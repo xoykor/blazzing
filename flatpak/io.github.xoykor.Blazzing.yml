@@ -114,6 +114,21 @@ modules:
         url: https://github.com/mpv-player/mpv/archive/refs/tags/v0.41.0.tar.gz
         sha256: ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209
 
+  - name: json-c
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_SHARED_LIBS=ON
+      - -DBUILD_STATIC_LIBS=OFF
+      - -DDISABLE_WERROR=ON
+      - -DENABLE_THREADING=ON
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: archive
+        url: https://s3.amazonaws.com/json-c_releases/releases/json-c-0.18.tar.gz
+        sha256: 876ab046479166b869afc6896d288183bbc0e5843f141200c677b3e8dfb11724
+
   - name: blazzing
     buildsystem: cmake-ninja
     config-opts:
