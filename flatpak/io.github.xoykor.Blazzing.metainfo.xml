@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.xoykor.Blazzing</id>
+  <name>Blazzing</name>
+  <summary>Fast visual IPTV client for Linux</summary>
+  <summary xml:lang="pt-BR">Cliente IPTV visual rápido para Linux</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>Blazzing is a native C17/X11 IPTV client focused on a fast, responsive visual interface.</p>
+    <p>It supports Xtream Codes and M3U playlists, live TV, movies, series, favorites, playback progress, metadata, thumbnails and an embedded mpv player.</p>
+    <p xml:lang="pt-BR">Blazzing é um cliente IPTV nativo em C17/X11 focado em uma interface visual rápida e responsiva.</p>
+    <p xml:lang="pt-BR">Suporta Xtream Codes e M3U, TV ao vivo, filmes, séries, favoritos, progresso, metadados, miniaturas e player mpv incorporado.</p>
+  </description>
+  <launchable type="desktop-id">io.github.xoykor.Blazzing.desktop</launchable>
+  <url type="homepage">https://github.com/xoykor/blazzing</url>
+  <url type="bugtracker">https://github.com/xoykor/blazzing/issues</url>
+  <developer id="io.github.xoykor">
+    <name>xoykor</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.2.7" date="2026-09-07">
+      <description>
+        <p>Initial public Blazzing release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

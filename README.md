@@ -578,6 +578,33 @@ docs/                  technical documentation
 
 ---
 
+## Flatpak
+
+Blazzing includes a Flatpak manifest and an automated GitHub Actions build.
+
+On CachyOS / Arch Linux:
+
+```fish
+sudo pacman -S --needed flatpak flatpak-builder
+./flatpak/build-flatpak.fish
+```
+
+Run it with:
+
+```fish
+flatpak run io.github.xoykor.Blazzing
+```
+
+To generate a standalone `Blazzing.flatpak` bundle:
+
+```fish
+./flatpak/bundle-flatpak.fish
+```
+
+See [flatpak/README.md](flatpak/README.md) for details.
+
+---
+
 # Known limitations / roadmap
 
 The following features are not yet part of the current implementation:

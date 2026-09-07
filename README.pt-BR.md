@@ -481,6 +481,33 @@ packaging/             arquivo .desktop
 docs/                  documentação técnica
 ```
 
+## Flatpak
+
+O Blazzing inclui manifesto Flatpak e build automatizada pelo GitHub Actions.
+
+No CachyOS / Arch Linux:
+
+```fish
+sudo pacman -S --needed flatpak flatpak-builder
+./flatpak/build-flatpak.fish
+```
+
+Execute com:
+
+```fish
+flatpak run io.github.xoykor.Blazzing
+```
+
+Para gerar um bundle distribuível `Blazzing.flatpak`:
+
+```fish
+./flatpak/bundle-flatpak.fish
+```
+
+Veja [flatpak/README.md](flatpak/README.md) para detalhes.
+
+---
+
 ## Limitações conhecidas / roadmap
 
 Ainda não fazem parte da implementação atual:

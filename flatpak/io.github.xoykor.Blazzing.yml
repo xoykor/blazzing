@@ -1,0 +1,123 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/flatpak/flatpak-builder/main/data/flatpak-manifest.schema.json
+app-id: io.github.xoykor.Blazzing
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+command: visual-iptv
+
+add-extensions:
+  org.freedesktop.Platform.codecs-extra:
+    version: '25.08-extra'
+    directory: lib/codecs-extra
+    add-ld-path: .
+    autodelete: false
+
+cleanup-commands:
+  - mkdir -p /app/lib/codecs-extra
+
+finish-args:
+  # The current player architecture is native X11 reparenting.
+  - --socket=x11
+  - --share=ipc
+  - --share=network
+  - --device=dri
+  - --socket=pulseaudio
+  # Saved Xtream passwords use Secret Service when available.
+  - --talk-name=org.freedesktop.secrets
+  # Required for playlists referenced by local filesystem paths.
+  - --filesystem=home:ro
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /share/man
+  - /share/doc
+  - '*.a'
+  - '*.la'
+
+modules:
+  # mpv 0.41 requires libplacebo. We intentionally build an OpenGL/X11
+  # configuration because Blazzing embeds mpv through its native X11 window.
+  - name: libplacebo
+    buildsystem: meson
+    config-opts:
+      - -Ddemos=false
+      - -Dopengl=enabled
+      - -Dvulkan=disabled
+      - -Dshaderc=disabled
+      - -Dglslang=disabled
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: git
+        url: https://github.com/haasn/libplacebo.git
+        tag: v7.360.1
+        commit: cee9b076f2c63104ccfd497fa79c39a867293ec4
+
+  - name: libass
+    buildsystem: autotools
+    config-opts:
+      - --disable-static
+      - --enable-harfbuzz
+      - --enable-fontconfig
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: git
+        url: https://github.com/libass/libass.git
+        tag: 0.17.5
+        commit: 4a05d8127f525943ebf45fdc6497c9e665947f0d
+
+  - name: mpv
+    buildsystem: meson
+    config-opts:
+      - -Dcplayer=true
+      - -Dlibmpv=false
+      - -Dbuild-date=false
+      - -Dmanpage-build=disabled
+      - -Dx11=enabled
+      - -Dgl=enabled
+      - -Dgl-x11=enabled
+      - -Degl=enabled
+      - -Degl-x11=enabled
+      - -Dpulse=enabled
+      - -Dpipewire=enabled
+      - -Dalsa=disabled
+      - -Dwayland=disabled
+      - -Dvulkan=disabled
+      - -Dlua=disabled
+      - -Djavascript=disabled
+      - -Dcdda=disabled
+      - -Ddvdnav=disabled
+      - -Ddvbin=disabled
+      - -Dlibass=enabled
+    cleanup:
+      - /share/applications
+      - /share/icons
+      - /share/bash-completion
+      - /share/zsh
+      - /share/fish
+    sources:
+      - type: archive
+        url: https://github.com/mpv-player/mpv/archive/refs/tags/v0.41.0.tar.gz
+        sha256: ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209
+
+  - name: blazzing
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_TESTING=OFF
+      - -DCMAKE_INSTALL_PREFIX=/app
+    post-install:
+      # CMake still installs the historical desktop file; Flatpak exports
+      # metadata using the reverse-DNS app ID instead.
+      - rm -f /app/share/applications/visual-iptv.desktop
+      - install -Dm644 flatpak/io.github.xoykor.Blazzing.desktop /app/share/applications/io.github.xoykor.Blazzing.desktop
+      - install -Dm644 flatpak/io.github.xoykor.Blazzing.metainfo.xml /app/share/metainfo/io.github.xoykor.Blazzing.metainfo.xml
+      - install -Dm644 assets/blazzing-256.png /app/share/icons/hicolor/256x256/apps/io.github.xoykor.Blazzing.png
+      - install -Dm644 assets/blazzing.png /app/share/icons/hicolor/512x512/apps/io.github.xoykor.Blazzing.png
+    sources:
+      - type: dir
+        path: ..

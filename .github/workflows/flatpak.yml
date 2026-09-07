@@ -1,0 +1,44 @@
+name: Flatpak
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'assets/**'
+      - 'flatpak/**'
+      - 'packaging/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/flatpak.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'assets/**'
+      - 'flatpak/**'
+      - 'packaging/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/flatpak.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  flatpak:
+    name: Build x86_64 Flatpak
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
+      options: --privileged
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: Blazzing-x86_64.flatpak
+          manifest-path: flatpak/io.github.xoykor.Blazzing.yml
+          cache-key: flatpak-builder-${{ github.sha }}
+          artifact-name: Blazzing-x86_64.flatpak

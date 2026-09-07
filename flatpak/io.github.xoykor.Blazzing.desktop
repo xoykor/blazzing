@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Blazzing
+Comment=Fast visual IPTV client for Linux
+Comment[pt_BR]=Cliente IPTV visual rápido para Linux
+Exec=visual-iptv
+Icon=io.github.xoykor.Blazzing
+Terminal=false
+Categories=AudioVideo;Video;Network;
+Keywords=IPTV;TV;Streaming;Xtream;M3U;
+Keywords[pt_BR]=IPTV;TV;Streaming;Xtream;M3U;
