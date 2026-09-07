@@ -119,8 +119,11 @@ modules:
     config-opts:
       - -DBUILD_SHARED_LIBS=ON
       - -DBUILD_STATIC_LIBS=OFF
+      - -DBUILD_APPS=OFF
+      - -DBUILD_TESTING=OFF
       - -DDISABLE_WERROR=ON
       - -DENABLE_THREADING=ON
+      - -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     cleanup:
       - /include
       - /lib/pkgconfig
