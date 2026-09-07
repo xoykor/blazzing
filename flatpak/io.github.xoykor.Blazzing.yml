@@ -92,7 +92,6 @@ modules:
       - -Dcdda=disabled
       - -Ddvdnav=disabled
       - -Ddvbin=disabled
-      - -Dlibass=enabled
     cleanup:
       - /share/applications
       - /share/icons
