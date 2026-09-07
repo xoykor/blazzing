@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Visual IPTV
+Comment=Cliente IPTV visual em C/X11
+Exec=visual-iptv
+Icon=video-display
+Terminal=false
+Categories=AudioVideo;Video;

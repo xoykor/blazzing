@@ -1,0 +1,34 @@
+name: Bug report
+description: Relate um problema reproduzível sem incluir credenciais ou URLs privadas.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Não publique usuário/senha Xtream, playlists privadas, URLs autenticadas ou catalog.db."
+  - type: textarea
+    id: description
+    attributes:
+      label: Problema
+      description: O que aconteceu e o que você esperava?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Como reproduzir
+      description: Passos mínimos usando dados fictícios quando possível.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Ambiente
+      placeholder: "CachyOS, KDE X11, mpv 0.xx, GPU..."
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs sanitizados
+      description: Remova credenciais e URLs privadas antes de colar.

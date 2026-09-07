@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitize: [OFF, ON]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake pkg-config python3 \
+            libx11-dev libcurl4-openssl-dev libjson-c-dev libsqlite3-dev \
+            libjpeg-dev libpng-dev libwebp-dev libssl-dev ffmpeg mpv
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=${{ matrix.sanitize == 'ON' && 'Debug' || 'Release' }}
+          -DVIPTV_SANITIZE=${{ matrix.sanitize }}
+
+      - name: Build
+        run: cmake --build build --parallel 2
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure

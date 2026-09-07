@@ -1,0 +1,28 @@
+# CMake/build outputs
+/build/
+/build-*/
+/CMakeFiles/
+/CMakeCache.txt
+/CTestTestfile.cmake
+/cmake_install.cmake
+/Makefile
+compile_commands.json
+
+# Local application data / credentials
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
+!.env.example
+
+# Runtime/debug artifacts
+*.log
+/core
+/core.*
+
+# Editor/OS files
+.vscode/
+.idea/
+.DS_Store
+*~
