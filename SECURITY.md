@@ -1,19 +1,23 @@
-# Segurança
+# Security
 
-## Conteúdo sensível
+[Português (Brasil)](SECURITY.pt-BR.md)
 
-Não publique credenciais Xtream, URLs privadas de M3U, URLs autenticadas de stream, dumps de Secret Service ou bancos reais da aplicação em issues ou pull requests.
+## Sensitive content
 
-Os testes do repositório devem usar apenas dados fictícios/controlados.
+Do not publish Xtream credentials, private M3U URLs, authenticated stream URLs, Secret Service dumps, or real application databases in issues or pull requests.
 
-## Relatando uma vulnerabilidade
+Repository tests must use only fictional or controlled data.
 
-Se o repositório estiver com **Private vulnerability reporting** habilitado no GitHub, prefira esse canal para falhas que possam expor credenciais ou permitir execução indevida de código. Caso contrário, não anexe segredos a um issue público; descreva apenas o impacto e o componente afetado até que um canal privado seja definido pelo mantenedor.
+## Reporting a vulnerability
 
-## Fronteiras atuais
+If **Private vulnerability reporting** is enabled for the repository, prefer that channel for issues that could expose credentials or allow unintended code execution.
 
-- Senhas Xtream não são persistidas no SQLite.
-- Secret Service é usado quando disponível.
-- URLs de mídia são enviadas ao mpv por IPC e não por argv.
-- Logs recentes do mpv passam por sanitização de URLs.
-- FFmpeg é iniciado via `exec`, sem shell.
+Otherwise, do not attach secrets to a public issue. Describe only the impact and affected component until the maintainer provides a private channel.
+
+## Current security boundaries
+
+- Xtream passwords are not persisted in SQLite.
+- Secret Service is used when available.
+- Media URLs are sent to mpv through IPC rather than argv.
+- Recent mpv diagnostic messages go through URL sanitization.
+- FFmpeg is launched through `exec`, without a shell.

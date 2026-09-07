@@ -1,27 +1,29 @@
-# Build e instalação
+# Building and installation
+
+[Português (Brasil)](BUILDING.pt-BR.md)
 
 ## CachyOS / Arch Linux
 
-Dependências:
+Dependencies:
 
-```fish
-sudo pacman -S --needed base-devel cmake pkgconf libx11 curl json-c sqlite libjpeg-turbo libpng libwebp openssl ffmpeg mpv libsecret
+```sh
+sudo pacman -S --needed git base-devel cmake pkgconf libx11 curl json-c sqlite libjpeg-turbo libpng libwebp openssl ffmpeg mpv libsecret
 ```
 
-Build Release:
+Release build:
 
-```fish
+```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j(nproc)
+cmake --build build --parallel
 ```
 
-Testes:
+Tests:
 
-```fish
+```sh
 ctest --test-dir build --output-on-failure
 ```
 
-Atalho equivalente:
+Equivalent helper script:
 
 ```fish
 ./scripts/build-cachyos.fish
@@ -29,56 +31,44 @@ Atalho equivalente:
 
 ## Debian / Ubuntu
 
-Os nomes de pacote variam entre versões, mas uma base típica é:
+A typical dependency set is:
 
-```text
-build-essential
-cmake
-pkg-config
-libx11-dev
-libcurl4-openssl-dev
-libjson-c-dev
-libsqlite3-dev
-libjpeg-dev
-libpng-dev
-libwebp-dev
-libssl-dev
-ffmpeg
-mpv
-libsecret-tools
+```sh
+sudo apt update
+sudo apt install git build-essential cmake pkg-config libx11-dev libcurl4-openssl-dev libjson-c-dev libsqlite3-dev libjpeg-dev libpng-dev libwebp-dev libssl-dev ffmpeg mpv libsecret-tools
 ```
 
-Depois use os mesmos comandos CMake.
+Then use the same CMake commands.
 
 ## Sanitizers
 
-```fish
+```sh
 cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DVIPTV_SANITIZE=ON
-cmake --build build-asan -j(nproc)
+cmake --build build-asan --parallel
 ctest --test-dir build-asan --output-on-failure
 ```
 
-`VIPTV_SANITIZE` ativa AddressSanitizer e UndefinedBehaviorSanitizer em GCC/Clang.
+`VIPTV_SANITIZE` enables AddressSanitizer and UndefinedBehaviorSanitizer with GCC/Clang.
 
-## Instalação local
+## Local installation
 
-Após compilar:
+After building:
 
-```fish
+```sh
 sudo cmake --install build --prefix /usr/local
 ```
 
-O CMake instala:
+CMake currently installs:
 
-- `visual-iptv` em `bin`;
-- `packaging/visual-iptv.desktop` em `share/applications`.
+- `visual-iptv` into `bin`;
+- `packaging/visual-iptv.desktop` into `share/applications`.
 
-Para desenvolvimento, prefira executar diretamente `./build/visual-iptv`.
+For development, prefer running `./build/visual-iptv` directly.
 
 ## `compile_commands.json`
 
-O projeto define `CMAKE_EXPORT_COMPILE_COMMANDS=ON`; o arquivo fica dentro do diretório de build. Editores e ferramentas como clangd podem apontar para `build/compile_commands.json`.
+The project enables `CMAKE_EXPORT_COMPILE_COMMANDS=ON`. The file is generated inside the build directory. Editors and tools such as clangd can point to `build/compile_commands.json`.
 
-## Requisitos de runtime
+## Runtime requirements
 
-A compilação pode localizar `mpv`, mas o player é uma dependência de runtime. O aplicativo espera uma sessão X11 funcional e um mpv capaz de criar uma janela X11 nativa.
+The build may locate mpv, but mpv is also a runtime dependency. The current player integration expects a working X11 session and an mpv build capable of creating a native X11 window.

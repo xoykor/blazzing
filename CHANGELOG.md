@@ -1,14 +1,16 @@
 # Changelog
 
+[Português (Brasil)](CHANGELOG.pt-BR.md)
+
 ## 1.2.7 — 2026-09-07
 
-Baseline público inicial do Visual IPTV:
+Initial public baseline, originally released under the working name Visual IPTV and now published as **Blazzing**:
 
-- Xtream Codes e M3U;
-- TV, VOD, séries e episódios;
-- navegação visual e artwork adaptativo;
-- thumbnails assíncronos;
-- favoritos, perfis, metadados e progresso em SQLite;
-- mpv persistente por JSON IPC com janela X11 nativa incorporada;
-- HUD, timeline, pause/seek/volume/fullscreen e failover;
-- suíte de testes para os módulos principais.
+- Xtream Codes and M3U support;
+- live TV, VOD, series, and episodes;
+- visual navigation and adaptive artwork;
+- asynchronous thumbnails;
+- favorites, profiles, metadata, and playback progress in SQLite;
+- persistent mpv controlled through JSON IPC with embedded native X11 window;
+- HUD, timeline, pause/seek/volume/fullscreen, and failover;
+- test suite for the main modules.

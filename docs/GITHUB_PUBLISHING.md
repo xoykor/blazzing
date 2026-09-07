@@ -1,63 +1,61 @@
-# Publicando no GitHub
+# Publishing on GitHub
 
-O repositório já inclui `.gitignore`, licença MIT, documentação, CI, templates de issue/PR e não depende de arquivos gerados de build.
+[Português (Brasil)](GITHUB_PUBLISHING.pt-BR.md)
 
-## Com GitHub CLI
+The repository includes a `.gitignore`, MIT license, documentation, CI, issue/PR templates, and does not depend on generated build files.
 
-Na raiz do projeto:
+## With GitHub CLI
 
-```fish
+From the project root:
+
+```sh
 git init
 git add .
 git commit -m "Initial public release"
 git branch -M main
-gh repo create visual-iptv --public --source=. --remote=origin --push
+gh repo create blazzing --public --source=. --remote=origin --push
 ```
 
-O comando `gh` solicitará autenticação caso ela ainda não esteja configurada.
+`gh` will request authentication if needed.
 
-## Com um repositório já criado
+## With an existing repository
 
-Depois de criar um repositório vazio no GitHub, use a URL exibida pela própria página:
-
-```fish
+```sh
 git init
 git add .
 git commit -m "Initial public release"
 git branch -M main
-git remote add origin SUA_URL_DO_REPOSITORIO
+git remote add origin https://github.com/xoykor/blazzing.git
 git push -u origin main
 ```
 
-## Antes do primeiro push
+## Before pushing
 
-Confira o que será publicado:
+Inspect what will be published:
 
-```fish
+```sh
 git status --short
 git diff --cached --stat
 ```
 
-Procure acidentalmente por dados privados:
+Search for accidentally committed private data:
 
-```fish
+```sh
 git grep -n -i -E 'password|senha|username|usuario|https?://'
 ```
 
-Ocorrências legítimas existem no código e nos testes; o objetivo é conferir que nenhuma delas contém credenciais ou hosts privados reais.
+Legitimate matches exist in source code and tests. The goal is to confirm that none contain real credentials or private hosts.
 
-## Configuração recomendada do repositório
+## Suggested repository metadata
 
-Descrição sugerida:
+Description:
 
 ```text
-Cliente IPTV visual nativo para Linux/X11 em C17, com Xtream/M3U e mpv incorporado por JSON IPC.
+Fast native visual IPTV client for Linux/X11 in C17, with Xtream/M3U and embedded mpv.
 ```
 
-Topics sugeridos:
+Suggested topics:
 
 ```text
 iptv c x11 linux mpv xtream m3u sqlite cmake
 ```
-
-Após o primeiro push, confirme que a workflow `CI` conclui os jobs Release e ASan/UBSan.

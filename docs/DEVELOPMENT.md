@@ -1,12 +1,14 @@
-# Guia de desenvolvimento
+# Development guide
 
-## Ordem recomendada de leitura
+[Português (Brasil)](DEVELOPMENT.pt-BR.md)
+
+## Recommended reading order
 
 1. `include/visual_iptv/core.h`
 2. `CMakeLists.txt`
 3. `src/ui_x11/x11_app.c`
 4. `src/player_mpv/player_mpv.c`
-5. `src/provider/xtream.c` e `src/provider/m3u.c`
+5. `src/provider/xtream.c` and `src/provider/m3u.c`
 6. `src/database/database.c`
 7. `src/thumbnails/thumbnails.c`
 8. `src/decoder/ffmpeg_cli.c`
@@ -14,57 +16,57 @@
 
 ## Ownership
 
-As APIs seguem C explícito:
+The APIs follow explicit C ownership rules:
 
-- estruturas inicializadas com `*_init` devem ser liberadas com `*_clear`;
-- funções `*_push` fazem deep copy;
-- strings retornadas como heap-owned devem ser `free()` pelo chamador quando documentado;
-- `vip_credentials_clear()` sobrescreve a senha antes do `free()`;
-- snapshots do player são cópias e não expõem ponteiros internos.
+- structures initialized with `*_init` must be released with `*_clear`;
+- `*_push` functions perform deep copies;
+- heap-owned strings returned by an API must be `free()`d by the caller when documented;
+- `vip_credentials_clear()` overwrites the password before `free()`;
+- player snapshots are copies and never expose internal pointers.
 
-## Regras de threading
+## Threading rules
 
-- Não desenhar nem manipular Xlib a partir de workers.
-- Não executar rede bloqueante no event loop.
-- Ao adicionar estado compartilhado, definir claramente qual mutex/atomic o protege.
-- Comandos JSON IPC devem continuar serializados pelo `write_mutex` do player.
-- Não bloquear o monitor mpv com trabalho de UI ou rede.
+- Do not draw or manipulate Xlib from worker threads.
+- Do not run blocking network operations in the event loop.
+- When adding shared state, clearly define which mutex or atomic protects it.
+- JSON IPC commands must remain serialized through the player's `write_mutex`.
+- Do not block the mpv monitor with UI or network work.
 
 ## Player
 
-Antes de alterar incorporação de vídeo, entender duas janelas diferentes:
+Before changing video embedding, understand the two separate windows:
 
-- `video_win`: container `InputOutput` que recebe a janela nativa mpv como filha;
-- `player_input_win`: sibling `InputOnly`, transparente, usado para mouse/HUD.
+- `video_win`: `InputOutput` container that receives the native mpv window as a child;
+- `player_input_win`: transparent `InputOnly` sibling used for mouse/HUD interaction.
 
-O backend atual **não usa `--wid`**. O mpv cria sua janela e ela é descoberta por `_NET_WM_PID` e reparentada. Preservar esse contrato evita acoplar o aplicativo ao rendering de frames.
+The current backend **does not use `--wid`**. mpv creates its own window; the application discovers it through `_NET_WM_PID` and reparents it. Preserve this contract unless there is a strong architectural reason to replace it.
 
-A URL de mídia deve continuar fora do argv do processo mpv.
+The media URL must remain outside the mpv process argv.
 
-## UI e jobs
+## UI and jobs
 
-`x11_app.c` é a camada de orquestração. Login, temporadas e metadados possuem workers próprios. Antes de criar outro worker, considere se o scheduler existente ou uma operação já assíncrona pode atendê-lo.
+`x11_app.c` is the orchestration layer. Login, seasons, and metadata have dedicated workers. Before adding another worker, check whether the existing scheduler or another asynchronous operation can handle the task.
 
-O grid usa a classe predominante de artwork (`portrait`, `landscape`, `square`) para determinar card e colunas. Imagens preservam aspect ratio; não assumir que todo provider entrega thumbnails 16:9.
+The grid uses the predominant artwork class (`portrait`, `landscape`, `square`) to determine card geometry and column count. Images preserve aspect ratio; never assume every provider supplies 16:9 thumbnails.
 
-## Banco
+## Database
 
-Migrações devem ser compatíveis com bancos já existentes. Não remova tabelas/colunas silenciosamente. Novos dados sensíveis não devem ser adicionados ao SQLite.
+Migrations must remain compatible with existing databases. Do not silently remove tables or columns. New sensitive data must not be added to SQLite.
 
-## Testes
+## Tests
 
-Execute sempre:
+Always run:
 
-```fish
+```sh
 ctest --test-dir build --output-on-failure
 ```
 
-Para alterações de memória, concorrência, parser ou player, execute também build com sanitizers.
+For changes involving memory, concurrency, parsers, or the player, also run a sanitizer build.
 
-O teste do mpv usa um processo Python falso que implementa o socket JSON IPC. Assim, comandos e parsing de eventos podem ser testados sem uma sessão gráfica real.
+The mpv test uses a fake Python process that implements the JSON IPC socket. This allows command/event parsing to be tested without a real graphical session.
 
-## Estilo de comentários
+## Comment style
 
-Comentários devem explicar **por que** uma decisão existe, invariantes de ownership/threading ou protocolos externos. Evite comentários que apenas repetem a instrução C imediatamente abaixo.
+Comments should explain **why** a decision exists, ownership/threading invariants, or external protocols. Avoid comments that merely restate the C statement immediately below them.
 
-Headers públicos possuem comentários de API; detalhes de implementação ficam no `.c` correspondente.
+Public headers contain API comments; implementation details belong in the corresponding `.c` file.

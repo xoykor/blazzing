@@ -1,42 +1,44 @@
-# Contribuindo
+# Contributing
 
-Contribuições são bem-vindas para correções, compatibilidade, testes e novas funcionalidades.
+[Português (Brasil)](CONTRIBUTING.pt-BR.md)
 
-## Antes de enviar um PR
+Contributions are welcome for bug fixes, compatibility improvements, tests, and new features.
 
-1. Não inclua credenciais, playlists privadas, bancos de dados reais ou URLs autenticadas.
-2. Compile com os warnings do projeto habilitados.
-3. Rode a suíte completa de testes.
-4. Para mudanças em parsing, memória, threading ou player, rode também ASan/UBSan.
-5. Atualize a documentação quando alterar comportamento público, atalhos, variáveis de ambiente, banco ou arquitetura.
+## Before opening a pull request
 
-```fish
+1. Do not include credentials, private playlists, real databases, or authenticated URLs.
+2. Build with project warnings enabled.
+3. Run the full test suite.
+4. For parser, memory, threading, or player changes, also run ASan/UBSan.
+5. Update documentation when public behavior, shortcuts, environment variables, database layout, or architecture changes.
+
+```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j(nproc)
+cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
 Sanitizers:
 
-```fish
+```sh
 cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DVIPTV_SANITIZE=ON
-cmake --build build-asan -j(nproc)
+cmake --build build-asan --parallel
 ctest --test-dir build-asan --output-on-failure
 ```
 
-## Escopo técnico
+## Technical scope
 
-A base atual é C17 + Xlib, com mpv persistente/JSON IPC e SQLite. Mudanças arquiteturais grandes devem explicar o ganho concreto e preservar, quando aplicável:
+The current codebase is C17 + Xlib, with persistent mpv/JSON IPC and SQLite. Large architectural changes should explain the concrete benefit and preserve, where applicable:
 
-- compatibilidade dos dados persistidos;
-- separação de credenciais;
-- responsividade do event loop;
-- URLs de mídia fora do argv do mpv;
-- ownership explícito das estruturas C.
+- persisted-data compatibility;
+- credential separation;
+- event-loop responsiveness;
+- media URLs outside mpv argv;
+- explicit ownership of C structures.
 
 ## Commits
 
-Prefira commits pequenos e com objetivo claro. Exemplos:
+Prefer small commits with one clear purpose.
 
 ```text
 fix: preserve player focus after mpv reparent

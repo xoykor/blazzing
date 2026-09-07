@@ -1,57 +1,59 @@
-# Dados e privacidade
+# Data and privacy
 
-## Arquivos persistentes
+[Português (Brasil)](DATA_AND_PRIVACY.pt-BR.md)
 
-Banco SQLite:
+## Persistent files
+
+SQLite database:
 
 ```text
 ~/.local/share/visual-iptv-x11/catalog.db
 ```
 
-Cache de thumbnails:
+Thumbnail cache:
 
 ```text
 ~/.cache/visual-iptv-x11/thumbnails/
 ```
 
-O socket JSON IPC do mpv é temporário e existe apenas durante a execução.
+The mpv JSON IPC socket is temporary and exists only while the application is running.
 
-## O que o SQLite armazena
+## What SQLite stores
 
-O schema atual possui dados para:
+The current schema stores:
 
-- categorias e itens do catálogo;
-- favoritos;
-- histórico/estado auxiliar;
-- metadados de thumbnails;
-- configurações;
-- perfis;
-- progresso de VOD/episódios;
-- progresso agregado de séries;
-- metadados ricos de filmes/séries.
+- catalog categories and items;
+- favorites;
+- history/auxiliary state;
+- thumbnail metadata;
+- settings;
+- profiles;
+- VOD/episode progress;
+- aggregated series progress;
+- rich movie/series metadata.
 
-Perfis Xtream incluem servidor, servidor alternativo e nome de usuário, mas **não incluem a senha**.
+Xtream profiles include the server, alternate server, and username, but **do not include the password**.
 
-## Senhas
+## Passwords
 
-Quando `secret-tool` está disponível, a senha é armazenada e recuperada pelo Secret Service do desktop associada ao ID do perfil. Se o serviço não estiver disponível, o perfil continua salvo sem senha e ela deve ser digitada novamente.
+When `secret-tool` is available, the password is stored and retrieved through the desktop Secret Service and associated with the profile ID. If Secret Service is unavailable, the profile remains saved without its password and the password must be entered again.
 
-Buffers de senha alocados pelo core/alguns jobs são sobrescritos antes de serem liberados.
+Password buffers allocated by the core and some jobs are overwritten before being freed.
 
-## URLs de stream
+## Stream URLs
 
-O processo mpv é persistente. A URL da mídia não é passada em `argv`; ela é enviada pelo socket Unix JSON IPC depois que o processo está ativo.
+The mpv process is persistent. Media URLs are not placed in `argv`; they are sent through the Unix JSON IPC socket after the process is running.
 
-Mensagens do mpv podem, em alguns casos, repetir a URL de um stream. Antes de guardar texto recente de diagnóstico, o backend substitui trechos reconhecidos como `http://...` ou `https://...` por `[URL ocultada]`.
+mpv messages may occasionally repeat a stream URL. Before retaining recent diagnostic text, the backend replaces recognized `http://...` or `https://...` fragments with `[URL hidden]`.
 
-## Repositório e relatórios de bug
+## Repository and bug reports
 
-Nunca publique em issues, screenshots, logs ou commits:
+Never publish the following in issues, screenshots, logs, or commits:
 
-- usuário/senha Xtream reais;
-- URLs privadas de playlist;
-- URLs completas de streams autenticados;
-- dumps do Secret Service;
-- banco `catalog.db` de uma conta real.
+- real Xtream username/password pairs;
+- private playlist URLs;
+- complete authenticated stream URLs;
+- Secret Service dumps;
+- `catalog.db` from a real account.
 
-Ao reportar problemas, use endpoints fictícios ou um servidor de teste controlado por você.
+When reporting problems, use fictional endpoints or a test server you control.

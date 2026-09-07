@@ -1,40 +1,43 @@
-# Configuração e diagnóstico
+# Configuration and diagnostics
 
-A aplicação não requer arquivo de configuração. Overrides técnicos são fornecidos por variáveis de ambiente.
+[Português (Brasil)](CONFIGURATION.pt-BR.md)
+
+Blazzing does not require a configuration file. Technical overrides are provided through environment variables.
 
 ## `VIPTV_MPV_DEBUG`
 
-Ativa diagnóstico detalhado do backend mpv e dos eventos relevantes de input/foco.
+Enables detailed mpv-backend diagnostics and relevant input/focus event logging.
+
+Fish:
 
 ```fish
 set -lx VIPTV_MPV_DEBUG 1
 ./build/visual-iptv 2>&1 | tee /tmp/visual-iptv-mpv-debug.log
 ```
 
-O backend sanitiza URLs presentes nas mensagens recentes do mpv antes de mantê-las em memória/logs próprios.
+Bash/Zsh:
+
+```sh
+VIPTV_MPV_DEBUG=1 ./build/visual-iptv 2>&1 | tee /tmp/visual-iptv-mpv-debug.log
+```
+
+The backend sanitizes URLs found in recent mpv messages before retaining them in its own in-memory diagnostics/log output.
 
 ## `VIPTV_MPV_RENDERER`
 
-Seleciona um caminho gráfico alternativo do mpv.
+Selects an alternate mpv graphics path.
 
-Valores úteis:
+Useful values:
 
 ```text
-gpu         comportamento padrão (também obtido sem variável)
-gpu-next    usa --vo=gpu-next,gpu
-next        alias de gpu-next
-x11         usa --vo=x11
-software-x11 alias de x11
+gpu          default behavior
+gpu-next     uses --vo=gpu-next,gpu
+next         alias for gpu-next
+x11          uses --vo=x11
+software-x11 alias for x11
 ```
 
-Exemplo:
-
-```fish
-set -lx VIPTV_MPV_RENDERER gpu-next
-./build/visual-iptv
-```
-
-Sem override, o backend usa:
+Default behavior:
 
 ```text
 --vo=gpu
@@ -43,7 +46,7 @@ Sem override, o backend usa:
 
 ## `VIPTV_MPV_HWDEC`
 
-Override de hardware decoding. Valores aceitos pelo backend:
+Hardware-decoding override. Accepted values:
 
 ```text
 no
@@ -57,28 +60,26 @@ vulkan
 vulkan-copy
 ```
 
-Padrão:
+Default:
 
 ```text
 auto-safe
 ```
 
-Exemplo para diagnóstico sem hardware decode:
+Example with hardware decoding disabled:
 
-```fish
-set -lx VIPTV_MPV_HWDEC no
-./build/visual-iptv
+```sh
+VIPTV_MPV_HWDEC=no ./build/visual-iptv
 ```
 
 ## `VIPTV_NO_AUDIO`
 
-Se estiver definida, cria o player sem saída de áudio.
+When set, the player starts without audio output.
 
-```fish
-set -lx VIPTV_NO_AUDIO 1
-./build/visual-iptv
+```sh
+VIPTV_NO_AUDIO=1 ./build/visual-iptv
 ```
 
-## Variáveis `VIPTV_TEST_*`
+## `VIPTV_TEST_*`
 
-Existem variáveis com prefixo `VIPTV_TEST_` usadas por testes e automações locais da aplicação. Elas não fazem parte da interface estável de configuração para usuário final e podem mudar junto da suíte de testes.
+Variables prefixed with `VIPTV_TEST_` are used by tests and local automation. They are not part of the stable end-user configuration interface and may change with the test suite.

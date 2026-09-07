@@ -1,109 +1,137 @@
 # Blazzing
 
-Cliente IPTV desktop nativo para Linux/X11, escrito em C17, com foco em uma interface visual rápida, suporte a Xtream Codes e M3U e reprodução incorporada com mpv.
+**English** | [Português (Brasil)](README.pt-BR.md)
 
-> Use o aplicativo somente com listas, servidores e conteúdos que você tenha autorização para acessar.
+Blazzing is a native IPTV desktop client for Linux/X11, written in C17 and designed around one main goal: **a fast, responsive visual interface**.
 
-## Recursos atuais
+It supports Xtream Codes and M3U playlists and embeds mpv for playback.
 
-- TV ao vivo, filmes e séries em catálogos separados.
-- Xtream Codes com servidor primário e servidor alternativo para failover.
-- Playlists M3U/M3U8 remotas ou locais.
-- Grid visual adaptativo para artwork vertical, horizontal e quadrado.
-- Download e cache assíncronos de thumbnails com 4 workers.
-- Decodificação direta de JPEG, PNG e WebP; FFmpeg é usado como fallback para captura de frames.
-- Metadados de filmes e séries: sinopse, capa, backdrop, gênero, lançamento, nota, duração, elenco, direção e trailer quando fornecidos pelo provedor.
-- Temporadas e episódios.
-- Favoritos persistentes.
-- Progresso e retomada de filmes/episódios, incluindo progresso agregado de séries.
-- Perfis/listas salvos localmente.
-- Senhas Xtream fora do SQLite; integração com Secret Service através de `secret-tool` quando disponível.
-- mpv persistente controlado por JSON IPC.
-- Janela nativa X11 do mpv incorporada à interface por reparenting.
-- HUD com pause, seek, timeline, volume, fullscreen e troca de canais.
-- Operações de rede, metadados e thumbnails fora do event loop principal.
+> Use Blazzing only with playlists, servers, and content you are authorized to access.
 
-# Instalação para iniciantes
+## Current features
 
-Esta seção é para quem só quer **baixar, compilar e abrir o Blazzing**, mesmo sem experiência com programação.
+- Separate catalogs for live TV, movies, and series.
+- Xtream Codes support with primary and alternate server failover.
+- Remote and local M3U/M3U8 playlists.
+- Adaptive visual grid for portrait, landscape, and square artwork.
+- Asynchronous thumbnail downloading and caching with 4 workers.
+- Direct JPEG, PNG, and WebP decoding; FFmpeg is used as a fallback for frame capture.
+- Movie and series metadata:
+  - synopsis;
+  - poster;
+  - backdrop;
+  - genre;
+  - release date;
+  - rating;
+  - duration;
+  - cast;
+  - director;
+  - trailer, when provided by the IPTV provider.
+- Seasons and episodes.
+- Persistent favorites.
+- Playback progress and resume support for movies and episodes.
+- Aggregated series progress.
+- Multiple saved profiles/playlists.
+- Xtream passwords are kept outside SQLite.
+- Secret Service integration through `secret-tool` when available.
+- Persistent mpv process controlled through JSON IPC.
+- Native mpv X11 window embedded inside the application through X11 reparenting.
+- Player HUD with:
+  - play/pause;
+  - seeking;
+  - timeline;
+  - volume;
+  - fullscreen;
+  - live TV channel switching.
+- Network, metadata, and thumbnail work runs outside the main event loop.
 
-Atualmente o projeto é distribuído como **código-fonte**. Na primeira instalação, seu computador precisa compilar o programa. Isso é feito automaticamente pelos comandos abaixo.
+# Installation for beginners
 
-Depois de compilado, você não precisa repetir todo o processo sempre que quiser abrir o aplicativo.
+This section is for users who simply want to **download, build, and run Blazzing**, even if they have never compiled a program before.
+
+Blazzing is currently distributed as **source code**. During the first installation, your computer needs to compile the application.
+
+Once it has been compiled, you do **not** need to repeat the full installation every time you want to open it.
+
+> Important: the repository has already been renamed to **Blazzing**, but the executable is still currently named `visual-iptv`. This will be renamed internally in a later release.
 
 ---
 
 ## CachyOS / Arch Linux
 
-### 1. Abra o terminal
+### 1. Open a terminal
 
-No KDE, você pode procurar por:
+On KDE, search for:
 
 ```text
 Konsole
 ```
 
-### 2. Instale as dependências
+### 2. Install the required packages
 
-Copie e cole:
+Copy and paste:
 
 ```sh
 sudo pacman -S --needed git base-devel cmake pkgconf libx11 curl json-c sqlite libjpeg-turbo libpng libwebp openssl ffmpeg mpv libsecret
 ```
 
-Pressione `Enter`.
+Press `Enter`.
 
-O sistema pode pedir sua senha. Enquanto você digita a senha no terminal, **nenhum caractere aparece na tela**. Isso é normal.
+Your system may ask for your password.
 
-### 3. Baixe o Blazzing
+When typing a password in the terminal, **no characters are shown on screen**. This is normal.
+
+### 3. Download Blazzing
+
+Run:
 
 ```sh
 git clone https://github.com/xoykor/blazzing.git
 ```
 
-Será criada uma pasta chamada:
+This creates a folder named:
 
 ```text
 blazzing
 ```
 
-### 4. Entre na pasta
+### 4. Enter the project folder
 
 ```sh
 cd blazzing
 ```
 
-### 5. Prepare a compilação
+### 5. Prepare the build
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 ```
 
-Espere o comando terminar.
+Wait for the command to finish.
 
-Se não aparecer uma mensagem de erro, continue.
+If there is no error, continue to the next step.
 
-### 6. Compile
+### 6. Compile Blazzing
 
 ```sh
 cmake --build build --parallel
 ```
 
-Na primeira vez, isso pode levar de alguns segundos a alguns minutos.
+The first build may take anywhere from a few seconds to a few minutes depending on your computer.
 
-### 7. Abra o programa
+### 7. Run Blazzing
 
 ```sh
 ./build/visual-iptv
 ```
 
-Se a janela abrir, a instalação foi concluída.
+If the application window opens, the installation was successful.
 
 ---
 
-## Instalação rápida no CachyOS / Arch
+## Quick installation on CachyOS / Arch Linux
 
-Se você já sabe usar o terminal, basta executar:
+If you are already comfortable using a terminal:
 
 ```sh
 sudo pacman -S --needed git base-devel cmake pkgconf libx11 curl json-c sqlite libjpeg-turbo libpng libwebp openssl ffmpeg mpv libsecret
@@ -116,35 +144,35 @@ cmake --build build --parallel
 
 ---
 
-## Ubuntu / Debian e derivados
+## Ubuntu / Debian and derivatives
 
-### 1. Instale as dependências
+### 1. Install the required packages
 
 ```sh
 sudo apt update
 sudo apt install git build-essential cmake pkg-config libx11-dev libcurl4-openssl-dev libjson-c-dev libsqlite3-dev libjpeg-dev libpng-dev libwebp-dev libssl-dev ffmpeg mpv libsecret-tools
 ```
 
-### 2. Baixe o projeto
+### 2. Download Blazzing
 
 ```sh
 git clone https://github.com/xoykor/blazzing.git
 ```
 
-### 3. Entre na pasta
+### 3. Enter the project folder
 
 ```sh
 cd blazzing
 ```
 
-### 4. Compile
+### 4. Build the application
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ```
 
-### 5. Abra
+### 5. Run it
 
 ```sh
 ./build/visual-iptv
@@ -152,47 +180,76 @@ cmake --build build --parallel
 
 ---
 
-## Como abrir novamente depois de instalado
+# Installing with Download ZIP
 
-Você **não precisa recompilar toda vez**.
+If you do not want to use Git:
 
-Se o terminal já estiver na pasta `blazzing`:
+1. open the Blazzing repository on GitHub;
+2. click the green **Code** button;
+3. click **Download ZIP**;
+4. extract the downloaded ZIP file;
+5. open a terminal inside the extracted folder;
+6. install the dependencies for your Linux distribution;
+7. run:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+./build/visual-iptv
+```
+
+Using `git clone` is recommended because updating the application later is much easier.
+
+---
+
+# How to open Blazzing again
+
+You do **not** need to recompile it every time.
+
+If your terminal is already inside the `blazzing` folder:
 
 ```sh
 ./build/visual-iptv
 ```
 
-Se não estiver:
+If you are somewhere else:
 
 ```sh
 cd blazzing
+./build/visual-iptv
+```
+
+If the folder is inside `Downloads`, for example:
+
+```sh
+cd ~/Downloads/blazzing
 ./build/visual-iptv
 ```
 
 ---
 
-## Como atualizar
+# How to update Blazzing
 
-Entre na pasta:
+Enter the project folder:
 
 ```sh
 cd blazzing
 ```
 
-Baixe a versão mais recente:
+Download the latest changes:
 
 ```sh
 git pull
 ```
 
-Recompile:
+Rebuild:
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ```
 
-Abra:
+Run the new version:
 
 ```sh
 ./build/visual-iptv
@@ -200,32 +257,11 @@ Abra:
 
 ---
 
-## Instalação usando Download ZIP
-
-Se você não quiser usar Git:
-
-1. clique no botão **Code** no topo da página do GitHub;
-2. clique em **Download ZIP**;
-3. extraia o ZIP;
-4. abra um terminal dentro da pasta extraída;
-5. instale as dependências da sua distribuição;
-6. execute:
-
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-./build/visual-iptv
-```
-
-Usar `git clone` é recomendado porque facilita muito as atualizações.
-
----
-
-# Problemas comuns
+# Common problems
 
 ## `cmake: command not found`
 
-O CMake não está instalado.
+CMake is not installed.
 
 CachyOS / Arch:
 
@@ -238,6 +274,8 @@ Ubuntu / Debian:
 ```sh
 sudo apt install cmake
 ```
+
+---
 
 ## `git: command not found`
 
@@ -253,6 +291,8 @@ Ubuntu / Debian:
 sudo apt install git
 ```
 
+---
+
 ## `mpv: command not found`
 
 CachyOS / Arch:
@@ -267,62 +307,111 @@ Ubuntu / Debian:
 sudo apt install mpv
 ```
 
-## CMake diz que não encontrou `CMakeLists.txt`
+---
 
-Você está executando o comando na pasta errada.
+## CMake says it cannot find `CMakeLists.txt`
 
-Veja a pasta atual:
+You are probably running the command from the wrong directory.
+
+Check your current directory:
 
 ```sh
 pwd
 ```
 
-Veja os arquivos nela:
+List the files:
 
 ```sh
 ls
 ```
 
-Na pasta correta deve aparecer:
+The correct Blazzing project folder must contain:
 
 ```text
 CMakeLists.txt
 ```
 
-Se você instalou com `git clone`, tente:
+If you installed it using `git clone`, try:
 
 ```sh
 cd blazzing
 ```
 
-e execute o CMake novamente.
+Then run the CMake command again.
+
+---
 
 ## `./build/visual-iptv: No such file or directory`
 
-Isso normalmente significa que o programa ainda não foi compilado ou que a compilação falhou.
+This usually means Blazzing has not been compiled yet, or the build failed.
 
-Execute novamente:
+Run:
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ```
 
-Se aparecer erro, procure a **primeira mensagem de erro** no terminal.
+If an error appears, look for the **first error message** in the terminal output.
 
-## O programa abre, mas o player não funciona
+---
 
-Confira se o mpv está instalado:
+## The application opens, but video playback does not work
+
+Check whether mpv is installed:
 
 ```sh
 mpv --version
 ```
 
-A integração atual do player também requer uma sessão gráfica **X11**.
+The current player integration also requires an **X11 session**.
+
+On KDE Plasma, you can check your current session with:
+
+```sh
+echo $XDG_SESSION_TYPE
+```
+
+The expected result is:
+
+```text
+x11
+```
 
 ---
 
-## Arquitetura em uma visão
+# Controls
+
+## Catalog
+
+| Key | Action |
+|---|---|
+| `1` | Live TV |
+| `2` | Movies |
+| `3` | Series |
+| Arrow keys | Move focus |
+| `Enter` | Open/play item |
+| `F` | Toggle favorite |
+| `L` | Open profile/playlist selector |
+| `Esc` | Leave episode list or clear search |
+| `Ctrl+V` | Paste clipboard |
+| `Shift+Insert` | Paste PRIMARY selection |
+
+## Player
+
+| Key | Action |
+|---|---|
+| `Space` | Play/pause |
+| `Esc` / `Backspace` | Return to catalog |
+| `F11` | Toggle fullscreen |
+| `↑` / `↓` | Volume ±5 |
+| `←` / `→` | Seek ±10 s for VOD/episodes; previous/next channel for live TV |
+
+The timeline also supports clicking and dragging on seekable content.
+
+---
+
+# Architecture overview
 
 ```text
                  +----------------------+
@@ -347,45 +436,68 @@ A integração atual do player também requer uma sessão gráfica **X11**.
                  +----------------------+
 ```
 
-O mpv continua responsável pelo pipeline de vídeo. O aplicativo não copia frames do player para a interface: a janela X11 nativa criada pelo mpv é encontrada pelo PID e reparentada para o container de vídeo do aplicativo.
+mpv remains responsible for the video pipeline.
 
-Detalhes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Blazzing does not copy decoded video frames into the UI. Instead, the native X11 window created by mpv is located using the mpv process PID and reparented into Blazzing's video container.
 
-## Requisitos técnicos
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 
-- Linux com sessão X11.
-- CMake 3.20 ou superior.
-- Compilador com C17.
-- Xlib, libcurl, json-c, SQLite3, OpenSSL, libjpeg, libpng, libwebp e pthreads.
-- `ffmpeg` para captura de frames de thumbnail.
-- `mpv` para reprodução.
-- `secret-tool` é opcional, mas recomendado para salvar senhas via Secret Service.
+---
 
-## Build para desenvolvimento
+# Technical requirements
+
+- Linux with an X11 session.
+- CMake 3.20 or newer.
+- C17-compatible compiler.
+- Xlib.
+- libcurl.
+- json-c.
+- SQLite3.
+- OpenSSL.
+- libjpeg.
+- libpng.
+- libwebp.
+- pthreads.
+- `ffmpeg` for fallback thumbnail frame capture.
+- `mpv` for playback.
+- `secret-tool` is optional but recommended for Secret Service password storage.
+
+---
+
+# Development build
+
+On CachyOS / Arch:
 
 ```sh
 ./scripts/build-cachyos.fish
 ```
 
-Mais opções: [docs/BUILDING.md](docs/BUILDING.md).
+More build information:
 
-## Testes
+[docs/BUILDING.md](docs/BUILDING.md)
+
+---
+
+# Tests
+
+Run the normal test suite with:
 
 ```sh
 ctest --test-dir build --output-on-failure
 ```
 
-A suíte atual cobre:
+The current test suite covers:
 
-- core e validação de credenciais;
-- parsing Xtream;
-- M3U;
-- SQLite;
+- core and credential validation;
+- Xtream parsing;
+- M3U parsing;
+- SQLite persistence;
 - thumbnails;
-- backend FFmpeg;
-- backend mpv/JSON IPC, incluindo sanitização de URLs nos logs.
+- FFmpeg backend;
+- mpv / JSON IPC backend;
+- sanitization of stream URLs in backend diagnostics.
 
-Para AddressSanitizer + UndefinedBehaviorSanitizer:
+## AddressSanitizer + UndefinedBehaviorSanitizer
 
 ```sh
 cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DVIPTV_SANITIZE=ON
@@ -393,105 +505,94 @@ cmake --build build-asan --parallel
 ctest --test-dir build-asan --output-on-failure
 ```
 
-## Controles
+---
 
-### Catálogo
+# Local data and privacy
 
-| Tecla | Ação |
-|---|---|
-| `1` | TV ao vivo |
-| `2` | Filmes |
-| `3` | Séries |
-| Setas | Mover foco |
-| `Enter` | Abrir/reproduzir item |
-| `F` | Alternar favorito |
-| `L` | Seletor de listas/perfis |
-| `Esc` | Voltar da lista de episódios ou limpar pesquisa |
-| `Ctrl+V` | Colar clipboard |
-| `Shift+Insert` | Colar seleção PRIMARY |
-
-### Player
-
-| Tecla | Ação |
-|---|---|
-| `Espaço` | Play/pause |
-| `Esc` / `Backspace` | Voltar ao catálogo |
-| `F11` | Alternar fullscreen |
-| `↑` / `↓` | Volume ±5 |
-| `←` / `→` | Seek ±10 s em VOD/episódios; canal anterior/próximo em TV ao vivo |
-
-A timeline também aceita clique e arraste em conteúdo seekable.
-
-## Dados locais e privacidade
-
-Banco de dados:
+Database:
 
 ```text
 ~/.local/share/visual-iptv-x11/catalog.db
 ```
 
-Cache de thumbnails:
+Thumbnail cache:
 
 ```text
 ~/.cache/visual-iptv-x11/thumbnails/
 ```
 
-Senhas Xtream não são gravadas no SQLite. Quando disponível, o aplicativo usa Secret Service através de `secret-tool`.
+Xtream passwords are not stored directly in SQLite.
 
-Veja [docs/DATA_AND_PRIVACY.md](docs/DATA_AND_PRIVACY.md).
+When available, Blazzing uses Secret Service through `secret-tool`.
 
-## Configuração e diagnóstico
+See:
 
-Veja [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+[docs/DATA_AND_PRIVACY.md](docs/DATA_AND_PRIVACY.md)
 
-Exemplo em Fish:
+---
+
+# Configuration and diagnostics
+
+See:
+
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md)
+
+Example for Fish shell:
 
 ```fish
 set -lx VIPTV_MPV_DEBUG 1
 ./build/visual-iptv 2>&1 | tee /tmp/visual-iptv-mpv-debug.log
 ```
 
-## Documentação
+---
 
-- [Arquitetura](docs/ARCHITECTURE.md)
-- [Build e instalação](docs/BUILDING.md)
-- [Configuração e diagnóstico](docs/CONFIGURATION.md)
-- [Dados e privacidade](docs/DATA_AND_PRIVACY.md)
-- [Guia de desenvolvimento](docs/DEVELOPMENT.md)
-- [Contribuição](CONTRIBUTING.md)
-- [Segurança](SECURITY.md)
-
-## Estrutura do repositório
+# Repository structure
 
 ```text
-include/visual_iptv/   API entre módulos
-src/app/               entry point
-src/core/              tipos, erros e ownership
-src/provider/          Xtream Codes e M3U
-src/database/          persistência SQLite
-src/decoder/           abstração de captura + FFmpeg CLI
-src/thumbnails/        scheduler, download, decode e cache
-src/player_mpv/        processo mpv, JSON IPC e reparent X11
-src/ui_x11/            interface e integração dos módulos
-src/tools/             utilitários de desenvolvimento
-tests/                 testes
-packaging/             arquivo .desktop
-docs/                  documentação técnica
+include/visual_iptv/   API shared between modules
+src/app/               application entry point
+src/core/              core types, errors, ownership
+src/provider/          Xtream Codes and M3U
+src/database/          SQLite persistence
+src/decoder/           capture abstraction + FFmpeg CLI
+src/thumbnails/        scheduler, downloading, decoding and cache
+src/player_mpv/        mpv process, JSON IPC and X11 reparenting
+src/ui_x11/            user interface and module integration
+src/tools/             development utilities
+tests/                 tests
+packaging/             desktop file
+docs/                  technical documentation
 ```
 
-## Limitações conhecidas / roadmap
+---
 
-Ainda não fazem parte da implementação atual:
+# Documentation
 
-- EPG completo;
-- seletor gráfico de faixas de áudio;
-- seletor gráfico de legendas;
-- renderização de texto com cobertura Unicode ampla via Xft/Fontconfig;
-- paginação/lazy loading do catálogo Xtream;
-- interface avançada de gerenciamento do cache;
-- atualização automática;
-- pacote nativo AUR/Arch.
+- [Architecture](docs/ARCHITECTURE.md)
+- [Building](docs/BUILDING.md)
+- [Configuration and diagnostics](docs/CONFIGURATION.md)
+- [Data and privacy](docs/DATA_AND_PRIVACY.md)
+- [Development guide](docs/DEVELOPMENT.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
 
-## Licença
+---
 
-MIT. Consulte [LICENSE](LICENSE).
+# Known limitations / roadmap
+
+The following features are not yet part of the current implementation:
+
+- full EPG;
+- graphical audio track selector;
+- graphical subtitle selector;
+- wide Unicode text rendering through Xft/Fontconfig;
+- Xtream catalog pagination/lazy loading;
+- advanced cache management UI;
+- automatic application updates;
+- native Arch/AUR package.
+
+---
+
+# License
+
+MIT. See [LICENSE](LICENSE).
