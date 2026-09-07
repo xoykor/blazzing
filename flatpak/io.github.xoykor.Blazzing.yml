@@ -70,6 +70,17 @@ modules:
         tag: 0.17.5
         commit: 4a05d8127f525943ebf45fdc6497c9e665947f0d
 
+  - name: libXpresent
+    buildsystem: autotools
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: git
+        url: https://gitlab.freedesktop.org/xorg/lib/libxpresent.git
+        tag: libXpresent-1.0.2
+        commit: 4d92149372461bf575e8a09b1064a2884c38c3aa
+
   - name: mpv
     buildsystem: meson
     config-opts:
