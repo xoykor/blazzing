@@ -1,6 +1,12 @@
 # Blazzing
 
-<p align="center">\n  <img src="assets/blazzing.png" alt="Ícone do Blazzing" width="220">\n</p>\n\n[English](README.md) | **Português (Brasil)**
+<p align="center">
+  <img src="assets/blazzing.png" alt="Ícone do Blazzing" width="220">
+</p>
+
+<p align="center">
+  <a href="README.md">English</a> · <strong>Português (Brasil)</strong>
+</p>
 
 Cliente IPTV desktop nativo para Linux/X11, escrito em C17, com foco em uma interface visual rápida, suporte a Xtream Codes e M3U e reprodução incorporada com mpv.
 
