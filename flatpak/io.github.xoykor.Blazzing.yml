@@ -81,6 +81,24 @@ modules:
         tag: libXpresent-1.0.2
         commit: 4d92149372461bf575e8a09b1064a2884c38c3aa
 
+  - name: luajit
+    no-autogen: true
+    make-args:
+      - BUILDMODE=dynamic
+      - PREFIX=${FLATPAK_DEST}
+    make-install-args:
+      - PREFIX=${FLATPAK_DEST}
+    cleanup:
+      - /bin
+      - /include
+      - /lib/pkgconfig
+      - /share/man
+    sources:
+      - type: git
+        url: https://github.com/openresty/luajit2.git
+        tag: v2.1-20260724
+        commit: 982cd8323eafd8604a9e5f2a916aa50b9f67d9ed
+
   - name: mpv
     buildsystem: meson
     config-opts:
@@ -98,7 +116,7 @@ modules:
       - -Dalsa=disabled
       - -Dwayland=disabled
       - -Dvulkan=disabled
-      - -Dlua=disabled
+      - -Dlua=enabled
       - -Djavascript=disabled
       - -Dcdda=disabled
       - -Ddvdnav=disabled
