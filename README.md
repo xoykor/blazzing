@@ -1,6 +1,6 @@
 # Blazzing
 
-**English** | [Português (Brasil)](README.pt-BR.md)
+<p align="center">\n  <img src="assets/blazzing.png" alt="Blazzing icon" width="220">\n</p>\n\n**English** | [Português (Brasil)](README.pt-BR.md)
 
 Blazzing is a native IPTV desktop client for Linux/X11, written in C17 and designed around one main goal: **a fast, responsive visual interface**.
 

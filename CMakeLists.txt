@@ -118,3 +118,5 @@ endif()
 
 install(TARGETS visual-iptv RUNTIME DESTINATION bin)
 install(FILES packaging/visual-iptv.desktop DESTINATION share/applications)
+install(FILES assets/blazzing-256.png DESTINATION share/icons/hicolor/256x256/apps RENAME blazzing.png)
+install(FILES assets/blazzing.png DESTINATION share/icons/hicolor/512x512/apps RENAME blazzing.png)

@@ -1,8 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=Visual IPTV
-Comment=Cliente IPTV visual em C/X11
+Name=Blazzing
+Comment=Fast visual IPTV client for Linux/X11
+Comment[pt_BR]=Cliente IPTV visual rápido para Linux/X11
 Exec=visual-iptv
-Icon=video-display
+Icon=blazzing
 Terminal=false
 Categories=AudioVideo;Video;
