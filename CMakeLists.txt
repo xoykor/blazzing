@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(visual_iptv_x11 VERSION 1.2.10 LANGUAGES C)
+project(visual_iptv_x11 VERSION 1.2.11 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -27,6 +27,13 @@ function(vip_warnings target)
         target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(${target} PRIVATE -fsanitize=address,undefined)
     endif()
+endfunction()
+
+function(vip_thumbnail_policy_wrap target)
+    target_link_options(${target} PRIVATE
+        -Wl,--wrap=vip_thumbnail_scheduler_enqueue
+        -Wl,--wrap=vip_thumbnail_scheduler_cancel_pending
+        -Wl,--wrap=vip_thumbnail_capture_with_decoder)
 endfunction()
 
 add_library(vip_core src/core/core.c)
@@ -60,9 +67,10 @@ target_link_libraries(vip_ui_x11 PUBLIC
     PkgConfig::X11 PkgConfig::JPEG PkgConfig::CURL Threads::Threads)
 vip_warnings(vip_ui_x11)
 
-add_executable(visual-iptv src/app/main.c)
+add_executable(visual-iptv src/app/main.c src/thumbnails/thumbnail_policy.c)
 set_target_properties(visual-iptv PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 target_link_libraries(visual-iptv PRIVATE vip_ui_x11)
+vip_thumbnail_policy_wrap(visual-iptv)
 vip_warnings(visual-iptv)
 
 add_executable(vip-thumb-probe src/tools/thumb_probe.c)
@@ -104,6 +112,12 @@ if(BUILD_TESTING)
     target_link_libraries(test_thumbnails PRIVATE vip_thumbnails Threads::Threads)
     vip_warnings(test_thumbnails)
     add_test(NAME thumbnails COMMAND test_thumbnails)
+
+    add_executable(test_thumbnail_policy tests/test_thumbnail_policy.c src/thumbnails/thumbnail_policy.c)
+    target_link_libraries(test_thumbnail_policy PRIVATE vip_thumbnails Threads::Threads)
+    vip_thumbnail_policy_wrap(test_thumbnail_policy)
+    vip_warnings(test_thumbnail_policy)
+    add_test(NAME thumbnail_policy COMMAND test_thumbnail_policy)
 
     add_executable(test_decoder_ffmpeg tests/test_decoder_ffmpeg.c)
     target_link_libraries(test_decoder_ffmpeg PRIVATE vip_decoder vip_thumbnails)
