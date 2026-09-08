@@ -50,6 +50,9 @@
 #define GRID_GAP 18
 #define DETAILS_PANEL_W 410
 #define CACHE_SLOTS 96
+#define THUMB_PREFETCH_BATCH 192u
+#define THUMB_PREFETCH_INTERVAL_MS 120LL
+#define THUMB_BACKGROUND_PRIORITY 10000LL
 #define INPUT_SERVER 1
 #define INPUT_SERVER_ALT 2
 #define INPUT_USERNAME 3
@@ -231,6 +234,9 @@ struct app {
     atomic_bool thumbs_dirty;
     image_slot_t image_cache[CACHE_SLOTS];
     uint64_t image_age;
+    size_t thumb_prefetch_cursor[3];
+    size_t episode_prefetch_cursor;
+    int64_t thumb_prefetch_next_ms;
 
     vip_mpv_player_t *player;
     char player_status[256];
@@ -844,6 +850,81 @@ static void enqueue_thumbnail(app_t *a, const vip_channel_t *ch, int64_t priorit
     };
     (void)vip_thumbnail_scheduler_enqueue(a->thumbs, &req, &error);
 }
+
+static size_t thumbnail_worker_count(void) {
+    const char *override = getenv("VIPTV_THUMB_WORKERS");
+    if (override && override[0]) {
+        char *end = NULL;
+        errno = 0;
+        unsigned long parsed = strtoul(override, &end, 10);
+        if (errno == 0 && end != override && *end == '\0' &&
+            parsed >= 1ul && parsed <= 64ul)
+            return (size_t)parsed;
+    }
+
+    long online = sysconf(_SC_NPROCESSORS_ONLN);
+    size_t workers = online > 0 ? (size_t)online : 8u;
+    if (workers < 8u) workers = 8u;
+    if (workers > 16u) workers = 16u;
+    return workers;
+}
+
+static size_t prefetch_thumbnail_list(app_t *a,
+                                      vip_channel_list_t *channels,
+                                      size_t *cursor,
+                                      size_t budget,
+                                      int64_t priority) {
+    if (!a || !channels || !cursor || channels->len == 0u || budget == 0u) return 0u;
+    size_t limit = budget < channels->len ? budget : channels->len;
+    for (size_t i = 0; i < limit; ++i) {
+        size_t index = *cursor % channels->len;
+        *cursor = (index + 1u) % channels->len;
+        enqueue_thumbnail(a, &channels->items[index], priority);
+    }
+    return limit;
+}
+
+/*
+ * Mantém o cache "aquecendo" em segundo plano. Cards visíveis e o painel de
+ * detalhes continuam vencendo a fila por usarem prioridades muito maiores.
+ * Quando uma imagem falha, a próxima volta pelo catálogo a coloca na fila
+ * novamente; portanto o carregamento não morre silenciosamente.
+ */
+static void prefetch_thumbnail_batch(app_t *a) {
+    if (!a || !a->thumbs || a->screen == SCREEN_LOGIN || !a->active_profile_id[0]) return;
+
+    int64_t now = monotonic_ms();
+    if (now < a->thumb_prefetch_next_ms) return;
+    a->thumb_prefetch_next_ms = now + THUMB_PREFETCH_INTERVAL_MS;
+
+    bool episode_source = a->series_episode_mode && a->episode_channels.len > 0u;
+    size_t sources = episode_source ? 1u : 0u;
+    for (int k = 0; k < 3; ++k) {
+        if (a->catalogs[k].loaded && a->catalogs[k].channels.len > 0u) ++sources;
+    }
+    if (sources == 0u) return;
+
+    size_t budget = THUMB_PREFETCH_BATCH;
+    for (int k = 0; k < 3 && budget > 0u; ++k) {
+        catalog_t *catalog = &a->catalogs[k];
+        if (!catalog->loaded || catalog->channels.len == 0u) continue;
+
+        size_t quota = (budget + sources - 1u) / sources;
+        int64_t priority = THUMB_BACKGROUND_PRIORITY - (int64_t)k * 100LL;
+        size_t used = prefetch_thumbnail_list(a, &catalog->channels,
+                                              &a->thumb_prefetch_cursor[k],
+                                              quota, priority);
+        budget -= used;
+        --sources;
+    }
+
+    if (episode_source && budget > 0u) {
+        (void)prefetch_thumbnail_list(a, &a->episode_channels,
+                                      &a->episode_prefetch_cursor,
+                                      budget, THUMB_BACKGROUND_PRIORITY + 500LL);
+    }
+}
+
 
 static vip_status_t login_one_server(const char *server,
                                      const char *username,
@@ -1597,7 +1678,8 @@ static void enter_player(app_t *a, size_t channel_index) {
     a->player_hud_until_ms = a->player_open_ms + 3000;
     a->player_alt_attempted = false;
     a->timeline_dragging = false;
-    if (a->thumbs) vip_thumbnail_scheduler_set_paused(a->thumbs, true);
+    /* O player não pausa mais o pipeline de thumbnails: o cache continua
+       sendo preenchido mesmo durante a reprodução. */
     set_video_visible(a, true);
     focus_player_input(a);
     /* This child is only a graphics container. mpv creates its own native
@@ -2538,7 +2620,9 @@ static void init_runtime(app_t *a) {
     vip_ffmpeg_decoder_config_t dc={.ffmpeg_path="ffmpeg",.timeout_ms=10000,.candidate_frames=3,.output_width=320,.output_height=180};
     if (vip_ffmpeg_decoder_create(&a->decoder,&dc,&error)==VIP_OK &&
         vip_thumbnail_capture_context_init(&a->capture_context,a->decoder,a->cache_dir,82,&error)==VIP_OK) {
-        if (vip_thumbnail_scheduler_create(&a->thumbs,4,vip_thumbnail_capture_with_decoder,&a->capture_context,
+        size_t thumb_workers = thumbnail_worker_count();
+        fprintf(stderr, "[thumbs] %zu workers; prefetch contínuo habilitado\n", thumb_workers);
+        if (vip_thumbnail_scheduler_create(&a->thumbs,thumb_workers,vip_thumbnail_capture_with_decoder,&a->capture_context,
                                            thumbnail_ready,a,&error)!=VIP_OK)
             fprintf(stderr,"[thumbs] %s\n",error.message);
     } else fprintf(stderr,"[decoder] %s\n",error.message);
@@ -2661,6 +2745,7 @@ int vip_x11_app_run(void) {
         while (XPending(a.dpy)) { XEvent e; XNextEvent(a.dpy,&e); process_event(&a,&e); }
         handle_async(&a);
         maybe_start_details_load(&a);
+        prefetch_thumbnail_batch(&a);
         maybe_failover_player(&a);
         sync_video_window(&a);
         int64_t now=monotonic_ms();

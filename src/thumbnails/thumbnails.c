@@ -28,6 +28,7 @@ typedef struct sched_entry {
     char *provider_id;
     char *channel_id;
     uint64_t generation;
+    int64_t priority;
     bool generating;
     struct sched_entry *next;
 } sched_entry_t;
@@ -307,6 +308,12 @@ vip_status_t vip_thumbnail_scheduler_enqueue(vip_thumbnail_scheduler_t *s,
     if (e && e->generating) {
         pthread_mutex_unlock(&s->mutex); request_clear(&item.request); return VIP_OK;
     }
+    /* Repetir a mesma prioridade (ou uma menor) não cria outro nó no heap.
+       Uma prioridade maior ainda pode promover um card que acabou de entrar
+       no viewport, preservando a responsividade da interface. */
+    if (e && request->priority <= e->priority) {
+        pthread_mutex_unlock(&s->mutex); request_clear(&item.request); return VIP_OK;
+    }
     if (!e) {
         e = map_insert(s, request->provider_id, request->channel_id, error);
         if (!e) { pthread_mutex_unlock(&s->mutex); request_clear(&item.request); return VIP_ERR_NOMEM; }
@@ -317,6 +324,7 @@ vip_status_t vip_thumbnail_scheduler_enqueue(vip_thumbnail_scheduler_t *s,
     st = heap_push(s, item, error);
     if (st == VIP_OK) {
         e->generation = generation;
+        e->priority = request->priority;
         pthread_cond_signal(&s->cond);
     } else {
         if (inserted) map_remove(s, request->provider_id, request->channel_id);
@@ -490,6 +498,8 @@ static vip_status_t download_logo(const char *url, image_download_t *buf, vip_er
         return VIP_ERR_NETWORK;
     }
     curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 3500L);

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(visual_iptv_x11 VERSION 1.2.8 LANGUAGES C)
+project(visual_iptv_x11 VERSION 1.2.9 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
