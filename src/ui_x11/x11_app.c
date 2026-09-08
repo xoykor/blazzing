@@ -50,8 +50,8 @@
 #define GRID_GAP 18
 #define DETAILS_PANEL_W 410
 #define CACHE_SLOTS 96
-#define THUMB_PREFETCH_BATCH 192u
-#define THUMB_PREFETCH_INTERVAL_MS 120LL
+#define THUMB_PREFETCH_BATCH 96u
+#define THUMB_PREFETCH_INTERVAL_MS 150LL
 #define THUMB_BACKGROUND_PRIORITY 10000LL
 #define INPUT_SERVER 1
 #define INPUT_SERVER_ALT 2
@@ -497,7 +497,13 @@ static image_slot_t *image_cache_slot_get(app_t *a, const char *path) {
         if (!slot->path || slot->age < victim->age) victim = slot;
     }
     XImage *img = load_jpeg_ximage(a, path);
-    if (!img) return NULL;
+    if (!img) {
+        /* The file exists but is not a decodable JPEG. Remove it so the
+           enqueue path below can fetch it again instead of displaying an
+           eternal "carregando imagem...". */
+        (void)remove(path);
+        return NULL;
+    }
     image_slot_clear(victim);
     victim->path = vip_strdup(path);
     victim->mtime = st.st_mtime;
@@ -818,7 +824,17 @@ static void thumbnail_ready(const vip_thumbnail_request_t *request,
                             const vip_error_t *error,
                             void *userdata) {
     app_t *a = userdata;
-    (void)error;
+    static atomic_uint_fast64_t failure_count = 0;
+    if (status != VIP_OK) {
+        uint64_t n = atomic_fetch_add(&failure_count, 1u) + 1u;
+        if (n <= 20u || (n % 100u) == 0u) {
+            fprintf(stderr, "[thumbs] falha #%llu item=%s status=%d: %s\n",
+                    (unsigned long long)n,
+                    request && request->channel_id ? request->channel_id : "?",
+                    (int)status,
+                    error && error->message[0] ? error->message : "sem detalhe");
+        }
+    }
     if (status == VIP_OK && path && a->db) {
         vip_error_t db_error = {0};
         vip_thumbnail_source_t src = request->logo_url && request->logo_url[0]
@@ -910,10 +926,9 @@ static void prefetch_thumbnail_batch(app_t *a) {
         if (!catalog->loaded || catalog->channels.len == 0u) continue;
 
         size_t quota = (budget + sources - 1u) / sources;
-        int64_t priority = THUMB_BACKGROUND_PRIORITY - (int64_t)k * 100LL;
         size_t used = prefetch_thumbnail_list(a, &catalog->channels,
                                               &a->thumb_prefetch_cursor[k],
-                                              quota, priority);
+                                              quota, THUMB_BACKGROUND_PRIORITY);
         budget -= used;
         --sources;
     }
@@ -921,7 +936,7 @@ static void prefetch_thumbnail_batch(app_t *a) {
     if (episode_source && budget > 0u) {
         (void)prefetch_thumbnail_list(a, &a->episode_channels,
                                       &a->episode_prefetch_cursor,
-                                      budget, THUMB_BACKGROUND_PRIORITY + 500LL);
+                                      budget, THUMB_BACKGROUND_PRIORITY);
     }
 }
 

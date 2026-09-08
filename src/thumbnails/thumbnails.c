@@ -23,6 +23,33 @@
 #include <sys/stat.h>
 
 #define MAP_BUCKETS 4096u
+#define THUMB_MAX_PENDING 512u
+#define THUMB_INTERACTIVE_PRIORITY 500000LL
+
+/* Cache files are always generated as JPEG.  A valid cache entry must at
+ * least have JPEG SOI/EOI markers; visible decode failures are also removed
+ * by the X11 layer and will be re-enqueued. */
+static bool cached_jpeg_valid(const char *path) {
+    if (!path) return false;
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return false;
+    unsigned char head[2] = {0}, tail[2] = {0};
+    bool ok = fread(head, 1u, 2u, fp) == 2u;
+    if (ok && fseek(fp, -2L, SEEK_END) == 0)
+        ok = fread(tail, 1u, 2u, fp) == 2u;
+    fclose(fp);
+    return ok &&
+           head[0] == 0xffu && head[1] == 0xd8u &&
+           tail[0] == 0xffu && tail[1] == 0xd9u;
+}
+
+static char *temporary_cache_path(const char *path) {
+    if (!path) return NULL;
+    size_t n = strlen(path) + 5u;
+    char *tmp = malloc(n);
+    if (tmp) snprintf(tmp, n, "%s.tmp", path);
+    return tmp;
+}
 
 typedef struct sched_entry {
     char *provider_id;
@@ -303,6 +330,16 @@ vip_status_t vip_thumbnail_scheduler_enqueue(vip_thumbnail_scheduler_t *s,
     if (s->stopping) {
         pthread_mutex_unlock(&s->mutex); request_clear(&item.request); return VIP_ERR_CANCELLED;
     }
+    /* Backpressure: background prefetch is intentionally lossy when the
+       queue is already full. The UI keeps scanning continuously and will
+       enqueue those items later as workers drain the queue. Interactive
+       viewport/detail requests always bypass this cap. */
+    if (s->heap_len >= THUMB_MAX_PENDING &&
+        request->priority < THUMB_INTERACTIVE_PRIORITY) {
+        pthread_mutex_unlock(&s->mutex);
+        request_clear(&item.request);
+        return VIP_OK;
+    }
     sched_entry_t *e = map_find(s, request->provider_id, request->channel_id);
     bool inserted = false;
     if (e && e->generating) {
@@ -424,9 +461,17 @@ vip_status_t vip_thumbnail_save_rgb_jpeg(const uint8_t *rgb,
             memcpy(scaled + (y * out_w + x) * 3, rgb + src_y * stride + src_x * 3, 3);
         }
     }
-    FILE *fp = fopen(path, "wb");
+    char *tmp_path = temporary_cache_path(path);
+    if (!tmp_path) {
+        free(scaled);
+        vip_error_set(error, VIP_ERR_NOMEM, "sem memória para cache temporário");
+        return VIP_ERR_NOMEM;
+    }
+    FILE *fp = fopen(tmp_path, "wb");
     if (!fp) {
-        free(scaled); vip_error_set(error, VIP_ERR_IO, "não foi possível abrir %s: %s", path, strerror(errno)); return VIP_ERR_IO;
+        free(tmp_path); free(scaled);
+        vip_error_set(error, VIP_ERR_IO, "não foi possível abrir cache temporário: %s", strerror(errno));
+        return VIP_ERR_IO;
     }
     struct jpeg_compress_struct cinfo;
     struct jpeg_error_mgr jerr;
@@ -444,7 +489,18 @@ vip_status_t vip_thumbnail_save_rgb_jpeg(const uint8_t *rgb,
     }
     jpeg_finish_compress(&cinfo);
     jpeg_destroy_compress(&cinfo);
-    fclose(fp); free(scaled);
+    int close_rc = fclose(fp);
+    int rename_rc = close_rc == 0 ? rename(tmp_path, path) : -1;
+    if (close_rc != 0 || rename_rc != 0) {
+        int saved_errno = errno;
+        (void)remove(tmp_path);
+        free(tmp_path); free(scaled);
+        vip_error_set(error, VIP_ERR_IO, "falha ao publicar thumbnail no cache: %s",
+                      strerror(saved_errno));
+        return VIP_ERR_IO;
+    }
+    free(tmp_path); free(scaled);
+    vip_error_clear(error);
     return VIP_OK;
 }
 
@@ -512,8 +568,20 @@ static vip_status_t download_logo(const char *url, image_download_t *buf, vip_er
     long http = 0;
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http);
     curl_easy_cleanup(curl);
-    if (rc != CURLE_OK || buf->overflow || http >= 400 || buf->len == 0u) {
-        vip_error_set(error, VIP_ERR_NETWORK, "não foi possível baixar a capa");
+    if (rc != CURLE_OK) {
+        vip_error_set(error, VIP_ERR_NETWORK, "download da capa: %s", curl_easy_strerror(rc));
+        return VIP_ERR_NETWORK;
+    }
+    if (buf->overflow) {
+        vip_error_set(error, VIP_ERR_NETWORK, "capa excede 12 MiB");
+        return VIP_ERR_NETWORK;
+    }
+    if (http >= 400) {
+        vip_error_set(error, VIP_ERR_NETWORK, "servidor da capa respondeu HTTP %ld", http);
+        return VIP_ERR_NETWORK;
+    }
+    if (buf->len == 0u) {
+        vip_error_set(error, VIP_ERR_NETWORK, "servidor retornou capa vazia");
         return VIP_ERR_NETWORK;
     }
     return VIP_OK;
@@ -614,8 +682,17 @@ static vip_status_t save_rgb_jpeg_exact(const uint8_t *rgb, size_t width, size_t
                                         const char *path, int quality, vip_error_t *error) {
     vip_status_t st = mkdir_parents(path, error);
     if (st != VIP_OK) return st;
-    FILE *fp=fopen(path,"wb");
-    if (!fp) { vip_error_set(error, VIP_ERR_IO, "não foi possível abrir cache de capa"); return VIP_ERR_IO; }
+    char *tmp_path = temporary_cache_path(path);
+    if (!tmp_path) {
+        vip_error_set(error, VIP_ERR_NOMEM, "sem memória para cache temporário");
+        return VIP_ERR_NOMEM;
+    }
+    FILE *fp=fopen(tmp_path,"wb");
+    if (!fp) {
+        free(tmp_path);
+        vip_error_set(error, VIP_ERR_IO, "não foi possível abrir cache temporário de capa");
+        return VIP_ERR_IO;
+    }
     struct jpeg_compress_struct cinfo; struct jpeg_error_mgr jerr;
     cinfo.err=jpeg_std_error(&jerr); jpeg_create_compress(&cinfo); jpeg_stdio_dest(&cinfo,fp);
     cinfo.image_width=(JDIMENSION)width; cinfo.image_height=(JDIMENSION)height;
@@ -626,7 +703,18 @@ static vip_status_t save_rgb_jpeg_exact(const uint8_t *rgb, size_t width, size_t
         JSAMPROW row=(JSAMPROW)(rgb + (size_t)cinfo.next_scanline * stride);
         jpeg_write_scanlines(&cinfo,&row,1u);
     }
-    jpeg_finish_compress(&cinfo); jpeg_destroy_compress(&cinfo); fclose(fp);
+    jpeg_finish_compress(&cinfo); jpeg_destroy_compress(&cinfo);
+    int close_rc = fclose(fp);
+    int rename_rc = close_rc == 0 ? rename(tmp_path, path) : -1;
+    if (close_rc != 0 || rename_rc != 0) {
+        int saved_errno = errno;
+        (void)remove(tmp_path);
+        free(tmp_path);
+        vip_error_set(error, VIP_ERR_IO, "falha ao publicar capa no cache: %s",
+                      strerror(saved_errno));
+        return VIP_ERR_IO;
+    }
+    free(tmp_path);
     vip_error_clear(error); return VIP_OK;
 }
 
@@ -712,21 +800,26 @@ vip_status_t vip_thumbnail_capture_with_decoder(const vip_thumbnail_request_t *r
     if (!path) return error ? error->code : VIP_ERR_IO;
 
     struct stat stbuf;
-    if (stat(path, &stbuf) == 0 && stbuf.st_size > 0) {
-        *path_out = path;
-        vip_error_clear(error);
-        return VIP_OK;
+    if (stat(path, &stbuf) == 0) {
+        if (stbuf.st_size > 0 && cached_jpeg_valid(path)) {
+            *path_out = path;
+            vip_error_clear(error);
+            return VIP_OK;
+        }
+        /* A crash/disk error may leave a partial cache file. Never let a
+           non-empty but invalid file permanently suppress future downloads. */
+        (void)remove(path);
     }
 
     vip_rgb_frame_t frame = {0};
     vip_status_t st = VIP_ERR_INVALID_FRAME;
-    if (request->logo_url && request->logo_url[0]) {
-        /* Artwork is downloaded/decoded in-process. This is substantially cheaper than
-           spawning FFmpeg for every poster and also preserves the original aspect ratio. */
+    bool has_artwork = request->logo_url && request->logo_url[0];
+    if (has_artwork) {
+        /* Provider artwork is the canonical thumbnail. A transient HTTP/CDN
+           failure must not fan out into many expensive FFmpeg stream opens.
+           Continuous prefetch/viewport redraws will retry the artwork later. */
         st = capture_logo_direct(request->logo_url, path, context->jpeg_quality, error);
-    }
-    if (st != VIP_OK) {
-        vip_error_clear(error);
+    } else {
         st = vip_thumbnail_decoder_capture(context->decoder, request->stream_url, &frame, error);
         if (st == VIP_OK) {
             st = vip_thumbnail_save_rgb_jpeg(frame.data, frame.width, frame.height, frame.stride,
