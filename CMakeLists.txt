@@ -97,6 +97,11 @@ if(BUILD_TESTING)
     vip_warnings(test_core)
     add_test(NAME core COMMAND test_core)
 
+    add_executable(test_streaming_services tests/test_streaming_services.c)
+    target_link_libraries(test_streaming_services PRIVATE vip_core)
+    vip_warnings(test_streaming_services)
+    add_test(NAME streaming_services COMMAND test_streaming_services)
+
     add_executable(test_provider tests/test_provider.c)
     target_link_libraries(test_provider PRIVATE vip_provider PkgConfig::CURL)
     vip_warnings(test_provider)
