@@ -36,11 +36,15 @@ function(vip_thumbnail_policy_wrap target)
         -Wl,--wrap=vip_thumbnail_capture_with_decoder)
 endfunction()
 
-add_library(vip_core src/core/core.c)
+add_library(vip_core src/core/core.c src/core/streaming_services.c)
 target_include_directories(vip_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 vip_warnings(vip_core)
 
-add_library(vip_provider src/provider/xtream.c src/provider/m3u.c src/provider/server_resolver.c)
+add_library(vip_provider
+    src/provider/xtream.c
+    src/provider/m3u.c
+    src/provider/server_resolver.c
+    src/provider/pluto.c)
 target_link_libraries(vip_provider PUBLIC vip_core PkgConfig::CURL PkgConfig::JSONC OpenSSL::Crypto)
 vip_warnings(vip_provider)
 
@@ -97,6 +101,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_provider PRIVATE vip_provider PkgConfig::CURL)
     vip_warnings(test_provider)
     add_test(NAME provider COMMAND test_provider)
+
+    add_executable(test_pluto tests/test_pluto.c)
+    target_link_libraries(test_pluto PRIVATE vip_provider)
+    vip_warnings(test_pluto)
+    add_test(NAME pluto COMMAND test_pluto)
 
     add_executable(test_server_resolver tests/test_server_resolver.c)
     target_link_libraries(test_server_resolver PRIVATE vip_provider)
