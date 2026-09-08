@@ -2,6 +2,17 @@
 
 [Português (Brasil)](CHANGELOG.pt-BR.md)
 
+## 1.2.11 — 2026-09-07
+
+Thumbnail stall prevention update:
+
+- background prefetch no longer opens streams for items without provider artwork;
+- logo-less stream-frame thumbnails are generated only for visible/interactive cards;
+- FFmpeg thumbnail capture is capped at two concurrent jobs so artwork downloads keep progressing;
+- scrolling/filter rebuilds no longer destroy the pending thumbnail queue;
+- regression coverage verifies background no-artwork filtering and queue preservation during viewport changes;
+- continuous aggressive artwork prefetch remains enabled with the existing bounded scheduler queue.
+
 ## 1.2.10 — 2026-09-07
 
 Thumbnail pipeline reliability update:

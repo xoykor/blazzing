@@ -2,6 +2,17 @@
 
 [English](CHANGELOG.md)
 
+## 1.2.11 — 2026-09-07
+
+Atualização para impedir travamentos aparentes no carregamento de miniaturas:
+
+- o prefetch em segundo plano não abre mais streams de itens sem artwork fornecido pelo provider;
+- thumbnails geradas a partir do vídeo via FFmpeg ficam restritas a cards visíveis/interativos;
+- capturas FFmpeg de miniatura são limitadas a duas simultâneas, preservando workers para downloads de capas;
+- rolagem e reconstruções de filtro não destroem mais toda a fila pendente de thumbnails;
+- testes de regressão verificam o bloqueio de itens sem artwork no background e a preservação da fila durante mudanças de viewport;
+- o prefetch contínuo e agressivo de artwork permanece ativo com a fila limitada já existente.
+
 ## 1.2.10 — 2026-09-07
 
 Atualização de confiabilidade do pipeline de miniaturas:
