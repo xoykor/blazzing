@@ -71,7 +71,11 @@ target_link_libraries(vip_ui_x11 PUBLIC
     PkgConfig::X11 PkgConfig::JPEG PkgConfig::CURL Threads::Threads)
 vip_warnings(vip_ui_x11)
 
-add_executable(visual-iptv src/app/main.c src/thumbnails/thumbnail_policy.c)
+add_executable(visual-iptv
+    src/app/main.c
+    src/app/hub.c
+    src/app/pluto_app.c
+    src/thumbnails/thumbnail_policy.c)
 set_target_properties(visual-iptv PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 target_link_libraries(visual-iptv PRIVATE vip_ui_x11)
 vip_thumbnail_policy_wrap(visual-iptv)
