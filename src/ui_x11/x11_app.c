@@ -13,6 +13,7 @@
 #include "visual_iptv/player_mpv.h"
 #include "visual_iptv/provider.h"
 #include "visual_iptv/provider_m3u.h"
+#include "visual_iptv/server_resolver.h"
 #include "visual_iptv/thumbnails.h"
 
 #include <X11/Xatom.h>
@@ -1016,6 +1017,9 @@ static void *login_worker(void *userdata) {
     catalog_t series = {0};
     bool success = false;
     bool used_alternate = false;
+    bool saw_http_404 = false;
+    char *resolved_primary = NULL;
+    char *resolved_alternate = NULL;
     char provider_id[17] = {0};
     vip_status_t st = VIP_ERR_INVALID_ARGUMENT;
 
@@ -1026,6 +1030,7 @@ static void *login_worker(void *userdata) {
         fprintf(stderr, "[login] conectando ao servidor primário\n");
         st = login_one_server(job->server, job->username, job->password,
                               &credentials, &cats, &channels, &vod, &series, &error);
+        saw_http_404 = st != VIP_OK && strstr(error.message, "HTTP 404") != NULL;
         if (st != VIP_OK && job->server_alt && job->server_alt[0]) {
             fprintf(stderr, "[login] primário falhou; tentando servidor alternativo\n");
             pthread_mutex_lock(&a->data_mutex);
@@ -1039,6 +1044,7 @@ static void *login_worker(void *userdata) {
             vip_error_clear(&error);
             st = login_one_server(job->server_alt, job->username, job->password,
                                   &credentials, &cats, &channels, &vod, &series, &error);
+            if (st != VIP_OK && strstr(error.message, "HTTP 404") != NULL) saw_http_404 = true;
             used_alternate = st == VIP_OK;
             if (used_alternate) {
                 vip_credentials_t identity = {0};
@@ -1051,6 +1057,50 @@ static void *login_worker(void *userdata) {
                 }
                 vip_credentials_clear(&identity);
             }
+        }
+
+        /* StreamFire/Spark-compatible fallback. Only an HTTP 404 from the
+         * regular Xtream endpoint activates it. Every candidate returned by
+         * the resolver API is verified through player_api.php before use. */
+        if (st != VIP_OK && saw_http_404) {
+            fprintf(stderr, "[login] endpoint Xtream retornou 404; procurando servidor pela API do provider\n");
+            pthread_mutex_lock(&a->data_mutex);
+            snprintf(a->status, sizeof(a->status), "Servidor retornou 404; procurando endpoint automaticamente...");
+            pthread_mutex_unlock(&a->data_mutex);
+
+            vip_server_resolution_t resolution = {0};
+            vip_error_t resolve_error = {0};
+            if (vip_streamfire_resolve_servers(job->username, job->password, &resolution, &resolve_error) == VIP_OK) {
+                resolved_primary = vip_strdup(resolution.primary);
+                resolved_alternate = vip_strdup_nullable(resolution.alternate);
+                if (!resolved_primary) {
+                    vip_error_set(&error, VIP_ERR_NOMEM, "sem memória para servidor resolvido");
+                } else {
+                    vip_category_list_clear(&cats); vip_category_list_init(&cats);
+                    vip_channel_list_clear(&channels); vip_channel_list_init(&channels);
+                    vip_category_list_clear(&vod.categories); vip_channel_list_clear(&vod.channels); memset(&vod, 0, sizeof(vod));
+                    vip_category_list_clear(&series.categories); vip_channel_list_clear(&series.channels); memset(&series, 0, sizeof(series));
+                    vip_credentials_clear(&credentials);
+                    vip_error_clear(&error);
+                    used_alternate = false;
+                    st = login_one_server(resolved_primary, job->username, job->password,
+                                          &credentials, &cats, &channels, &vod, &series, &error);
+                    if (st != VIP_OK && resolved_alternate && resolved_alternate[0]) {
+                        vip_category_list_clear(&cats); vip_category_list_init(&cats);
+                        vip_channel_list_clear(&channels); vip_channel_list_init(&channels);
+                        vip_category_list_clear(&vod.categories); vip_channel_list_clear(&vod.channels); memset(&vod, 0, sizeof(vod));
+                        vip_category_list_clear(&series.categories); vip_channel_list_clear(&series.channels); memset(&series, 0, sizeof(series));
+                        vip_credentials_clear(&credentials);
+                        vip_error_clear(&error);
+                        st = login_one_server(resolved_alternate, job->username, job->password,
+                                              &credentials, &cats, &channels, &vod, &series, &error);
+                        used_alternate = st == VIP_OK;
+                    }
+                }
+            } else {
+                error = resolve_error;
+            }
+            vip_server_resolution_clear(&resolution);
         }
         if (st == VIP_OK) snprintf(provider_id, sizeof(provider_id), "%s", credentials.provider_id);
     }
@@ -1078,6 +1128,10 @@ static void *login_worker(void *userdata) {
             vip_category_list_init(&a->catalogs[CONTENT_SERIES].categories);
             vip_channel_list_init(&a->catalogs[CONTENT_SERIES].channels);
         }
+        if (resolved_primary && resolved_primary[0]) {
+            snprintf(a->server, sizeof(a->server), "%s", resolved_primary);
+            snprintf(a->server_alt, sizeof(a->server_alt), "%s", resolved_alternate ? resolved_alternate : "");
+        }
         a->active_server_alt = used_alternate;
         a->content_kind = CONTENT_LIVE;
         a->series_episode_mode = false;
@@ -1104,6 +1158,8 @@ static void *login_worker(void *userdata) {
     vip_category_list_clear(&vod.categories); vip_channel_list_clear(&vod.channels);
     vip_category_list_clear(&series.categories); vip_channel_list_clear(&series.channels);
     vip_credentials_clear(&credentials);
+    free(resolved_primary);
+    free(resolved_alternate);
     if (job->password) { volatile char *p = job->password; size_t n = strlen(job->password); while (n--) *p++ = 0; }
     free(job->server); free(job->server_alt); free(job->username); free(job->password); free(job->profile_name); free(job);
     atomic_store(&a->login_success, success);

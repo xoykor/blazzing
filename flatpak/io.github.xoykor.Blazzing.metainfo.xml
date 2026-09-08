@@ -20,6 +20,11 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.2.12" date="2026-09-08">
+      <description>
+        <p>Automatic provider endpoint discovery after Xtream HTTP 404, with native resolver decoding and verified server failover.</p>
+      </description>
+    </release>
     <release version="1.2.11" date="2026-09-07">
       <description>
         <p>Continuous thumbnail loading with background artwork-only prefetch, bounded FFmpeg frame capture and queue preservation while navigating.</p>

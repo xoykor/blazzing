@@ -1,3 +1,14 @@
+## 1.2.12 — 2026-09-08
+
+Descoberta automática do endpoint do provider:
+
+- quando o login Xtream normal retorna HTTP 404, o Blazzing pode consultar as APIs de resolução StreamFire/Spark;
+- a decodificação do payload e a extração dos candidatos foram implementadas nativamente em C;
+- os endereços retornados são normalizados, deduplicados e validados via `player_api.php`;
+- o primeiro servidor validado vira o primário e um segundo servidor validado vira o failover;
+- credenciais não são enviadas às APIs de resolução quando o login Xtream normal funciona;
+- testes de regressão cobrem decodificação e extração de servidores.
+
 # Changelog
 
 [English](CHANGELOG.md)

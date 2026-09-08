@@ -1,3 +1,14 @@
+## 1.2.12 — 2026-09-08
+
+Automatic provider endpoint discovery:
+
+- when a normal Xtream login returns HTTP 404, Blazzing can query the StreamFire/Spark resolver APIs;
+- resolver payload decoding and candidate extraction are implemented natively in C;
+- returned bases are normalized, deduplicated and verified through `player_api.php`;
+- the first verified base becomes the primary server and a second verified base becomes failover;
+- credentials are not sent to resolver APIs during normal successful Xtream logins;
+- regression tests cover payload decoding and server extraction.
+
 # Changelog
 
 [Português (Brasil)](CHANGELOG.pt-BR.md)
