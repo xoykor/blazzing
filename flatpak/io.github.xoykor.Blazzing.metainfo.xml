@@ -20,6 +20,11 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.2.11" date="2026-09-07">
+      <description>
+        <p>Continuous thumbnail loading with background artwork-only prefetch, bounded FFmpeg frame capture and queue preservation while navigating.</p>
+      </description>
+    </release>
     <release version="1.2.10" date="2026-09-07">
       <description>
         <p>Reliable continuous thumbnail pipeline with bounded queue, fair prefetch and atomic cache writes.</p>
