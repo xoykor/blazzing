@@ -36,11 +36,15 @@ function(vip_thumbnail_policy_wrap target)
         -Wl,--wrap=vip_thumbnail_capture_with_decoder)
 endfunction()
 
-add_library(vip_core src/core/core.c)
+add_library(vip_core src/core/core.c src/core/streaming_services.c)
 target_include_directories(vip_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 vip_warnings(vip_core)
 
-add_library(vip_provider src/provider/xtream.c src/provider/m3u.c src/provider/server_resolver.c)
+add_library(vip_provider
+    src/provider/xtream.c
+    src/provider/m3u.c
+    src/provider/server_resolver.c
+    src/provider/pluto.c)
 target_link_libraries(vip_provider PUBLIC vip_core PkgConfig::CURL PkgConfig::JSONC OpenSSL::Crypto)
 vip_warnings(vip_provider)
 
@@ -67,7 +71,11 @@ target_link_libraries(vip_ui_x11 PUBLIC
     PkgConfig::X11 PkgConfig::JPEG PkgConfig::CURL Threads::Threads)
 vip_warnings(vip_ui_x11)
 
-add_executable(visual-iptv src/app/main.c src/thumbnails/thumbnail_policy.c)
+add_executable(visual-iptv
+    src/app/main.c
+    src/app/hub.c
+    src/app/pluto_app.c
+    src/thumbnails/thumbnail_policy.c)
 set_target_properties(visual-iptv PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 target_link_libraries(visual-iptv PRIVATE vip_ui_x11)
 vip_thumbnail_policy_wrap(visual-iptv)
@@ -93,10 +101,20 @@ if(BUILD_TESTING)
     vip_warnings(test_core)
     add_test(NAME core COMMAND test_core)
 
+    add_executable(test_streaming_services tests/test_streaming_services.c)
+    target_link_libraries(test_streaming_services PRIVATE vip_core)
+    vip_warnings(test_streaming_services)
+    add_test(NAME streaming_services COMMAND test_streaming_services)
+
     add_executable(test_provider tests/test_provider.c)
     target_link_libraries(test_provider PRIVATE vip_provider PkgConfig::CURL)
     vip_warnings(test_provider)
     add_test(NAME provider COMMAND test_provider)
+
+    add_executable(test_pluto tests/test_pluto.c)
+    target_link_libraries(test_pluto PRIVATE vip_provider)
+    vip_warnings(test_pluto)
+    add_test(NAME pluto COMMAND test_pluto)
 
     add_executable(test_server_resolver tests/test_server_resolver.c)
     target_link_libraries(test_server_resolver PRIVATE vip_provider)
