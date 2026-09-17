@@ -1,3 +1,15 @@
+## 1.2.16 — 2026-09-17
+
+Correção do catálogo M3U e da navegação de séries:
+
+- playlists M3U agora são separadas em TV, Filmes e Séries em vez de colocar todos os itens na aba TV;
+- categorias de filmes e séries identificadas pelo `group-title` passam a preencher as abas corretas em fontes M3U;
+- episódios de séries M3U são condensados em um único card por série na tela principal de Séries;
+- ao abrir uma série M3U, o Blazzing agora mostra primeiro as temporadas e depois apenas os episódios da temporada escolhida;
+- a caixa de busca agora possui um estado de foco muito mais evidente, com fundo destacado, barra de acento e cursor;
+- Prime Video, Max e Globoplay, que apenas abriam o navegador, foram removidos completamente junto com a API de sessão externa;
+- o hub inicial agora mantém somente IPTV/Listas e Pluto TV, ambos reproduzidos nativamente no Blazzing.
+
 ## 1.2.15 — 2026-09-17
 
 Atualização de UI/UX e navegação de séries:
