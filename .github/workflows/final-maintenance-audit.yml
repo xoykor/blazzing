@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies and analyzers
         run: |
           sudo apt-get update
-          sudo apt-get install -y             build-essential cmake ninja-build pkg-config             libx11-dev libcurl4-openssl-dev libjson-c-dev libsqlite3-dev             libjpeg-dev libpng-dev libwebp-dev libssl-dev libcairo2-dev libpango1.0-dev             ffmpeg mpv cppcheck clang clang-tools python3
+          sudo apt-get install -y             build-essential cmake ninja-build pkg-config             libx11-dev libcurl4-openssl-dev libjson-c-dev libsqlite3-dev             libjpeg-dev libpng-dev libwebp-dev libssl-dev libcairo2-dev libpango1.0-dev             ffmpeg mpv cppcheck clang clang-tools universal-ctags python3
 
       - name: Normal build and tests
         run: |
@@ -121,6 +121,82 @@ jobs:
           print(f"TOTAL comment_lines={total_comment}")
           print(f"TOTAL functions={total_functions}")
           print(f"TOTAL documented_functions={documented_functions}")
+          PY
+
+      - name: Documentation and comment quality audit
+        run: |
+          {
+            echo "== stale architecture wording =="
+            grep -RInE 'does not use .--wid|não usa .--wid|_NET_WM_PID|reparent(ed|ing|ada|ado)?' README*.md docs flatpak include src || true
+            echo
+            echo "== leftover tautological generated comments =="
+            grep -RInE '/\\* Implement the .* helper\\. \\*/' include src tests || true
+            echo
+            echo "== awkward boolean comments =="
+            grep -RInE '/\\* Return whether [a-z0-9_ ]+\\. \\*/' include src tests || true
+          } | tee audit/documentation-quality.txt
+
+          if grep -RInE 'does not use .--wid|não usa .--wid|_NET_WM_PID|reparent(ed|ing|ada|ado)?' README*.md docs flatpak include src; then
+            echo "Stale reparenting documentation remains."
+            exit 1
+          fi
+
+          if grep -RInE '/\\* Implement the .* helper\\. \\*/' include src tests; then
+            echo "Tautological generated comments remain."
+            exit 1
+          fi
+
+      - name: Function comment coverage with ctags
+        run: |
+          python3 - <<'PY' | tee audit/function-comment-coverage.txt
+          from pathlib import Path
+          import json
+          import subprocess
+
+          files = sorted(
+              list(Path("src").rglob("*.c"))
+              + list(Path("src").rglob("*.h"))
+              + list(Path("include").rglob("*.h"))
+              + list(Path("tests").rglob("*.c"))
+              + list(Path("tests").rglob("*.h"))
+          )
+          proc = subprocess.run(
+              ["ctags", "--output-format=json", "--fields=+nK", "--kinds-C=fp", "-o", "-"]
+              + [str(p) for p in files],
+              check=True, text=True, capture_output=True
+          )
+
+          tags = []
+          for line in proc.stdout.splitlines():
+              item = json.loads(line)
+              if item.get("_type") == "tag" and item.get("kind") in ("function", "prototype"):
+                  tags.append((Path(item["path"]), int(item["line"]), item["name"]))
+
+          documented = 0
+          missing = []
+          for path, line_no, name in tags:
+              lines = path.read_text(errors="replace").splitlines()
+              i = line_no - 2
+              while i >= 0 and not lines[i].strip():
+                  i -= 1
+              ok = False
+              if i >= 0:
+                  prev = lines[i].strip()
+                  ok = prev.startswith("//") or prev.endswith("*/") or prev.startswith("/*") or prev.startswith("*")
+              if ok:
+                  documented += 1
+              else:
+                  missing.append(f"{path}:{line_no}: {name}")
+
+          print(f"functions_and_prototypes={len(tags)}")
+          print(f"documented={documented}")
+          print(f"coverage={(100.0 * documented / len(tags)) if tags else 100.0:.1f}%")
+          if missing:
+              print("missing:")
+              print("\n".join(missing))
+
+          if missing:
+              raise SystemExit(1)
           PY
 
       - uses: actions/upload-artifact@v4
