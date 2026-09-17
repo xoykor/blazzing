@@ -35,6 +35,7 @@ typedef struct {
 
 static size_t write_response(void *ptr, size_t size, size_t nmemb, void *userdata) {
     response_buf_t *buf = userdata;
+    if (size != 0u && nmemb > SIZE_MAX / size) { buf->overflow = true; return 0u; }
     const size_t bytes = size * nmemb;
     if (bytes > PLUTO_MAX_RESPONSE || buf->len > PLUTO_MAX_RESPONSE - bytes) {
         buf->overflow = true;
@@ -43,7 +44,8 @@ static size_t write_response(void *ptr, size_t size, size_t nmemb, void *userdat
     const size_t need = buf->len + bytes + 1u;
     if (need > buf->cap) {
         size_t cap = buf->cap ? buf->cap : 4096u;
-        while (cap < need) cap *= 2u;
+        while (cap < need && cap <= PLUTO_MAX_RESPONSE / 2u) cap *= 2u;
+        if (cap < need) cap = need;
         char *grown = realloc(buf->data, cap);
         if (!grown) return 0;
         buf->data = grown;
@@ -83,6 +85,11 @@ static vip_status_t http_get(vip_pluto_client_t *client,
     curl_easy_setopt(client->curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(client->curl, CURLOPT_MAXREDIRS, 5L);
     curl_easy_setopt(client->curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(client->curl, CURLOPT_TCP_KEEPALIVE, 1L);
+    curl_easy_setopt(client->curl, CURLOPT_ACCEPT_ENCODING, "");
+#ifdef CURL_HTTP_VERSION_2TLS
+    curl_easy_setopt(client->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+#endif
     curl_easy_setopt(client->curl, CURLOPT_USERAGENT,
                      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/122 Safari/537.36");
 

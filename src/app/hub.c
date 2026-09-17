@@ -124,7 +124,7 @@ static void hub_draw(hub_window_t *h) {
     hub_text(h, 54, 42, "Blazzing", h->text);
     hub_text(h, 54, 67, "Streaming hub", h->muted);
     hub_text(h, 54, 132, "Escolha uma fonte", h->text);
-    hub_text(h, 54, 154, "IPTV e Pluto rodam nativamente. Servicos com DRM abrem no ambiente web oficial.", h->muted);
+    hub_text(h, 54, 154, "IPTV e Pluto rodam nativamente. DRM abre no navegador; login e sessão ficam no navegador.", h->muted);
 
     draw_service_card(h, 0, "IPTV / Listas", "Xtream, M3U e perfis salvos", "NATIVO  |  MPV");
     draw_service_card(h, 1, "Pluto TV", "TV gratis, sem login", "NATIVO  |  MPV");
@@ -155,7 +155,7 @@ static hub_action_t activate_selected(hub_window_t *h) {
     vip_status_t st = vip_streaming_service_open(service_id, NULL, &error);
     if (st == VIP_OK) {
         const vip_streaming_service_t *service = vip_streaming_service_get(service_id);
-        snprintf(h->status, sizeof(h->status), "%s aberto no navegador.", service ? service->name : "Servico");
+        snprintf(h->status, sizeof(h->status), "%s aberto no navegador; a sessão não é capturada pelo Blazzing.", service ? service->name : "Servico");
     } else {
         snprintf(h->status, sizeof(h->status), "Falha ao abrir: %.200s", error.message);
     }

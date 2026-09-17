@@ -116,7 +116,8 @@ int main(void) {
     TEST_CHECK(file_contains(args_path, "--hwdec=auto-safe"));
     TEST_CHECK(file_contains(args_path, "--force-window=immediate"));
     TEST_CHECK(file_contains(args_path, "--no-border"));
-    TEST_CHECK(!file_contains(args_path, "--wid="));
+    TEST_CHECK(file_contains(args_path, "--wid=123"));
+    TEST_CHECK(!file_contains(args_path, "--geometry="));
     TEST_CHECK(!file_contains(args_path, "example.invalid"));
     TEST_CHECK(!file_contains(args_path, "--start="));
     TEST_CHECK(!file_contains(args_path, "--playlist="));

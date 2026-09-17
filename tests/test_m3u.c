@@ -14,7 +14,7 @@ int main(void) {
     FILE *fp = fdopen(fd, "w");
     TEST_CHECK(fp != NULL);
     fputs("#EXTM3U\n"
-          "#EXTINF:-1 tvg-logo=\"https://img/a.jpg\" group-title=\"Notícias\",Canal A\n"
+          "#EXTINF:-1 tvg-logo=\"https://img/a.jpg\" group-title=\"Notícias\",Canal A, HD\n"
           "https://stream/a.m3u8\n"
           "#EXTINF:-1 group-title=\"Filmes\",Canal B\n"
           "https://stream/b.ts\n", fp);
@@ -28,7 +28,7 @@ int main(void) {
     TEST_CHECK(strlen(provider_id) == 16);
     TEST_CHECK(cats.len == 2);
     TEST_CHECK(channels.len == 2);
-    TEST_CHECK(strcmp(channels.items[0].name, "Canal A") == 0);
+    TEST_CHECK(strcmp(channels.items[0].name, "Canal A, HD") == 0);
     TEST_CHECK(strcmp(channels.items[0].logo_url, "https://img/a.jpg") == 0);
     TEST_CHECK(strcmp(channels.items[1].stream_url, "https://stream/b.ts") == 0);
 

@@ -379,7 +379,7 @@ static int spawn_runtime(vip_mpv_player_t *player, int *log_read_fd) {
 
     const char *vo_arg = use_x11_vo ? "--vo=x11" : (use_gpu_next ? "--vo=gpu-next,gpu" : "--vo=gpu");
     const char *context_arg = use_x11_vo ? NULL : (use_gpu_next ? "--gpu-context=x11egl,x11,x11vk" : "--gpu-context=x11");
-    debug_log(player, "runtime persistente renderer=%s hwdec=%s embed=native-x11-reparent parent=%lu",
+    debug_log(player, "runtime persistente renderer=%s hwdec=%s embed=wid parent=%lu",
               use_x11_vo ? "x11" : (use_gpu_next ? "gpu-next-x11" : "gpu-x11"), hwdec, player->window_id);
 
     int log_pipe[2] = {-1, -1};
@@ -398,9 +398,11 @@ static int spawn_runtime(vip_mpv_player_t *player, int *log_read_fd) {
         char ipc_arg[160];
         char hwdec_arg[96];
         char title_arg[96];
+        char wid_arg[96];
         snprintf(ipc_arg, sizeof(ipc_arg), "--input-ipc-server=%s", player->ipc_path);
         snprintf(hwdec_arg, sizeof(hwdec_arg), "--hwdec=%s", hwdec);
         snprintf(title_arg, sizeof(title_arg), "--title=visual-iptv-mpv-%ld", (long)getpid());
+        snprintf(wid_arg, sizeof(wid_arg), "--wid=%lu", player->window_id);
         char *const audio_arg = player->audio ? "--audio=auto" : "--no-audio";
         char *argv[36];
         size_t ai = 0u;
@@ -409,7 +411,7 @@ static int spawn_runtime(vip_mpv_player_t *player, int *log_read_fd) {
         argv[ai++] = "--idle=yes";
         argv[ai++] = "--force-window=immediate";
         argv[ai++] = "--no-border";
-        argv[ai++] = "--geometry=64x64+0+0";
+        argv[ai++] = wid_arg;
         argv[ai++] = title_arg;
         argv[ai++] = "--keep-open=no";
         argv[ai++] = "--osc=no";
@@ -743,8 +745,9 @@ static void consume_ipc(vip_mpv_player_t *player, char *buf, size_t *len) {
  * process liveness and native-window reparent/resize synchronization. */
 static void *monitor_main(void *userdata) {
     vip_mpv_player_t *player = userdata;
-    Display *embed_dpy = XOpenDisplay(NULL);
-    if (!embed_dpy) debug_log(player, "DISPLAY X11 indisponível no monitor; janela nativa não poderá ser anexada");
+    /* --wid embeds directly into video_win. Keep the legacy native-window
+       synchronizer dormant rather than racing the window manager/reparent path. */
+    Display *embed_dpy = NULL;
     char ipc_buf[VIP_MPV_IPC_BUF_CAP] = {0};
     size_t ipc_len = 0u;
     int status = 0;

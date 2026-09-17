@@ -16,7 +16,8 @@
 #include <string.h>
 #include <strings.h>
 
-#define VIP_HTTP_MAX_RESPONSE (32u * 1024u * 1024u)
+#define VIP_HTTP_MAX_MIB 128u
+#define VIP_HTTP_MAX_RESPONSE ((size_t)VIP_HTTP_MAX_MIB * 1024u * 1024u)
 
 struct vip_xtream_client {
     CURL *curl;
@@ -32,6 +33,7 @@ typedef struct {
 
 static size_t write_response(void *ptr, size_t size, size_t nmemb, void *userdata) {
     response_buf_t *buf = userdata;
+    if (size != 0u && nmemb > SIZE_MAX / size) { buf->overflow = true; return 0u; }
     size_t bytes = size * nmemb;
     if (bytes > VIP_HTTP_MAX_RESPONSE || buf->len > VIP_HTTP_MAX_RESPONSE - bytes) {
         buf->overflow = true;
@@ -39,8 +41,9 @@ static size_t write_response(void *ptr, size_t size, size_t nmemb, void *userdat
     }
     size_t need = buf->len + bytes + 1;
     if (need > buf->cap) {
-        size_t cap = buf->cap ? buf->cap : 4096;
-        while (cap < need) cap *= 2;
+        size_t cap = buf->cap ? buf->cap : 4096u;
+        while (cap < need && cap <= VIP_HTTP_MAX_RESPONSE / 2u) cap *= 2u;
+        if (cap < need) cap = need;
         char *grown = realloc(buf->data, cap);
         if (!grown) return 0;
         buf->data = grown;
@@ -135,18 +138,23 @@ static vip_status_t http_get(vip_xtream_client_t *client,
     curl_easy_setopt(client->curl, CURLOPT_WRITEFUNCTION, write_response);
     curl_easy_setopt(client->curl, CURLOPT_WRITEDATA, &buf);
     curl_easy_setopt(client->curl, CURLOPT_CONNECTTIMEOUT, 8L);
-    curl_easy_setopt(client->curl, CURLOPT_TIMEOUT, 20L);
+    curl_easy_setopt(client->curl, CURLOPT_TIMEOUT, 45L);
     curl_easy_setopt(client->curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(client->curl, CURLOPT_MAXREDIRS, 5L);
-    curl_easy_setopt(client->curl, CURLOPT_USERAGENT, "visual-iptv-c/0.1");
+    curl_easy_setopt(client->curl, CURLOPT_USERAGENT, "Blazzing/1.2");
     curl_easy_setopt(client->curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(client->curl, CURLOPT_TCP_KEEPALIVE, 1L);
+    curl_easy_setopt(client->curl, CURLOPT_ACCEPT_ENCODING, "");
+#ifdef CURL_HTTP_VERSION_2TLS
+    curl_easy_setopt(client->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+#endif
     CURLcode rc = curl_easy_perform(client->curl);
     long status = 0;
     curl_easy_getinfo(client->curl, CURLINFO_RESPONSE_CODE, &status);
     if (rc != CURLE_OK) {
         free(buf.data);
         if (buf.overflow)
-            vip_error_set(error, VIP_ERR_NETWORK, "resposta do provider excedeu o limite de 32 MiB");
+            vip_error_set(error, VIP_ERR_NETWORK, "resposta do provider excedeu o limite de %u MiB", VIP_HTTP_MAX_MIB);
         else
             vip_error_set(error, VIP_ERR_NETWORK, "falha HTTP: %s", curl_easy_strerror(rc));
         return VIP_ERR_NETWORK;

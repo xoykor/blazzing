@@ -404,12 +404,28 @@ static int mkdir_parents(const char *path) {
 
 static void init_paths(app_t *a) {
     const char *home = getenv("HOME");
-    if (!home) home = "/tmp";
-    snprintf(a->cache_dir, sizeof(a->cache_dir), "%s/.cache/visual-iptv-x11/thumbnails", home);
+    if (!home || !home[0]) home = "/tmp";
+
+    char cache_fallback[1024];
+    char data_fallback[1024];
+    const char *cache_base = getenv("XDG_CACHE_HOME");
+    const char *data_base = getenv("XDG_DATA_HOME");
+    if (!cache_base || !cache_base[0]) {
+        snprintf(cache_fallback, sizeof(cache_fallback), "%s/.cache", home);
+        cache_base = cache_fallback;
+    }
+    if (!data_base || !data_base[0]) {
+        snprintf(data_fallback, sizeof(data_fallback), "%s/.local/share", home);
+        data_base = data_fallback;
+    }
+
+    snprintf(a->cache_dir, sizeof(a->cache_dir), "%s/visual-iptv-x11/thumbnails", cache_base);
     char data_dir[1024];
-    snprintf(data_dir, sizeof(data_dir), "%s/.local/share/visual-iptv-x11", home);
-    (void)mkdir_parents(a->cache_dir);
-    (void)mkdir_parents(data_dir);
+    snprintf(data_dir, sizeof(data_dir), "%s/visual-iptv-x11", data_base);
+    if (mkdir_parents(a->cache_dir) != 0)
+        fprintf(stderr, "[paths] não foi possível criar cache: %s\n", a->cache_dir);
+    if (mkdir_parents(data_dir) != 0)
+        fprintf(stderr, "[paths] não foi possível criar dados: %s\n", data_dir);
     size_t dn = strlen(data_dir);
     if (dn + sizeof("/catalog.db") <= sizeof(a->db_path)) {
         memcpy(a->db_path, data_dir, dn);
@@ -798,6 +814,7 @@ static void switch_content(app_t *a, content_kind_t kind) {
     a->grid_scroll = 0;
     a->focused_filtered = 0;
     a->search[0] = '\0';
+    a->input_focus = INPUT_SEARCH;
     free(a->favorite_flags);
     a->favorite_flags = NULL;
     recalc_category_counts(a);
@@ -814,6 +831,7 @@ static void return_from_episode_list(app_t *a) {
     a->grid_scroll = 0;
     a->focused_filtered = 0;
     a->search[0] = '\0';
+    a->input_focus = INPUT_SEARCH;
     recalc_category_counts(a);
     load_media_state(a);
     rebuild_filter(a);
@@ -826,7 +844,7 @@ static void thumbnail_ready(const vip_thumbnail_request_t *request,
                             void *userdata) {
     app_t *a = userdata;
     static atomic_uint_fast64_t failure_count = 0;
-    if (status != VIP_OK) {
+    if (status != VIP_OK && status != VIP_ERR_CANCELLED) {
         uint64_t n = atomic_fetch_add(&failure_count, 1u) + 1u;
         if (n <= 20u || (n % 100u) == 0u) {
             fprintf(stderr, "[thumbs] falha #%llu item=%s status=%d: %s\n",
@@ -1062,8 +1080,10 @@ static void *login_worker(void *userdata) {
         /* StreamFire/Spark-compatible fallback. Only an HTTP 404 from the
          * regular Xtream endpoint activates it. Every candidate returned by
          * the resolver API is verified through player_api.php before use. */
-        if (st != VIP_OK && saw_http_404) {
-            fprintf(stderr, "[login] endpoint Xtream retornou 404; procurando servidor pela API do provider\n");
+        const char *resolver_opt = getenv("VIPTV_ALLOW_EXTERNAL_RESOLVER");
+        bool allow_external_resolver = resolver_opt && resolver_opt[0] && strcmp(resolver_opt, "0") != 0;
+        if (st != VIP_OK && saw_http_404 && allow_external_resolver) {
+            fprintf(stderr, "[login] endpoint Xtream retornou 404; resolvedor externo autorizado pelo usuário\n");
             pthread_mutex_lock(&a->data_mutex);
             snprintf(a->status, sizeof(a->status), "Servidor retornou 404; procurando endpoint automaticamente...");
             pthread_mutex_unlock(&a->data_mutex);
@@ -1101,6 +1121,9 @@ static void *login_worker(void *userdata) {
                 error = resolve_error;
             }
             vip_server_resolution_clear(&resolution);
+        } else if (st != VIP_OK && saw_http_404 && !allow_external_resolver) {
+            vip_error_set(&error, VIP_ERR_NETWORK,
+                          "servidor retornou HTTP 404; descoberta externa desativada por privacidade (VIPTV_ALLOW_EXTERNAL_RESOLVER=1 para autorizar)");
         }
         if (st == VIP_OK) snprintf(provider_id, sizeof(provider_id), "%s", credentials.provider_id);
     }
@@ -1169,7 +1192,7 @@ static void *login_worker(void *userdata) {
 }
 
 static void start_login(app_t *a) {
-    if (atomic_load(&a->login_running)) return;
+    if (atomic_load(&a->login_running) || a->login_thread_started) return;
     if (!a->server[0]) {
         snprintf(a->status, sizeof(a->status), a->login_mode == LOGIN_M3U
                  ? "Informe uma URL ou caminho de playlist M3U" : "Preencha servidor, usuário e senha");
@@ -1253,7 +1276,8 @@ static void *series_worker(void *userdata) {
 
 static void start_series_load(app_t *a, size_t channel_index) {
     if (!a || a->content_kind != CONTENT_SERIES || a->series_episode_mode ||
-        atomic_load(&a->series_running) || channel_index >= ACTIVE_CHANNELS(a).len) return;
+        atomic_load(&a->series_running) || a->series_thread_started ||
+        channel_index >= ACTIVE_CHANNELS(a).len) return;
     vip_channel_t *series = &ACTIVE_CHANNELS(a).items[channel_index];
     if (!series->id || strncmp(series->id, "series:", 7u) != 0) return;
     snprintf(a->series_parent_id, sizeof(a->series_parent_id), "%s", series->id);
@@ -1404,7 +1428,7 @@ static void clear_details_view(app_t *a) {
 }
 
 static void start_details_load(app_t *a, size_t channel_index) {
-    if (!a || atomic_load(&a->details_running) || a->login_mode != LOGIN_XTREAM ||
+    if (!a || atomic_load(&a->details_running) || a->details_thread_started || a->login_mode != LOGIN_XTREAM ||
         a->series_episode_mode || (a->content_kind != CONTENT_VOD && a->content_kind != CONTENT_SERIES) ||
         channel_index >= ACTIVE_CHANNELS(a).len) return;
     vip_channel_t *media = &ACTIVE_CHANNELS(a).items[channel_index];
@@ -1449,6 +1473,7 @@ static void start_details_load(app_t *a, size_t channel_index) {
 
 static void maybe_start_details_load(app_t *a) {
     if (!details_panel_active(a) || a->screen != SCREEN_BROWSE || atomic_load(&a->details_running) ||
+        a->details_thread_started ||
         a->filtered_len == 0u) return;
     if (a->focused_filtered >= a->filtered_len) a->focused_filtered = a->filtered_len - 1u;
     size_t channel_index = a->filtered[a->focused_filtered];
@@ -1789,7 +1814,6 @@ static void leave_player(app_t *a) {
     a->screen = SCREEN_BROWSE;
     a->input_focus = INPUT_SEARCH;
     a->timeline_dragging = false;
-    load_media_state(a);
     rebuild_filter(a);
 }
 
@@ -2529,43 +2553,133 @@ static void switch_relative_channel(app_t *a, int delta) {
 }
 
 static void handle_key(app_t *a, XKeyEvent *kev) {
-    KeySym sym=NoSymbol; char buf[64]; int n=XLookupString(kev,buf,sizeof(buf),&sym,NULL);
-    bool ctrl=(kev->state&ControlMask)!=0, shift=(kev->state&ShiftMask)!=0;
-    if (sym==XK_F11) { set_fullscreen(a,!a->fullscreen); show_player_hud(a); return; }
-    if (a->screen==SCREEN_PLAYER) {
+    KeySym sym = NoSymbol;
+    char buf[64];
+    int n = XLookupString(kev, buf, sizeof(buf), &sym, NULL);
+    bool ctrl = (kev->state & ControlMask) != 0;
+    bool shift = (kev->state & ShiftMask) != 0;
+    bool printable = n > 0 && !ctrl && (unsigned char)buf[0] >= 0x20u;
+
+    if (sym == XK_F11) {
+        set_fullscreen(a, !a->fullscreen);
         show_player_hud(a);
-        if (sym==XK_Escape || sym==XK_BackSpace) { leave_player(a); return; }
-        if (sym==XK_space && a->player) { vip_mpv_player_set_paused(a->player,!vip_mpv_player_is_paused(a->player)); save_current_progress(a,true); return; }
-        if (sym==XK_Left) { if(a->player_item_live)switch_relative_channel(a,-1); else if(a->player){vip_error_t e={0};(void)vip_mpv_player_seek_relative(a->player,-10.0,&e);} return; }
-        if (sym==XK_Right) { if(a->player_item_live)switch_relative_channel(a,1); else if(a->player){vip_error_t e={0};(void)vip_mpv_player_seek_relative(a->player,10.0,&e);} return; }
-        if ((sym==XK_Up || sym==XK_Down) && a->player) { vip_mpv_player_snapshot_t sn={0}; vip_mpv_player_snapshot(a->player,&sn); vip_error_t e={0}; double v=sn.volume+(sym==XK_Up?5.0:-5.0); if(v<0)v=0;if(v>100)v=100;(void)vip_mpv_player_set_volume(a->player,v,&e); return; }
         return;
     }
-    if (a->screen==SCREEN_BROWSE) {
-        if(sym==XK_1){switch_content(a,CONTENT_LIVE);return;} if(sym==XK_2){switch_content(a,CONTENT_VOD);return;} if(sym==XK_3){switch_content(a,CONTENT_SERIES);return;}
-        if(sym==XK_l||sym==XK_L){if(a->thumbs)vip_thumbnail_scheduler_cancel_pending(a->thumbs);refresh_profiles(a);a->screen=SCREEN_LOGIN;a->input_focus=INPUT_SERVER;return;}
-        if(sym==XK_Left){move_grid_focus(a,-1,0);return;} if(sym==XK_Right){move_grid_focus(a,1,0);return;} if(sym==XK_Up){move_grid_focus(a,0,-1);return;} if(sym==XK_Down){move_grid_focus(a,0,1);return;}
-        if((sym==XK_Return||sym==XK_KP_Enter)&&a->filtered_len>0){if(a->focused_filtered>=a->filtered_len)a->focused_filtered=a->filtered_len-1u;activate_item(a,a->filtered[a->focused_filtered]);return;}
-        if((sym==XK_f||sym==XK_F)&&!ctrl&&a->filtered_len>0){if(a->focused_filtered>=a->filtered_len)a->focused_filtered=a->filtered_len-1u;toggle_favorite(a,a->filtered[a->focused_filtered]);return;}
+
+    if (a->screen == SCREEN_PLAYER) {
+        show_player_hud(a);
+        if (sym == XK_Escape || sym == XK_BackSpace) { leave_player(a); return; }
+        if (sym == XK_space && a->player) {
+            vip_mpv_player_set_paused(a->player, !vip_mpv_player_is_paused(a->player));
+            save_current_progress(a, true);
+            return;
+        }
+        if (sym == XK_Left) {
+            if (a->player_item_live) switch_relative_channel(a, -1);
+            else if (a->player) { vip_error_t e = {0}; (void)vip_mpv_player_seek_relative(a->player, -10.0, &e); }
+            return;
+        }
+        if (sym == XK_Right) {
+            if (a->player_item_live) switch_relative_channel(a, 1);
+            else if (a->player) { vip_error_t e = {0}; (void)vip_mpv_player_seek_relative(a->player, 10.0, &e); }
+            return;
+        }
+        if ((sym == XK_Up || sym == XK_Down) && a->player) {
+            vip_mpv_player_snapshot_t sn = {0};
+            vip_mpv_player_snapshot(a->player, &sn);
+            vip_error_t e = {0};
+            double v = sn.volume + (sym == XK_Up ? 5.0 : -5.0);
+            if (v < 0.0) v = 0.0;
+            if (v > 100.0) v = 100.0;
+            (void)vip_mpv_player_set_volume(a->player, v, &e);
+            return;
+        }
+        return;
     }
-    if(sym==XK_Escape){if(a->screen==SCREEN_BROWSE&&a->series_episode_mode){return_from_episode_list(a);return;}if(a->screen==SCREEN_BROWSE&&a->search[0]){a->search[0]='\0';rebuild_filter(a);}return;}
-    if(ctrl&&(sym==XK_v||sym==XK_V)){request_paste(a,a->clipboard);return;} if(shift&&sym==XK_Insert){request_paste(a,XA_PRIMARY);return;}
-    if(sym==XK_Tab){
-        if(a->screen==SCREEN_LOGIN){
-            if(a->login_mode==LOGIN_M3U)a->input_focus=a->input_focus==INPUT_PROFILE_NAME?INPUT_SERVER:INPUT_PROFILE_NAME;
-            else a->input_focus=a->input_focus==INPUT_PROFILE_NAME?INPUT_SERVER:a->input_focus==INPUT_SERVER?INPUT_SERVER_ALT:a->input_focus==INPUT_SERVER_ALT?INPUT_USERNAME:a->input_focus==INPUT_USERNAME?INPUT_PASSWORD:INPUT_PROFILE_NAME;
-        } else a->input_focus=INPUT_SEARCH; return;
+
+    if (a->screen == SCREEN_BROWSE) {
+        /* Printable keys belong to the search field. Navigation shortcuts use
+           modifiers so typing titles can never switch screens or mutate the
+           playlist/server field left behind by the login screen. */
+        if (ctrl && sym == XK_1) { switch_content(a, CONTENT_LIVE); return; }
+        if (ctrl && sym == XK_2) { switch_content(a, CONTENT_VOD); return; }
+        if (ctrl && sym == XK_3) { switch_content(a, CONTENT_SERIES); return; }
+        if (ctrl && (sym == XK_l || sym == XK_L)) {
+            if (a->thumbs) vip_thumbnail_scheduler_cancel_pending(a->thumbs);
+            refresh_profiles(a);
+            a->screen = SCREEN_LOGIN;
+            a->input_focus = INPUT_SERVER;
+            return;
+        }
+        if (ctrl && (sym == XK_f || sym == XK_F)) { a->input_focus = INPUT_SEARCH; return; }
+        if (ctrl && (sym == XK_d || sym == XK_D) && a->filtered_len > 0u) {
+            if (a->focused_filtered >= a->filtered_len) a->focused_filtered = a->filtered_len - 1u;
+            toggle_favorite(a, a->filtered[a->focused_filtered]);
+            return;
+        }
+        if (sym == XK_Left) { move_grid_focus(a, -1, 0); return; }
+        if (sym == XK_Right) { move_grid_focus(a, 1, 0); return; }
+        if (sym == XK_Up) { move_grid_focus(a, 0, -1); return; }
+        if (sym == XK_Down) { move_grid_focus(a, 0, 1); return; }
+        if ((sym == XK_Return || sym == XK_KP_Enter) && a->filtered_len > 0u) {
+            if (a->focused_filtered >= a->filtered_len) a->focused_filtered = a->filtered_len - 1u;
+            activate_item(a, a->filtered[a->focused_filtered]);
+            return;
+        }
+        if (sym == XK_Escape) {
+            if (a->series_episode_mode) { return_from_episode_list(a); return; }
+            if (a->search[0]) { a->search[0] = '\0'; rebuild_filter(a); }
+            a->input_focus = INPUT_SEARCH;
+            return;
+        }
+        if (ctrl && (sym == XK_v || sym == XK_V)) {
+            a->input_focus = INPUT_SEARCH;
+            request_paste(a, a->clipboard);
+            return;
+        }
+        if (shift && sym == XK_Insert) {
+            a->input_focus = INPUT_SEARCH;
+            request_paste(a, XA_PRIMARY);
+            return;
+        }
+        if (sym == XK_Tab) { a->input_focus = INPUT_SEARCH; return; }
+        if (sym == XK_BackSpace) { a->input_focus = INPUT_SEARCH; backspace_input(a); return; }
+        if (printable) { a->input_focus = INPUT_SEARCH; append_input(a, buf, (size_t)n); return; }
+        return;
     }
-    if(sym==XK_Return||sym==XK_KP_Enter){if(a->screen==SCREEN_LOGIN)start_login(a);return;}
-    if(sym==XK_BackSpace){backspace_input(a);return;} if(n>0&&!ctrl&&(unsigned char)buf[0]>=0x20u)append_input(a,buf,(size_t)n);
+
+    if (sym == XK_Escape) return;
+    if (ctrl && (sym == XK_v || sym == XK_V)) { request_paste(a, a->clipboard); return; }
+    if (shift && sym == XK_Insert) { request_paste(a, XA_PRIMARY); return; }
+    if (sym == XK_Tab) {
+        if (a->login_mode == LOGIN_M3U)
+            a->input_focus = a->input_focus == INPUT_PROFILE_NAME ? INPUT_SERVER : INPUT_PROFILE_NAME;
+        else
+            a->input_focus = a->input_focus == INPUT_PROFILE_NAME ? INPUT_SERVER :
+                             a->input_focus == INPUT_SERVER ? INPUT_SERVER_ALT :
+                             a->input_focus == INPUT_SERVER_ALT ? INPUT_USERNAME :
+                             a->input_focus == INPUT_USERNAME ? INPUT_PASSWORD : INPUT_PROFILE_NAME;
+        return;
+    }
+    if (sym == XK_Return || sym == XK_KP_Enter) { start_login(a); return; }
+    if (sym == XK_BackSpace) { backspace_input(a); return; }
+    if (printable) append_input(a, buf, (size_t)n);
 }
 
 static void handle_selection(app_t *a, XSelectionEvent *sel) {
+    int target = a->paste_target;
+    a->paste_target = 0;
     if (sel->property == None) return;
-    Atom type; int format; unsigned long nitems, after; unsigned char *data = NULL;
+    Atom type;
+    int format;
+    unsigned long nitems, after;
+    unsigned char *data = NULL;
     if (XGetWindowProperty(a->dpy, a->win, sel->property, 0, 8192, True, AnyPropertyType,
                            &type, &format, &nitems, &after, &data) == Success && data) {
-        if (format == 8) append_input(a, (const char *)data, nitems);
+        /* Selection conversion is asynchronous. Discard it if focus/screen
+           changed meanwhile instead of pasting into an unrelated field. */
+        if (format == 8 && target != 0 && target == a->input_focus)
+            append_input(a, (const char *)data, nitems);
         XFree(data);
     }
 }

@@ -6,6 +6,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <time.h>
 
 struct ready_state {
@@ -78,10 +79,17 @@ int main(void) {
     TEST_STATUS(vip_thumbnail_scheduler_enqueue(scheduler, &no_art, &error), VIP_OK, &error);
     TEST_CHECK(wait_for_count(&state, 1, 100L) == 0);
 
-    /* The same no-logo item is allowed once it is visible/interactive. */
+    /* Remote no-logo capture stays disabled by default: stream URLs may
+       contain credentials and ffmpeg receives its source through argv. */
     no_art.priority = 600000;
     TEST_STATUS(vip_thumbnail_scheduler_enqueue(scheduler, &no_art, &error), VIP_OK, &error);
+    TEST_CHECK(wait_for_count(&state, 1, 100L) == 0);
+
+    /* Explicit opt-in restores interactive frame capture. */
+    TEST_CHECK(setenv("VIPTV_ALLOW_REMOTE_THUMB_CAPTURE", "1", 1) == 0);
+    TEST_STATUS(vip_thumbnail_scheduler_enqueue(scheduler, &no_art, &error), VIP_OK, &error);
     TEST_CHECK(wait_for_count(&state, 1, 1000L) == 1);
+    unsetenv("VIPTV_ALLOW_REMOTE_THUMB_CAPTURE");
 
     /* cancel_pending is intentionally non-destructive at the application
        policy layer. Simulate a scroll while a background artwork request is

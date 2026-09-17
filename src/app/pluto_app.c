@@ -186,9 +186,16 @@ static int mkdir_parents(const char *path) {
 
 static void init_cache_path(pluto_app_t *a) {
     const char *home = getenv("HOME");
-    if (!home) home = "/tmp";
-    snprintf(a->cache_dir, sizeof(a->cache_dir), "%s/.cache/visual-iptv-x11/thumbnails", home);
-    (void)mkdir_parents(a->cache_dir);
+    if (!home || !home[0]) home = "/tmp";
+    const char *base = getenv("XDG_CACHE_HOME");
+    char fallback[1024];
+    if (!base || !base[0]) {
+        snprintf(fallback, sizeof(fallback), "%s/.cache", home);
+        base = fallback;
+    }
+    snprintf(a->cache_dir, sizeof(a->cache_dir), "%s/visual-iptv-x11/thumbnails", base);
+    if (mkdir_parents(a->cache_dir) != 0)
+        fprintf(stderr, "[pluto/cache] não foi possível criar %s\n", a->cache_dir);
 }
 
 static unsigned long pixel_from_rgb(pluto_app_t *a, uint8_t r, uint8_t g, uint8_t b) {
