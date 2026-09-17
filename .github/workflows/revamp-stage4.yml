@@ -37,7 +37,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add CMakeLists.txt .github/workflows/ci.yml src/ui_x11/x11_app.c
+          git add CMakeLists.txt src/ui_x11/x11_app.c
           git diff --cached --quiet && exit 0
           git commit -m 'feat(ui): integrate Cairo and Pango rendering foundation'
           git push origin HEAD:revamp-v1.3.0
