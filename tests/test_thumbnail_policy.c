@@ -1,4 +1,10 @@
 /* SPDX-License-Identifier: MIT */
+/*
+ * Regression tests for thumbnail policy.
+ *
+ * Comments intentionally cover straightforward helpers as well as subtle
+ * behavior so a maintainer can follow intent without reverse-engineering it.
+ */
 #define _POSIX_C_SOURCE 200809L
 #include "visual_iptv/thumbnails.h"
 #include "test_common.h"
@@ -15,21 +21,23 @@ struct ready_state {
     int count;
 };
 
-static vip_status_t fake_capture(const vip_thumbnail_request_t *request,
-                                 char **path_out,
-                                 vip_error_t *error,
+/* Implement the fake_capture helper. */
+static vip_status_t fake_capture(const vip_thumbnail_request_t *request, char **path_out, vip_error_t *error,
                                  void *userdata) {
-    (void)request; (void)error; (void)userdata;
+    (void)request;
+    (void)error;
+    (void)userdata;
     *path_out = vip_strdup("/tmp/policy-fake.jpg");
     return *path_out ? VIP_OK : VIP_ERR_NOMEM;
 }
 
-static void fake_ready(const vip_thumbnail_request_t *request,
-                       vip_status_t status,
-                       const char *path,
-                       const vip_error_t *error,
-                       void *userdata) {
-    (void)request; (void)status; (void)path; (void)error;
+/* Implement the fake_ready helper. */
+static void fake_ready(const vip_thumbnail_request_t *request, vip_status_t status, const char *path,
+                       const vip_error_t *error, void *userdata) {
+    (void)request;
+    (void)status;
+    (void)path;
+    (void)error;
     struct ready_state *state = userdata;
     pthread_mutex_lock(&state->mutex);
     state->count++;
@@ -37,6 +45,7 @@ static void fake_ready(const vip_thumbnail_request_t *request,
     pthread_mutex_unlock(&state->mutex);
 }
 
+/* Implement the wait_for_count helper. */
 static int wait_for_count(struct ready_state *state, int wanted, long milliseconds) {
     struct timespec until;
     clock_gettime(CLOCK_REALTIME, &until);
@@ -49,13 +58,15 @@ static int wait_for_count(struct ready_state *state, int wanted, long millisecon
 
     pthread_mutex_lock(&state->mutex);
     while (state->count < wanted) {
-        if (pthread_cond_timedwait(&state->cond, &state->mutex, &until) != 0) break;
+        if (pthread_cond_timedwait(&state->cond, &state->mutex, &until) != 0)
+            break;
     }
     int count = state->count;
     pthread_mutex_unlock(&state->mutex);
     return count;
 }
 
+/* Run this executable's main entry point. */
 int main(void) {
     vip_error_t error = {0};
     struct ready_state state = {0};
@@ -63,19 +74,17 @@ int main(void) {
     pthread_cond_init(&state.cond, NULL);
 
     vip_thumbnail_scheduler_t *scheduler = NULL;
-    TEST_STATUS(vip_thumbnail_scheduler_create(&scheduler, 1, fake_capture, NULL,
-                                               fake_ready, &state, &error), VIP_OK, &error);
+    TEST_STATUS(vip_thumbnail_scheduler_create(&scheduler, 1, fake_capture, NULL, fake_ready, &state, &error),
+                VIP_OK, &error);
 
     /* Background requests without provider artwork must not enter the worker
        queue: otherwise a large live-TV catalog can monopolize workers with
        slow FFmpeg stream captures. */
-    vip_thumbnail_request_t no_art = {
-        .provider_id = "p",
-        .channel_id = "no-art-background",
-        .logo_url = NULL,
-        .stream_url = "http://stream.invalid/live",
-        .priority = 10000
-    };
+    vip_thumbnail_request_t no_art = {.provider_id = "p",
+                                      .channel_id = "no-art-background",
+                                      .logo_url = NULL,
+                                      .stream_url = "http://stream.invalid/live",
+                                      .priority = 10000};
     TEST_STATUS(vip_thumbnail_scheduler_enqueue(scheduler, &no_art, &error), VIP_OK, &error);
     TEST_CHECK(wait_for_count(&state, 1, 100L) == 0);
 
@@ -94,13 +103,11 @@ int main(void) {
     /* Viewport/search changes no longer call cancel_pending. An explicit
        provider boundary does, and must discard stale queued work. */
     vip_thumbnail_scheduler_set_paused(scheduler, true);
-    vip_thumbnail_request_t artwork = {
-        .provider_id = "old-provider",
-        .channel_id = "stale-artwork",
-        .logo_url = "https://example.invalid/poster.jpg",
-        .stream_url = "http://stream.invalid/vod",
-        .priority = 10000
-    };
+    vip_thumbnail_request_t artwork = {.provider_id = "old-provider",
+                                       .channel_id = "stale-artwork",
+                                       .logo_url = "https://example.invalid/poster.jpg",
+                                       .stream_url = "http://stream.invalid/vod",
+                                       .priority = 10000};
     TEST_STATUS(vip_thumbnail_scheduler_enqueue(scheduler, &artwork, &error), VIP_OK, &error);
     vip_thumbnail_scheduler_cancel_pending(scheduler);
     vip_thumbnail_scheduler_set_paused(scheduler, false);

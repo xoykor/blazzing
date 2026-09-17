@@ -1,9 +1,16 @@
 /* SPDX-License-Identifier: MIT */
+/*
+ * Regression tests for pluto.
+ *
+ * Comments intentionally cover straightforward helpers as well as subtle
+ * behavior so a maintainer can follow intent without reverse-engineering it.
+ */
 #include "test_common.h"
 #include "visual_iptv/provider_pluto.h"
 
 #include <string.h>
 
+/* Run this executable's main entry point. */
 int main(void) {
     const char *json =
         "{\"data\":["
@@ -17,8 +24,8 @@ int main(void) {
     vip_error_t error;
     vip_error_clear(&error);
 
-    TEST_CHECK(vip_pluto_parse_channels_json(json, "token-test", "https://stitcher.example",
-                                              &channels, &error) == VIP_OK);
+    TEST_CHECK(vip_pluto_parse_channels_json(json, "token-test", "https://stitcher.example", &channels,
+                                             &error) == VIP_OK);
     TEST_CHECK(channels.len == 2u);
     TEST_CHECK(strcmp(channels.items[0].provider_id, "pluto-tv") == 0);
     TEST_CHECK(strcmp(channels.items[0].id, "abc123") == 0);

@@ -23,46 +23,51 @@
 
 static atomic_uint active_frame_captures = 0u;
 
+/* Implement the __real_vip_thumbnail_scheduler_enqueue helper. */
 extern vip_status_t __real_vip_thumbnail_scheduler_enqueue(vip_thumbnail_scheduler_t *scheduler,
                                                            const vip_thumbnail_request_t *request,
                                                            vip_error_t *error);
+/* Implement the __real_vip_thumbnail_scheduler_cancel_pending helper. */
 extern void __real_vip_thumbnail_scheduler_cancel_pending(vip_thumbnail_scheduler_t *scheduler);
+/* Implement the __real_vip_thumbnail_capture_with_decoder helper. */
 extern vip_status_t __real_vip_thumbnail_capture_with_decoder(const vip_thumbnail_request_t *request,
-                                                               char **path_out,
-                                                               vip_error_t *error,
-                                                               void *userdata);
+                                                              char **path_out, vip_error_t *error,
+                                                              void *userdata);
 
+/* Return whether artwork. */
 static bool has_artwork(const vip_thumbnail_request_t *request) {
     return request && request->logo_url && request->logo_url[0] != '\0';
 }
 
+/* Implement the remote_stream helper. */
 static bool remote_stream(const vip_thumbnail_request_t *request) {
     const char *url = request ? request->stream_url : NULL;
     return url && (!strncmp(url, "http://", 7u) || !strncmp(url, "https://", 8u));
 }
 
+/* Implement the remote_capture_enabled helper. */
 static bool remote_capture_enabled(void) {
     const char *value = getenv("VIPTV_ALLOW_REMOTE_THUMB_CAPTURE");
     return value && value[0] && strcmp(value, "0") != 0;
 }
 
+/* Implement the frame_slot_try_acquire helper. */
 static bool frame_slot_try_acquire(void) {
     unsigned current = atomic_load_explicit(&active_frame_captures, memory_order_relaxed);
     while (current < THUMB_MAX_FRAME_CAPTURES) {
-        if (atomic_compare_exchange_weak_explicit(&active_frame_captures,
-                                                  &current,
-                                                  current + 1u,
-                                                  memory_order_acquire,
-                                                  memory_order_relaxed))
+        if (atomic_compare_exchange_weak_explicit(&active_frame_captures, &current, current + 1u,
+                                                  memory_order_acquire, memory_order_relaxed))
             return true;
     }
     return false;
 }
 
+/* Implement the __wrap_vip_thumbnail_scheduler_enqueue helper. */
 vip_status_t __wrap_vip_thumbnail_scheduler_enqueue(vip_thumbnail_scheduler_t *scheduler,
-                                                     const vip_thumbnail_request_t *request,
-                                                     vip_error_t *error) {
-    if (!request) return VIP_ERR_INVALID_ARGUMENT;
+                                                    const vip_thumbnail_request_t *request,
+                                                    vip_error_t *error) {
+    if (!request)
+        return VIP_ERR_INVALID_ARGUMENT;
 
     /* Never let background catalog warming turn into stream opens.  A
        logo-less channel may still request a frame when its card becomes
@@ -82,6 +87,7 @@ vip_status_t __wrap_vip_thumbnail_scheduler_enqueue(vip_thumbnail_scheduler_t *s
     return __real_vip_thumbnail_scheduler_enqueue(scheduler, request, error);
 }
 
+/* Implement the __wrap_vip_thumbnail_scheduler_cancel_pending helper. */
 void __wrap_vip_thumbnail_scheduler_cancel_pending(vip_thumbnail_scheduler_t *scheduler) {
     /* Callers use cancellation only at provider/list boundaries. Viewport and
        search changes no longer call this function, so ordinary navigation
@@ -89,11 +95,11 @@ void __wrap_vip_thumbnail_scheduler_cancel_pending(vip_thumbnail_scheduler_t *sc
     __real_vip_thumbnail_scheduler_cancel_pending(scheduler);
 }
 
+/* Implement the __wrap_vip_thumbnail_capture_with_decoder helper. */
 vip_status_t __wrap_vip_thumbnail_capture_with_decoder(const vip_thumbnail_request_t *request,
-                                                        char **path_out,
-                                                        vip_error_t *error,
-                                                        void *userdata) {
-    if (!request) return VIP_ERR_INVALID_ARGUMENT;
+                                                       char **path_out, vip_error_t *error, void *userdata) {
+    if (!request)
+        return VIP_ERR_INVALID_ARGUMENT;
 
     if (has_artwork(request))
         return __real_vip_thumbnail_capture_with_decoder(request, path_out, error, userdata);

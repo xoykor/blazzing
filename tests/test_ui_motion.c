@@ -1,8 +1,15 @@
 /* SPDX-License-Identifier: MIT */
+/*
+ * Regression tests for ui motion.
+ *
+ * Comments intentionally cover straightforward helpers as well as subtle
+ * behavior so a maintainer can follow intent without reverse-engineering it.
+ */
 #include "visual_iptv/ui_motion.h"
 
 #include <assert.h>
 
+/* Run this executable's main entry point. */
 int main(void) {
     vip_ui_motion_t motion;
     vip_ui_motion_init(&motion, 0.0f, 1000);

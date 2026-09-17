@@ -3,9 +3,9 @@
  * @file player_mpv.h
  * @brief Persistent mpv process controlled through JSON IPC.
  *
- * mpv owns the video rendering path.  On X11, the backend discovers mpv's
- * native window and reparents it into the UI video container instead of
- * copying decoded frames through the application.
+ * mpv owns the video rendering path. On X11, the backend passes the UI video
+ * container through mpv's --wid option, so decoded frames stay inside mpv
+ * instead of being copied through the application.
  */
 #ifndef VISUAL_IPTV_PLAYER_MPV_H
 #define VISUAL_IPTV_PLAYER_MPV_H
@@ -22,10 +22,10 @@ typedef struct vip_mpv_player vip_mpv_player_t;
 
 /** Player construction options. */
 typedef struct {
-    const char *mpv_path;       /**< Executable path/name; NULL selects "mpv". */
-    unsigned long window_id;    /**< X11 container window used for reparenting. */
-    bool audio;                 /**< Whether audio output should be enabled. */
-    unsigned startup_grace_ms;  /**< Grace period for IPC/runtime startup. */
+    const char *mpv_path;      /**< Executable path/name; NULL selects "mpv". */
+    unsigned long window_id;   /**< X11 container passed directly to mpv via --wid. */
+    bool audio;                /**< Whether audio output should be enabled. */
+    unsigned startup_grace_ms; /**< Grace period for IPC/runtime startup. */
 } vip_mpv_player_config_t;
 
 /** Thread-safe copy of the latest observed mpv state. */
@@ -54,30 +54,35 @@ typedef struct {
 } vip_mpv_player_snapshot_t;
 
 /** Create the adapter; the mpv process is started lazily on first load. */
-vip_status_t vip_mpv_player_create(vip_mpv_player_t **out,
-                                   const vip_mpv_player_config_t *config,
+vip_status_t vip_mpv_player_create(vip_mpv_player_t **out, const vip_mpv_player_config_t *config,
                                    vip_error_t *error);
+/* Implement the vip_mpv_player_destroy helper. */
 void vip_mpv_player_destroy(vip_mpv_player_t *player);
 
 /** Load media at the beginning into the persistent runtime. */
-vip_status_t vip_mpv_player_load(vip_mpv_player_t *player,
-                                 const char *url,
-                                 vip_error_t *error);
+vip_status_t vip_mpv_player_load(vip_mpv_player_t *player, const char *url, vip_error_t *error);
 /** Load media and request an initial absolute seek after file load. */
-vip_status_t vip_mpv_player_load_at(vip_mpv_player_t *player,
-                                    const char *url,
-                                    double start_seconds,
+vip_status_t vip_mpv_player_load_at(vip_mpv_player_t *player, const char *url, double start_seconds,
                                     vip_error_t *error);
+/* Implement the vip_mpv_player_stop helper. */
 void vip_mpv_player_stop(vip_mpv_player_t *player);
+/* Implement the vip_mpv_player_set_paused helper. */
 void vip_mpv_player_set_paused(vip_mpv_player_t *player, bool paused);
+/* Implement the vip_mpv_player_is_paused helper. */
 bool vip_mpv_player_is_paused(vip_mpv_player_t *player);
+/* Implement the vip_mpv_player_is_running helper. */
 bool vip_mpv_player_is_running(vip_mpv_player_t *player);
+/* Implement the vip_mpv_player_state helper. */
 vip_player_state_t vip_mpv_player_state(vip_mpv_player_t *player);
 /** Copy the current player state without exposing internal locks. */
 void vip_mpv_player_snapshot(vip_mpv_player_t *player, vip_mpv_player_snapshot_t *out);
+/* Implement the vip_mpv_player_seek helper. */
 vip_status_t vip_mpv_player_seek(vip_mpv_player_t *player, double position_seconds, vip_error_t *error);
+/* Implement the vip_mpv_player_seek_relative helper. */
 vip_status_t vip_mpv_player_seek_relative(vip_mpv_player_t *player, double delta_seconds, vip_error_t *error);
+/* Implement the vip_mpv_player_set_volume helper. */
 vip_status_t vip_mpv_player_set_volume(vip_mpv_player_t *player, double volume, vip_error_t *error);
+/* Implement the vip_mpv_player_state_name helper. */
 const char *vip_mpv_player_state_name(vip_player_state_t state);
 /** Return a sanitized diagnostic string; stream URLs are redacted. */
 const char *vip_mpv_player_last_error(vip_mpv_player_t *player);

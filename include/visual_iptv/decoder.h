@@ -33,19 +33,19 @@ typedef struct {
     size_t output_height;
 } vip_ffmpeg_decoder_config_t;
 
+/* Implement the vip_rgb_frame_clear helper. */
 void vip_rgb_frame_clear(vip_rgb_frame_t *frame);
+/* Implement the vip_thumbnail_decoder_name helper. */
 const char *vip_thumbnail_decoder_name(const vip_thumbnail_decoder_t *decoder);
 /** Capture one representative frame from source into frame_out. */
-vip_status_t vip_thumbnail_decoder_capture(vip_thumbnail_decoder_t *decoder,
-                                           const char *source,
-                                           vip_rgb_frame_t *frame_out,
-                                           vip_error_t *error);
+vip_status_t vip_thumbnail_decoder_capture(vip_thumbnail_decoder_t *decoder, const char *source,
+                                           vip_rgb_frame_t *frame_out, vip_error_t *error);
+/* Implement the vip_thumbnail_decoder_destroy helper. */
 void vip_thumbnail_decoder_destroy(vip_thumbnail_decoder_t *decoder);
 
 /** Construct the subprocess-based FFmpeg decoder backend. */
 vip_status_t vip_ffmpeg_decoder_create(vip_thumbnail_decoder_t **out,
-                                       const vip_ffmpeg_decoder_config_t *config,
-                                       vip_error_t *error);
+                                       const vip_ffmpeg_decoder_config_t *config, vip_error_t *error);
 
 #ifdef __cplusplus
 }
