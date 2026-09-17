@@ -1,3 +1,17 @@
+## 1.2.14 — 2026-09-17
+
+Reliability, security and thumbnail performance hardening:
+
+- thumbnail shutdown now stops promptly instead of draining the full pending queue;
+- provider/profile switches discard stale pending thumbnail work while ordinary scrolling and filtering keep cache warming intact;
+- corrupt JPEG artwork is handled as a normal decode failure instead of allowing libjpeg to terminate the process;
+- artwork downloads abort stalled low-speed transfers sooner, freeing workers for useful work;
+- background prefetch spends most of its budget on the active catalog before warming hidden catalogs;
+- mpv JSON IPC buffer reset and compaction paths are hardened;
+- Secret Service password writes now handle short writes and interruptions correctly;
+- external DRM services are clearly presented as browser-launched sessions rather than integrated account login;
+- Release, ASan/UBSan, Cppcheck and GCC analyzer validation cover the final hardening changes.
+
 ## 1.2.13 — 2026-09-17
 
 Large M3U playlist support:
