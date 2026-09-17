@@ -1,5 +1,7 @@
 # Guia de desenvolvimento
 
+O conjunto de recursos da v1.3.0 está congelado. O desenvolvimento nesta branch é apenas de manutenção: bugs, segurança, build e compatibilidade.
+
 [English](DEVELOPMENT.md)
 
 ## Ordem recomendada de leitura
@@ -34,7 +36,7 @@
 
 `video_win` é o container `InputOutput` que recebe a janela mpv. `player_input_win` é um sibling `InputOnly` transparente para mouse/HUD.
 
-O backend não usa `--wid`: a janela mpv é descoberta por `_NET_WM_PID` e reparentada.
+O backend final incorpora o mpv por `--wid=<XID do video_win>`. URLs e comandos de reprodução continuam trafegando pelo socket privado de JSON IPC. Não reintroduza o caminho antigo de busca por PID/XReparentWindow: era código legado inalcançável e foi removido na auditoria final.
 
 ## Banco
 
