@@ -22,7 +22,7 @@
   <releases>
     <release version="1.2.16" date="2026-09-17">
       <description>
-        <p>Fixes M3U routing into TV, movies and series, groups episode entries into series cards with season navigation, strengthens search focus, and removes external browser streaming-service entries.</p>
+        <p>Fixes M3U routing into TV, movies and series, groups episode entries into series cards with season navigation, strengthens search focus, removes external browser streaming-service entries, and makes player fullscreen reliable under KDE/X11/XWayland.</p>
       </description>
     </release>
     <release version="1.2.15" date="2026-09-17">
