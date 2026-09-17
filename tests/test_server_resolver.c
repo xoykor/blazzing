@@ -1,15 +1,21 @@
 /* SPDX-License-Identifier: MIT */
+/*
+ * Regression tests for server resolver.
+ *
+ * Comments intentionally cover straightforward helpers as well as subtle
+ * behavior so a maintainer can follow intent without reverse-engineering it.
+ */
 #include "visual_iptv/server_resolver.h"
 #include "test_common.h"
 #include <string.h>
 #include <stdlib.h>
 
+/* Run this executable's main entry point. */
 int main(void) {
     vip_error_t error = {0};
     const char *identity = "12345678-1234-4234-9234-123456789abc";
-    const char *payload =
-        "FrKJsQy_4aSlogWdYFpDsfQaPFeUGOdM6RcN7lbFIeR2rqVgHpDT3qUwORcN5ctyfSDAirui."
-        "WIYG9ksGasRjy5MNpawxHYudF9kWdkusmCma8sKT7Zsc9gp3N_9x_wYnV-06QKjlp24cLCXY";
+    const char *payload = "FrKJsQy_4aSlogWdYFpDsfQaPFeUGOdM6RcN7lbFIeR2rqVgHpDT3qUwORcN5ctyfSDAirui."
+                          "WIYG9ksGasRjy5MNpawxHYudF9kWdkusmCma8sKT7Zsc9gp3N_9x_wYnV-06QKjlp24cLCXY";
     char *decoded = NULL;
     TEST_STATUS(vip_streamfire_decode_payload(payload, identity, &decoded, &error), VIP_OK, &error);
     TEST_CHECK(decoded != NULL);
@@ -24,6 +30,7 @@ int main(void) {
     vip_streamfire_free_bases(bases, count);
     free(decoded);
 
-    TEST_STATUS(vip_streamfire_decode_payload("invalido", identity, &decoded, &error), VIP_ERR_MALFORMED, &error);
+    TEST_STATUS(vip_streamfire_decode_payload("invalido", identity, &decoded, &error), VIP_ERR_MALFORMED,
+                &error);
     return 0;
 }

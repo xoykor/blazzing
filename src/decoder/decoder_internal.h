@@ -5,10 +5,8 @@
 
 #include "visual_iptv/decoder.h"
 
-typedef vip_status_t (*vip_decoder_capture_impl_fn)(void *impl,
-                                                    const char *source,
-                                                    vip_rgb_frame_t *frame_out,
-                                                    vip_error_t *error);
+typedef vip_status_t (*vip_decoder_capture_impl_fn)(void *impl, const char *source,
+                                                    vip_rgb_frame_t *frame_out, vip_error_t *error);
 typedef void (*vip_decoder_destroy_impl_fn)(void *impl);
 
 struct vip_thumbnail_decoder {

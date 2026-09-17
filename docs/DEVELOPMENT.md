@@ -1,5 +1,7 @@
 # Development guide
 
+The v1.3.0 feature set is frozen. Development on this branch is maintenance-only: bug, security, build and compatibility fixes.
+
 [Português (Brasil)](DEVELOPMENT.pt-BR.md)
 
 ## Recommended reading order
@@ -39,7 +41,7 @@ Before changing video embedding, understand the two separate windows:
 - `video_win`: `InputOutput` container that receives the native mpv window as a child;
 - `player_input_win`: transparent `InputOnly` sibling used for mouse/HUD interaction.
 
-The current backend **does not use `--wid`**. mpv creates its own window; the application discovers it through `_NET_WM_PID` and reparents it. Preserve this contract unless there is a strong architectural reason to replace it.
+The final backend embeds mpv through `--wid=<video_win XID>`. Media URLs and playback commands still travel over the private JSON IPC socket. Do not reintroduce the old PID-search/XReparentWindow path: it was dead legacy code and was removed during the final maintenance audit.
 
 The media URL must remain outside the mpv process argv.
 

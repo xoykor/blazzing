@@ -23,11 +23,8 @@ typedef enum {
  * model. provider_id_out receives a stable 16-hex identifier derived from the
  * playlist source.
  */
-vip_status_t vip_m3u_load(const char *source,
-                          vip_category_list_t *categories_out,
-                          vip_channel_list_t *channels_out,
-                          char provider_id_out[17],
-                          vip_error_t *error);
+vip_status_t vip_m3u_load(const char *source, vip_category_list_t *categories_out,
+                          vip_channel_list_t *channels_out, char provider_id_out[17], vip_error_t *error);
 
 /** Classify a group-title into live TV, VOD/movie or series content. */
 vip_m3u_content_kind_t vip_m3u_classify_group(const char *group_name);
@@ -36,10 +33,7 @@ vip_m3u_content_kind_t vip_m3u_classify_group(const char *group_name);
  * Parse common episode suffixes such as S01E02, S01 E02, T01E02 and 1x02.
  * series_out receives the title before the episode suffix.
  */
-bool vip_m3u_parse_episode_label(const char *name,
-                                 char *series_out,
-                                 size_t series_cap,
-                                 int *season_out,
+bool vip_m3u_parse_episode_label(const char *name, char *series_out, size_t series_cap, int *season_out,
                                  int *episode_out);
 
 /**
@@ -48,13 +42,10 @@ bool vip_m3u_parse_episode_label(const char *name,
  */
 vip_status_t vip_m3u_split_catalog(const vip_category_list_t *source_categories,
                                    const vip_channel_list_t *source_channels,
-                                   vip_category_list_t *live_categories,
-                                   vip_channel_list_t *live_channels,
-                                   vip_category_list_t *vod_categories,
-                                   vip_channel_list_t *vod_channels,
+                                   vip_category_list_t *live_categories, vip_channel_list_t *live_channels,
+                                   vip_category_list_t *vod_categories, vip_channel_list_t *vod_channels,
                                    vip_category_list_t *series_categories,
-                                   vip_channel_list_t *series_channels,
-                                   vip_error_t *error);
+                                   vip_channel_list_t *series_channels, vip_error_t *error);
 
 #ifdef __cplusplus
 }

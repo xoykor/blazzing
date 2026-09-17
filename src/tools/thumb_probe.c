@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+/* Run this executable's main entry point. */
 int main(int argc, char **argv) {
     if (argc != 3) {
         fprintf(stderr, "uso: %s <fonte> <thumbnail.jpg>\n", argv[0]);
@@ -29,8 +30,8 @@ int main(int argc, char **argv) {
     vip_rgb_frame_t frame = {0};
     st = vip_thumbnail_decoder_capture(decoder, argv[1], &frame, &error);
     if (st == VIP_OK)
-        st = vip_thumbnail_save_rgb_jpeg(frame.data, frame.width, frame.height, frame.stride,
-                                         argv[2], 82, &error);
+        st = vip_thumbnail_save_rgb_jpeg(frame.data, frame.width, frame.height, frame.stride, argv[2], 82,
+                                         &error);
 
     vip_rgb_frame_clear(&frame);
     vip_thumbnail_decoder_destroy(decoder);

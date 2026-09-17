@@ -13,27 +13,36 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Handle the strdup operation. */
 char *vip_strdup(const char *text) {
-    if (!text) return NULL;
+    if (!text)
+        return NULL;
     size_t n = strlen(text) + 1;
     char *copy = malloc(n);
-    if (copy) memcpy(copy, text, n);
+    if (copy)
+        memcpy(copy, text, n);
     return copy;
 }
 
+/* Handle the strdup nullable operation. */
 char *vip_strdup_nullable(const char *text) {
-    if (!text || text[0] == '\0') return NULL;
+    if (!text || text[0] == '\0')
+        return NULL;
     return vip_strdup(text);
 }
 
+/* Clear owned state from the requested state in the error. */
 void vip_error_clear(vip_error_t *error) {
-    if (!error) return;
+    if (!error)
+        return;
     error->code = VIP_OK;
     error->message[0] = '\0';
 }
 
+/* Set the requested state in the error. */
 void vip_error_set(vip_error_t *error, vip_status_t code, const char *fmt, ...) {
-    if (!error) return;
+    if (!error)
+        return;
     error->code = code;
     if (!fmt) {
         error->message[0] = '\0';
@@ -52,6 +61,7 @@ void vip_error_set(vip_error_t *error, vip_status_t code, const char *fmt, ...) 
     va_end(ap);
 }
 
+/* Update an FNV-1a 64-bit hash with the supplied text. */
 static uint64_t fnv1a64_update(uint64_t h, const char *text) {
     for (const unsigned char *p = (const unsigned char *)text; p && *p; ++p) {
         h ^= *p;
@@ -78,9 +88,11 @@ static char *normalize_server(const char *server, vip_error_t *error) {
         vip_error_set(error, VIP_ERR_INVALID_URL, "servidor ausente");
         return NULL;
     }
-    while (isspace((unsigned char)*server)) ++server;
+    while (isspace((unsigned char)*server))
+        ++server;
     size_t len = strlen(server);
-    while (len > 0 && isspace((unsigned char)server[len - 1])) --len;
+    while (len > 0 && isspace((unsigned char)server[len - 1]))
+        --len;
     if (len < 8 || (strncmp(server, "http://", 7) != 0 && strncmp(server, "https://", 8) != 0)) {
         vip_error_set(error, VIP_ERR_INVALID_URL, "o servidor deve começar com http:// ou https://");
         return NULL;
@@ -90,7 +102,8 @@ static char *normalize_server(const char *server, vip_error_t *error) {
         vip_error_set(error, VIP_ERR_INVALID_URL, "URL de servidor inválida");
         return NULL;
     }
-    while (len > scheme && server[len - 1] == '/') --len;
+    while (len > scheme && server[len - 1] == '/')
+        --len;
     char *out = malloc(len + 2);
     if (!out) {
         vip_error_set(error, VIP_ERR_NOMEM, "sem memória para URL do servidor");
@@ -102,18 +115,17 @@ static char *normalize_server(const char *server, vip_error_t *error) {
     return out;
 }
 
-vip_status_t vip_credentials_init(vip_credentials_t *out,
-                                  const char *server,
-                                  const char *username,
-                                  const char *password,
-                                  vip_error_t *error) {
+/* Initialize the requested state in the credentials. */
+vip_status_t vip_credentials_init(vip_credentials_t *out, const char *server, const char *username,
+                                  const char *password, vip_error_t *error) {
     if (!out || !username || !password) {
         vip_error_set(error, VIP_ERR_INVALID_ARGUMENT, "credenciais inválidas");
         return VIP_ERR_INVALID_ARGUMENT;
     }
     memset(out, 0, sizeof(*out));
     out->server = normalize_server(server, error);
-    if (!out->server) return error ? error->code : VIP_ERR_INVALID_URL;
+    if (!out->server)
+        return error ? error->code : VIP_ERR_INVALID_URL;
     out->username = vip_strdup(username);
     out->password = vip_strdup(password);
     if (!out->username || !out->password) {
@@ -127,42 +139,55 @@ vip_status_t vip_credentials_init(vip_credentials_t *out,
     return VIP_OK;
 }
 
+/* Clear owned state from the requested state in the credentials. */
 void vip_credentials_clear(vip_credentials_t *credentials) {
-    if (!credentials) return;
+    if (!credentials)
+        return;
     free(credentials->server);
     free(credentials->username);
     if (credentials->password) {
         volatile char *p = credentials->password;
         size_t n = strlen(credentials->password);
-        while (n--) *p++ = 0;
+        while (n--)
+            *p++ = 0;
     }
     free(credentials->password);
     memset(credentials, 0, sizeof(*credentials));
 }
 
+/* List init using the category. */
 void vip_category_list_init(vip_category_list_t *list) {
-    if (list) memset(list, 0, sizeof(*list));
+    if (list)
+        memset(list, 0, sizeof(*list));
 }
 
+/* Clear owned state from the requested state in the category. */
 static void category_clear(vip_category_t *category) {
-    if (!category) return;
+    if (!category)
+        return;
     free(category->provider_id);
     free(category->id);
     free(category->name);
     memset(category, 0, sizeof(*category));
 }
 
+/* List clear using the category. */
 void vip_category_list_clear(vip_category_list_t *list) {
-    if (!list) return;
-    for (size_t i = 0; i < list->len; ++i) category_clear(&list->items[i]);
+    if (!list)
+        return;
+    for (size_t i = 0; i < list->len; ++i)
+        category_clear(&list->items[i]);
     free(list->items);
     memset(list, 0, sizeof(*list));
 }
 
+/* Handle the reserve categories operation. */
 static vip_status_t reserve_categories(vip_category_list_t *list, size_t need, vip_error_t *error) {
-    if (need <= list->cap) return VIP_OK;
+    if (need <= list->cap)
+        return VIP_OK;
     size_t cap = list->cap ? list->cap * 2 : 32;
-    while (cap < need) cap *= 2;
+    while (cap < need)
+        cap *= 2;
     vip_category_t *items = realloc(list->items, cap * sizeof(*items));
     if (!items) {
         vip_error_set(error, VIP_ERR_NOMEM, "sem memória para categorias");
@@ -173,12 +198,14 @@ static vip_status_t reserve_categories(vip_category_list_t *list, size_t need, v
     return VIP_OK;
 }
 
-vip_status_t vip_category_list_push(vip_category_list_t *list,
-                                    const vip_category_t *category,
+/* List push using the category. */
+vip_status_t vip_category_list_push(vip_category_list_t *list, const vip_category_t *category,
                                     vip_error_t *error) {
-    if (!list || !category || !category->id || !category->name) return VIP_ERR_INVALID_ARGUMENT;
+    if (!list || !category || !category->id || !category->name)
+        return VIP_ERR_INVALID_ARGUMENT;
     vip_status_t st = reserve_categories(list, list->len + 1, error);
-    if (st != VIP_OK) return st;
+    if (st != VIP_OK)
+        return st;
     vip_category_t copy = {
         .provider_id = vip_strdup_nullable(category->provider_id),
         .id = vip_strdup(category->id),
@@ -194,12 +221,16 @@ vip_status_t vip_category_list_push(vip_category_list_t *list,
     return VIP_OK;
 }
 
+/* List init using the channel. */
 void vip_channel_list_init(vip_channel_list_t *list) {
-    if (list) memset(list, 0, sizeof(*list));
+    if (list)
+        memset(list, 0, sizeof(*list));
 }
 
+/* Clear owned state from the requested state in the channel. */
 static void channel_clear(vip_channel_t *channel) {
-    if (!channel) return;
+    if (!channel)
+        return;
     free(channel->provider_id);
     free(channel->id);
     free(channel->category_id);
@@ -210,17 +241,23 @@ static void channel_clear(vip_channel_t *channel) {
     memset(channel, 0, sizeof(*channel));
 }
 
+/* List clear using the channel. */
 void vip_channel_list_clear(vip_channel_list_t *list) {
-    if (!list) return;
-    for (size_t i = 0; i < list->len; ++i) channel_clear(&list->items[i]);
+    if (!list)
+        return;
+    for (size_t i = 0; i < list->len; ++i)
+        channel_clear(&list->items[i]);
     free(list->items);
     memset(list, 0, sizeof(*list));
 }
 
+/* Handle the reserve channels operation. */
 static vip_status_t reserve_channels(vip_channel_list_t *list, size_t need, vip_error_t *error) {
-    if (need <= list->cap) return VIP_OK;
+    if (need <= list->cap)
+        return VIP_OK;
     size_t cap = list->cap ? list->cap * 2 : 128;
-    while (cap < need) cap *= 2;
+    while (cap < need)
+        cap *= 2;
     vip_channel_t *items = realloc(list->items, cap * sizeof(*items));
     if (!items) {
         vip_error_set(error, VIP_ERR_NOMEM, "sem memória para canais");
@@ -231,13 +268,14 @@ static vip_status_t reserve_channels(vip_channel_list_t *list, size_t need, vip_
     return VIP_OK;
 }
 
-vip_status_t vip_channel_list_push(vip_channel_list_t *list,
-                                   const vip_channel_t *channel,
+/* List push using the channel. */
+vip_status_t vip_channel_list_push(vip_channel_list_t *list, const vip_channel_t *channel,
                                    vip_error_t *error) {
     if (!list || !channel || !channel->id || !channel->name || !channel->stream_url)
         return VIP_ERR_INVALID_ARGUMENT;
     vip_status_t st = reserve_channels(list, list->len + 1, error);
-    if (st != VIP_OK) return st;
+    if (st != VIP_OK)
+        return st;
     vip_channel_t copy = {
         .provider_id = vip_strdup_nullable(channel->provider_id),
         .id = vip_strdup(channel->id),
@@ -257,12 +295,16 @@ vip_status_t vip_channel_list_push(vip_channel_list_t *list,
     return VIP_OK;
 }
 
+/* Initialize the requested state in the media metadata. */
 void vip_media_metadata_init(vip_media_metadata_t *metadata) {
-    if (metadata) memset(metadata, 0, sizeof(*metadata));
+    if (metadata)
+        memset(metadata, 0, sizeof(*metadata));
 }
 
+/* Clear owned state from the requested state in the media metadata. */
 void vip_media_metadata_clear(vip_media_metadata_t *metadata) {
-    if (!metadata) return;
+    if (!metadata)
+        return;
     free(metadata->plot);
     free(metadata->cover_url);
     free(metadata->backdrop_url);
@@ -276,8 +318,8 @@ void vip_media_metadata_clear(vip_media_metadata_t *metadata) {
     memset(metadata, 0, sizeof(*metadata));
 }
 
-vip_status_t vip_media_metadata_copy(vip_media_metadata_t *dst,
-                                     const vip_media_metadata_t *src,
+/* Copy the requested state in the media metadata. */
+vip_status_t vip_media_metadata_copy(vip_media_metadata_t *dst, const vip_media_metadata_t *src,
                                      vip_error_t *error) {
     if (!dst || !src) {
         vip_error_set(error, VIP_ERR_INVALID_ARGUMENT, "metadados inválidos");
@@ -301,8 +343,7 @@ vip_status_t vip_media_metadata_copy(vip_media_metadata_t *dst,
         (src->genre && src->genre[0] && !copy.genre) ||
         (src->release_date && src->release_date[0] && !copy.release_date) ||
         (src->rating && src->rating[0] && !copy.rating) ||
-        (src->duration && src->duration[0] && !copy.duration) ||
-        (src->cast && src->cast[0] && !copy.cast) ||
+        (src->duration && src->duration[0] && !copy.duration) || (src->cast && src->cast[0] && !copy.cast) ||
         (src->director && src->director[0] && !copy.director) ||
         (src->youtube_trailer && src->youtube_trailer[0] && !copy.youtube_trailer)) {
         vip_media_metadata_clear(&copy);

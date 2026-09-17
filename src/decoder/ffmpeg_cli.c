@@ -37,19 +37,24 @@ typedef struct {
     size_t height;
 } ffmpeg_impl_t;
 
+/* Return monotonic time in milliseconds for deadlines and animation timing. */
 static int64_t monotonic_ms(void) {
     struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+        return 0;
     return (int64_t)ts.tv_sec * INT64_C(1000) + (int64_t)(ts.tv_nsec / 1000000L);
 }
 
+/* Terminate child. */
 static void terminate_child(pid_t pid) {
-    if (pid <= 0) return;
+    if (pid <= 0)
+        return;
     if (kill(pid, SIGTERM) == 0) {
         for (unsigned i = 0; i < 10; ++i) {
             int status = 0;
             pid_t rc = waitpid(pid, &status, WNOHANG);
-            if (rc == pid || rc < 0) return;
+            if (rc == pid || rc < 0)
+                return;
             struct timespec pause = {.tv_sec = 0, .tv_nsec = 20000000L};
             nanosleep(&pause, NULL);
         }
@@ -58,10 +63,13 @@ static void terminate_child(pid_t pid) {
     (void)waitpid(pid, NULL, 0);
 }
 
+/* Handle the safe mul3 operation. */
 static bool safe_mul3(size_t a, size_t b, size_t *out) {
-    if (a == 0 || b == 0 || a > SIZE_MAX / b) return false;
+    if (a == 0 || b == 0 || a > SIZE_MAX / b)
+        return false;
     size_t ab = a * b;
-    if (ab > SIZE_MAX / 3u) return false;
+    if (ab > SIZE_MAX / 3u)
+        return false;
     *out = ab * 3u;
     return true;
 }
@@ -71,8 +79,10 @@ static bool safe_mul3(size_t a, size_t b, size_t *out) {
 static bool frame_is_useful(const uint8_t *rgb, size_t width, size_t height, size_t stride) {
     size_t sx = width / 64u;
     size_t sy = height / 36u;
-    if (sx == 0) sx = 1;
-    if (sy == 0) sy = 1;
+    if (sx == 0)
+        sx = 1;
+    if (sy == 0)
+        sy = 1;
     double n = 0.0, sum = 0.0, sumsq = 0.0;
     for (size_t y = 0; y < height; y += sy) {
         const uint8_t *row = rgb + y * stride;
@@ -84,7 +94,8 @@ static bool frame_is_useful(const uint8_t *rgb, size_t width, size_t height, siz
             sumsq += lum * lum;
         }
     }
-    if (n == 0.0) return false;
+    if (n == 0.0)
+        return false;
     double mean = sum / n;
     double variance = sumsq / n - mean * mean;
     return mean >= 7.0 && variance >= 18.0;
@@ -92,9 +103,17 @@ static bool frame_is_useful(const uint8_t *rgb, size_t width, size_t height, siz
 
 /* execv/execvp receives source as one argv element.  No shell is involved,
  * so playlist URLs and local paths cannot become shell syntax. */
+#if defined(__GNUC__) && !defined(__clang__)
+/* The duplicated stdout descriptor is intentionally inherited by exec.
+ * GCC -fanalyzer does not model that ownership transfer and reports a leak. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wanalyzer-fd-leak"
+#endif
+/* Spawn ffmpeg. */
 static int spawn_ffmpeg(const ffmpeg_impl_t *impl, const char *source, int *stdout_fd) {
     int pipefd[2];
-    if (pipe(pipefd) != 0) return -1;
+    if (pipe(pipefd) != 0)
+        return -1;
 
     pid_t pid = fork();
     if (pid < 0) {
@@ -107,11 +126,17 @@ static int spawn_ffmpeg(const ffmpeg_impl_t *impl, const char *source, int *stdo
         if (devnull >= 0) {
             (void)dup2(devnull, STDIN_FILENO);
             (void)dup2(devnull, STDERR_FILENO);
-            if (devnull > STDERR_FILENO) close(devnull);
+            if (devnull > STDERR_FILENO)
+                close(devnull);
         }
         close(pipefd[0]);
-        if (dup2(pipefd[1], STDOUT_FILENO) < 0) _exit(126);
-        if (pipefd[1] != STDOUT_FILENO) close(pipefd[1]);
+        /* If the pipe already occupies stdout there is nothing to duplicate.
+         * Avoiding dup2(fd, fd) also makes ownership explicit to analyzers. */
+        if (pipefd[1] != STDOUT_FILENO) {
+            if (dup2(pipefd[1], STDOUT_FILENO) < 0)
+                _exit(126);
+            close(pipefd[1]);
+        }
 
         char frame_count[16];
         char filter[192];
@@ -124,37 +149,50 @@ static int spawn_ffmpeg(const ffmpeg_impl_t *impl, const char *source, int *stdo
         unsigned long long timeout_us = (unsigned long long)impl->timeout_ms * 1000ULL;
         snprintf(rw_timeout, sizeof(rw_timeout), "%llu", timeout_us);
 
-        char *const argv[] = {
-            impl->ffmpeg_path,
-            "-hide_banner",
-            "-loglevel", "error",
-            "-nostdin",
-            "-rw_timeout", rw_timeout,
-            "-i", (char *)source,
-            "-an", "-sn", "-dn",
-            "-threads", "1",
-            "-vf", filter,
-            "-frames:v", frame_count,
-            "-f", "rawvideo",
-            "-pix_fmt", "rgb24",
-            "pipe:1",
-            NULL
-        };
-        if (strchr(impl->ffmpeg_path, '/')) execv(impl->ffmpeg_path, argv);
-        else execvp(impl->ffmpeg_path, argv);
+        char *const argv[] = {impl->ffmpeg_path,
+                              "-hide_banner",
+                              "-loglevel",
+                              "error",
+                              "-nostdin",
+                              "-rw_timeout",
+                              rw_timeout,
+                              "-i",
+                              (char *)source,
+                              "-an",
+                              "-sn",
+                              "-dn",
+                              "-threads",
+                              "1",
+                              "-vf",
+                              filter,
+                              "-frames:v",
+                              frame_count,
+                              "-f",
+                              "rawvideo",
+                              "-pix_fmt",
+                              "rgb24",
+                              "pipe:1",
+                              NULL};
+        if (strchr(impl->ffmpeg_path, '/'))
+            execv(impl->ffmpeg_path, argv);
+        else
+            execvp(impl->ffmpeg_path, argv);
         _exit(127);
     }
 
     close(pipefd[1]);
     int flags = fcntl(pipefd[0], F_GETFL, 0);
-    if (flags >= 0) (void)fcntl(pipefd[0], F_SETFL, flags | O_NONBLOCK);
+    if (flags >= 0)
+        (void)fcntl(pipefd[0], F_SETFL, flags | O_NONBLOCK);
     *stdout_fd = pipefd[0];
     return (int)pid;
 }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
-static vip_status_t ffmpeg_capture(void *userdata,
-                                   const char *source,
-                                   vip_rgb_frame_t *frame_out,
+/* Capture the requested state in the ffmpeg. */
+static vip_status_t ffmpeg_capture(void *userdata, const char *source, vip_rgb_frame_t *frame_out,
                                    vip_error_t *error) {
     ffmpeg_impl_t *impl = userdata;
     size_t frame_bytes = 0;
@@ -193,10 +231,12 @@ static vip_status_t ffmpeg_capture(void *userdata,
         struct pollfd pfd = {.fd = fd, .events = POLLIN | POLLHUP};
         int prc = poll(&pfd, 1, wait_ms);
         if (prc < 0) {
-            if (errno == EINTR) continue;
+            if (errno == EINTR)
+                continue;
             break;
         }
-        if (prc == 0) continue;
+        if (prc == 0)
+            continue;
         if (pfd.revents & (POLLIN | POLLHUP)) {
             ssize_t n = read(fd, candidate + offset, frame_bytes - offset);
             if (n > 0) {
@@ -211,8 +251,10 @@ static vip_status_t ffmpeg_capture(void *userdata,
                 }
                 continue;
             }
-            if (n == 0) break;
-            if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) break;
+            if (n == 0)
+                break;
+            if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
+                break;
         }
     }
 
@@ -222,7 +264,8 @@ static vip_status_t ffmpeg_capture(void *userdata,
     if (!valid) {
         free(candidate);
         if (timed_out) {
-            vip_error_set(error, VIP_ERR_IO, "FFmpeg excedeu o limite de %u ms sem frame válido", impl->timeout_ms);
+            vip_error_set(error, VIP_ERR_IO, "FFmpeg excedeu o limite de %u ms sem frame válido",
+                          impl->timeout_ms);
             return VIP_ERR_IO;
         }
         vip_error_set(error, VIP_ERR_INVALID_FRAME,
@@ -238,16 +281,18 @@ static vip_status_t ffmpeg_capture(void *userdata,
     return VIP_OK;
 }
 
+/* Destroy the requested state in the ffmpeg. */
 static void ffmpeg_destroy(void *userdata) {
     ffmpeg_impl_t *impl = userdata;
-    if (!impl) return;
+    if (!impl)
+        return;
     free(impl->ffmpeg_path);
     free(impl);
 }
 
+/* Create the requested state in the ffmpeg decoder. */
 vip_status_t vip_ffmpeg_decoder_create(vip_thumbnail_decoder_t **out,
-                                       const vip_ffmpeg_decoder_config_t *config,
-                                       vip_error_t *error) {
+                                       const vip_ffmpeg_decoder_config_t *config, vip_error_t *error) {
     if (!out) {
         vip_error_set(error, VIP_ERR_INVALID_ARGUMENT, "saída do decoder ausente");
         return VIP_ERR_INVALID_ARGUMENT;
@@ -263,12 +308,12 @@ vip_status_t vip_ffmpeg_decoder_create(vip_thumbnail_decoder_t **out,
         return VIP_ERR_NOMEM;
     }
 
-    const char *path = config && config->ffmpeg_path && config->ffmpeg_path[0]
-                         ? config->ffmpeg_path : "ffmpeg";
+    const char *path =
+        config && config->ffmpeg_path && config->ffmpeg_path[0] ? config->ffmpeg_path : "ffmpeg";
     impl->ffmpeg_path = vip_strdup(path);
     impl->timeout_ms = config && config->timeout_ms ? config->timeout_ms : VIP_FFMPEG_DEFAULT_TIMEOUT_MS;
-    impl->candidate_frames = config && config->candidate_frames
-                               ? config->candidate_frames : VIP_FFMPEG_DEFAULT_FRAMES;
+    impl->candidate_frames =
+        config && config->candidate_frames ? config->candidate_frames : VIP_FFMPEG_DEFAULT_FRAMES;
     impl->width = config && config->output_width ? config->output_width : VIP_FFMPEG_DEFAULT_WIDTH;
     impl->height = config && config->output_height ? config->output_height : VIP_FFMPEG_DEFAULT_HEIGHT;
 
@@ -276,8 +321,9 @@ vip_status_t vip_ffmpeg_decoder_create(vip_thumbnail_decoder_t **out,
     bool limits_ok = impl->candidate_frames <= 30u && impl->width <= 4096u && impl->height <= 4096u;
     if (!path_ok || !limits_ok) {
         vip_status_t st = path_ok ? VIP_ERR_INVALID_ARGUMENT : VIP_ERR_NOMEM;
-        vip_error_set(error, st, path_ok ? "configuração FFmpeg fora dos limites"
-                                        : "sem memória para caminho do FFmpeg");
+        vip_error_set(error, st,
+                      path_ok ? "configuração FFmpeg fora dos limites"
+                              : "sem memória para caminho do FFmpeg");
         ffmpeg_destroy(impl);
         free(decoder);
         return st;

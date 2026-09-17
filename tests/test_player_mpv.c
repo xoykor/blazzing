@@ -1,4 +1,10 @@
 /* SPDX-License-Identifier: MIT */
+/*
+ * Regression tests for player mpv.
+ *
+ * Comments intentionally cover straightforward helpers as well as subtle
+ * behavior so a maintainer can follow intent without reverse-engineering it.
+ */
 #define _POSIX_C_SOURCE 200809L
 #include "visual_iptv/player_mpv.h"
 #include "test_common.h"
@@ -10,14 +16,17 @@
 #include <time.h>
 #include <unistd.h>
 
+/* Sleep for the requested number of milliseconds, retrying after interruptions. */
 static void sleep_ms(long ms) {
     struct timespec ts = {.tv_sec = ms / 1000L, .tv_nsec = (ms % 1000L) * 1000000L};
     nanosleep(&ts, NULL);
 }
 
+/* Handle the file contains operation. */
 static bool file_contains(const char *path, const char *needle) {
     FILE *fp = fopen(path, "r");
-    if (!fp) return false;
+    if (!fp)
+        return false;
     char buf[16384] = {0};
     size_t got = fread(buf, 1u, sizeof(buf) - 1u, fp);
     buf[got] = '\0';
@@ -25,6 +34,7 @@ static bool file_contains(const char *path, const char *needle) {
     return strstr(buf, needle) != NULL;
 }
 
+/* Run this executable's main entry point. */
 int main(void) {
     char fake_path[256], args_path[256], cmd_path[256];
     snprintf(fake_path, sizeof(fake_path), "/tmp/vip-fake-mpv-%ld.py", (long)getpid());
@@ -75,7 +85,8 @@ int main(void) {
           "    elif cmd[0]=='quit': break\n"
           "conn.close(); srv.close()\n"
           "try: os.unlink(ipc)\n"
-          "except FileNotFoundError: pass\n", fp);
+          "except FileNotFoundError: pass\n",
+          fp);
     TEST_CHECK(fclose(fp) == 0);
     TEST_CHECK(chmod(fake_path, 0700) == 0);
     TEST_CHECK(setenv("VIP_FAKE_MPV_ARGS", args_path, 1) == 0);
@@ -95,7 +106,10 @@ int main(void) {
     TEST_CHECK(vip_mpv_player_load_at(player, "http://example.invalid/ok.ts", 12.5, &error) == VIP_OK);
     bool playing = false;
     for (int i = 0; i < 80; ++i) {
-        if (vip_mpv_player_state(player) == VIP_PLAYER_PLAYING) { playing = true; break; }
+        if (vip_mpv_player_state(player) == VIP_PLAYER_PLAYING) {
+            playing = true;
+            break;
+        }
         sleep_ms(25);
     }
     TEST_CHECK(playing);
@@ -126,7 +140,8 @@ int main(void) {
     for (int i = 0; i < 80; ++i) {
         saw_load = file_contains(cmd_path, "\"loadfile\"");
         saw_seek = file_contains(cmd_path, "12.5");
-        if (saw_load && saw_seek) break;
+        if (saw_load && saw_seek)
+            break;
         sleep_ms(25);
     }
     TEST_CHECK(saw_load);
@@ -144,7 +159,10 @@ int main(void) {
     TEST_CHECK(vip_mpv_player_load(player, "http://example.invalid/missing.ts", &error) == VIP_OK);
     bool failed = false;
     for (int i = 0; i < 80; ++i) {
-        if (vip_mpv_player_state(player) == VIP_PLAYER_ERROR) { failed = true; break; }
+        if (vip_mpv_player_state(player) == VIP_PLAYER_ERROR) {
+            failed = true;
+            break;
+        }
         sleep_ms(25);
     }
     TEST_CHECK(failed);

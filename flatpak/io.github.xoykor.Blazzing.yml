@@ -16,7 +16,7 @@ cleanup-commands:
   - mkdir -p /app/lib/codecs-extra
 
 finish-args:
-  # The current player architecture is native X11 reparenting.
+  # The player is native X11/XWayland; mpv renders into video_win through --wid.
   - --socket=x11
   - --share=ipc
   - --share=network
@@ -37,7 +37,7 @@ cleanup:
 
 modules:
   # mpv 0.41 requires libplacebo. We intentionally build an OpenGL/X11
-  # configuration because Blazzing embeds mpv through its native X11 window.
+  # configuration because Blazzing embeds mpv directly into its X11 child window with --wid.
   - name: libplacebo
     buildsystem: meson
     config-opts:

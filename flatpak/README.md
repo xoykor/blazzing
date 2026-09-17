@@ -6,8 +6,7 @@ App ID:
 io.github.xoykor.Blazzing
 ```
 
-The manifest uses `org.freedesktop.Platform//25.08`, builds mpv 0.41.0
-inside the application, and enables the `codecs-extra` extension.
+The manifest uses `org.freedesktop.Platform//25.08`, builds mpv 0.41.0 inside the application, enables the `codecs-extra` extension, and intentionally uses the X11/XWayland playback path.
 
 ## CachyOS / Arch Linux
 
@@ -51,7 +50,7 @@ flatpak install --user ./Blazzing.flatpak
 
 Blazzing currently needs:
 
-- X11 + shared IPC because mpv's native X11 window is reparented into the UI;
+- X11 + shared IPC because mpv renders into Blazzing's X11 video child through `--wid`;
 - network access for IPTV providers and artwork;
 - DRI for GPU rendering/hardware acceleration;
 - PulseAudio socket for audio;

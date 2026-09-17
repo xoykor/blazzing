@@ -1,4 +1,10 @@
 /* SPDX-License-Identifier: MIT */
+/*
+ * Regression tests for decoder ffmpeg.
+ *
+ * Comments intentionally cover straightforward helpers as well as subtle
+ * behavior so a maintainer can follow intent without reverse-engineering it.
+ */
 #define _POSIX_C_SOURCE 200809L
 #include "visual_iptv/decoder.h"
 #include "visual_iptv/thumbnails.h"
@@ -12,7 +18,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-
 typedef struct {
     pthread_mutex_t mutex;
     pthread_cond_t cond;
@@ -21,11 +26,9 @@ typedef struct {
     char *path;
 } ready_state_t;
 
-static void scheduler_ready(const vip_thumbnail_request_t *request,
-                            vip_status_t status,
-                            const char *path,
-                            const vip_error_t *error,
-                            void *userdata) {
+/* Handle the scheduler ready operation. */
+static void scheduler_ready(const vip_thumbnail_request_t *request, vip_status_t status, const char *path,
+                            const vip_error_t *error, void *userdata) {
     (void)request;
     (void)error;
     ready_state_t *state = userdata;
@@ -38,11 +41,16 @@ static void scheduler_ready(const vip_thumbnail_request_t *request,
     pthread_mutex_unlock(&state->mutex);
 }
 
+/* Write ppm. */
 static int write_ppm(const char *path, int black) {
     FILE *fp = fopen(path, "wb");
-    if (!fp) return 0;
+    if (!fp)
+        return 0;
     const size_t width = 64, height = 36;
-    if (fprintf(fp, "P6\n%zu %zu\n255\n", width, height) < 0) { fclose(fp); return 0; }
+    if (fprintf(fp, "P6\n%zu %zu\n255\n", width, height) < 0) {
+        fclose(fp);
+        return 0;
+    }
     for (size_t y = 0; y < height; ++y) {
         for (size_t x = 0; x < width; ++x) {
             unsigned char pixel[3];
@@ -53,12 +61,16 @@ static int write_ppm(const char *path, int black) {
                 pixel[1] = (unsigned char)((y * 7u) & 0xffu);
                 pixel[2] = (unsigned char)(((x + y) * 3u) & 0xffu);
             }
-            if (fwrite(pixel, 1, sizeof(pixel), fp) != sizeof(pixel)) { fclose(fp); return 0; }
+            if (fwrite(pixel, 1, sizeof(pixel), fp) != sizeof(pixel)) {
+                fclose(fp);
+                return 0;
+            }
         }
     }
     return fclose(fp) == 0;
 }
 
+/* Run this executable's main entry point. */
 int main(void) {
     char temp[] = "/tmp/viptv-decoder-XXXXXX";
     char *dir = mkdtemp(temp);
@@ -85,7 +97,8 @@ int main(void) {
     vip_rgb_frame_t frame = {0};
     TEST_STATUS(vip_thumbnail_decoder_capture(decoder, input, &frame, &error), VIP_OK, &error);
     TEST_CHECK(frame.data != NULL && frame.width == 320 && frame.height == 180 && frame.stride == 960);
-    TEST_STATUS(vip_thumbnail_validate_rgb(frame.data, frame.width, frame.height, frame.stride, &error), VIP_OK, &error);
+    TEST_STATUS(vip_thumbnail_validate_rgb(frame.data, frame.width, frame.height, frame.stride, &error),
+                VIP_OK, &error);
     vip_rgb_frame_clear(&frame);
 
     vip_status_t black_status = vip_thumbnail_decoder_capture(decoder, black, &frame, &error);
@@ -104,8 +117,9 @@ int main(void) {
     pthread_mutex_init(&ready.mutex, NULL);
     pthread_cond_init(&ready.cond, NULL);
     vip_thumbnail_scheduler_t *scheduler = NULL;
-    TEST_STATUS(vip_thumbnail_scheduler_create(&scheduler, 1, vip_thumbnail_capture_with_decoder,
-                                               &capture, scheduler_ready, &ready, &error), VIP_OK, &error);
+    TEST_STATUS(vip_thumbnail_scheduler_create(&scheduler, 1, vip_thumbnail_capture_with_decoder, &capture,
+                                               scheduler_ready, &ready, &error),
+                VIP_OK, &error);
     TEST_STATUS(vip_thumbnail_scheduler_enqueue(scheduler, &request, &error), VIP_OK, &error);
 
     pthread_mutex_lock(&ready.mutex);

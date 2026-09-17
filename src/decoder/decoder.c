@@ -6,20 +6,22 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Clear owned state from the requested state in the rgb frame. */
 void vip_rgb_frame_clear(vip_rgb_frame_t *frame) {
-    if (!frame) return;
+    if (!frame)
+        return;
     free(frame->data);
     memset(frame, 0, sizeof(*frame));
 }
 
+/* Return the name of the requested state in the thumbnail decoder. */
 const char *vip_thumbnail_decoder_name(const vip_thumbnail_decoder_t *decoder) {
     return decoder && decoder->name ? decoder->name : "unknown";
 }
 
-vip_status_t vip_thumbnail_decoder_capture(vip_thumbnail_decoder_t *decoder,
-                                           const char *source,
-                                           vip_rgb_frame_t *frame_out,
-                                           vip_error_t *error) {
+/* Capture the requested state in the thumbnail decoder. */
+vip_status_t vip_thumbnail_decoder_capture(vip_thumbnail_decoder_t *decoder, const char *source,
+                                           vip_rgb_frame_t *frame_out, vip_error_t *error) {
     if (!decoder || !decoder->capture_impl || !source || !frame_out) {
         vip_error_set(error, VIP_ERR_INVALID_ARGUMENT, "decoder ou fonte inválida");
         return VIP_ERR_INVALID_ARGUMENT;
@@ -28,8 +30,11 @@ vip_status_t vip_thumbnail_decoder_capture(vip_thumbnail_decoder_t *decoder,
     return decoder->capture_impl(decoder->impl, source, frame_out, error);
 }
 
+/* Destroy the requested state in the thumbnail decoder. */
 void vip_thumbnail_decoder_destroy(vip_thumbnail_decoder_t *decoder) {
-    if (!decoder) return;
-    if (decoder->destroy_impl) decoder->destroy_impl(decoder->impl);
+    if (!decoder)
+        return;
+    if (decoder->destroy_impl)
+        decoder->destroy_impl(decoder->impl);
     free(decoder);
 }
