@@ -15,6 +15,8 @@
 #include "visual_iptv/provider_m3u.h"
 #include "visual_iptv/server_resolver.h"
 #include "visual_iptv/thumbnails.h"
+#include "visual_iptv/ui_motion.h"
+#include "visual_iptv/ui_render.h"
 
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
@@ -60,6 +62,14 @@
 #define INPUT_PASSWORD 4
 #define INPUT_SEARCH 5
 #define INPUT_PROFILE_NAME 6
+#define HOVER_NONE 0
+#define HOVER_TAB_BASE 10
+#define HOVER_SEARCH 20
+#define HOVER_FAVORITES 21
+#define HOVER_LISTS 22
+#define HOVER_BACK 23
+#define HOVER_CATEGORY_ALL 30
+#define HOVER_CATEGORY_BASE 1000
 
 typedef enum { SCREEN_LOGIN = 0, SCREEN_BROWSE, SCREEN_PLAYER } screen_t;
 typedef enum { CONTENT_LIVE = 0, CONTENT_VOD = 1, CONTENT_SERIES = 2 } content_kind_t;
@@ -85,6 +95,7 @@ typedef struct {
     unsigned long bg;
     unsigned long panel;
     unsigned long panel2;
+    unsigned long hover;
     unsigned long border;
     unsigned long text;
     unsigned long muted;
@@ -156,6 +167,7 @@ struct app {
     int depth;
     Colormap cmap;
     GC gc;
+    vip_ui_renderer_t renderer;
     XFontStruct *font;
     XFontStruct *font_title;
     XFontStruct *font_heading;
@@ -181,6 +193,18 @@ struct app {
     int windowed_w;
     int windowed_h;
     bool mouse_down;
+    int mouse_x;
+    int mouse_y;
+    bool mouse_inside;
+    bool hovered_card_valid;
+    size_t hovered_filtered;
+    vip_ui_motion_t hover_motion;
+    int hovered_control;
+    vip_ui_motion_t control_motion;
+    bool ui_motion_active;
+    int grid_scroll_target;
+    bool grid_scroll_animating;
+    int64_t grid_scroll_last_ms;
 
     login_mode_t login_mode;
     char profile_name[128];
@@ -308,6 +332,7 @@ static void init_palette(app_t *a) {
     a->colors.bg = alloc_color(a, "#070A12");
     a->colors.panel = alloc_color(a, "#0E1420");
     a->colors.panel2 = alloc_color(a, "#151E2D");
+    a->colors.hover = alloc_color(a, "#1D2C43");
     a->colors.border = alloc_color(a, "#2B3950");
     a->colors.text = alloc_color(a, "#F6F8FC");
     a->colors.muted = alloc_color(a, "#91A0B7");
@@ -720,17 +745,10 @@ static void details_panel_geometry(const app_t *a, int *x, int *y, int *w, int *
 static card_layout_t browse_layout(app_t *a) {
     card_layout_t layout = {0};
     layout.mode = detect_artwork_mode(a);
-    if (layout.mode == ART_PORTRAIT) {
-        layout.card_w = 196;
-        layout.art_h = 294;
-    } else if (layout.mode == ART_SQUARE) {
-        layout.card_w = 224;
-        layout.art_h = 224;
-    } else {
-        layout.card_w = 320;
-        layout.art_h = 180;
-    }
-    layout.card_h = layout.art_h + 48;
+    int ideal_w = 196, min_w = 168, max_w = 224;
+    if (layout.mode == ART_SQUARE) { ideal_w = 224; min_w = 184; max_w = 260; }
+    else if (layout.mode == ART_LANDSCAPE) { ideal_w = 320; min_w = 260; max_w = 380; }
+
     int content_x = SIDEBAR_W + 20;
     int avail_w = a->width - content_x - 18;
     if (details_panel_active(a)) {
@@ -739,10 +757,157 @@ static card_layout_t browse_layout(app_t *a) {
         (void)py; (void)ph;
         avail_w = px - content_x - 12;
     }
-    layout.cols = (avail_w + GRID_GAP) / (layout.card_w + GRID_GAP);
+    if (avail_w < min_w) avail_w = min_w;
+    layout.cols = (avail_w + GRID_GAP) / (ideal_w + GRID_GAP);
     if (layout.cols < 1) layout.cols = 1;
+    int fitted = (avail_w - (layout.cols - 1) * GRID_GAP) / layout.cols;
+    while (fitted > max_w && layout.cols < 16) {
+        ++layout.cols;
+        fitted = (avail_w - (layout.cols - 1) * GRID_GAP) / layout.cols;
+    }
+    while (fitted < min_w && layout.cols > 1) {
+        --layout.cols;
+        fitted = (avail_w - (layout.cols - 1) * GRID_GAP) / layout.cols;
+    }
+    if (fitted < min_w) fitted = min_w;
+    if (fitted > max_w) fitted = max_w;
+    layout.card_w = fitted;
+    if (layout.mode == ART_PORTRAIT) layout.art_h = (layout.card_w * 3) / 2;
+    else if (layout.mode == ART_SQUARE) layout.art_h = layout.card_w;
+    else layout.art_h = (layout.card_w * 9) / 16;
+    layout.card_h = layout.art_h + 54;
     layout.row_step = layout.card_h + GRID_GAP;
     return layout;
+}
+
+static bool browse_card_at(app_t *a, int x, int y, size_t *fidx_out) {
+    if (!a || a->screen != SCREEN_BROWSE || a->filtered_len == 0u) return false;
+    card_layout_t layout = browse_layout(a);
+    int content_x = SIDEBAR_W + 20;
+    int content_y = TOPBAR_H + 18;
+    if (x < content_x || y < content_y || x >= a->width || y >= a->height) return false;
+    if (details_panel_active(a)) {
+        int px, py, pw, ph;
+        details_panel_geometry(a, &px, &py, &pw, &ph);
+        if (point_in(x, y, px, py, pw, ph) || x >= px - 12) return false;
+    }
+    int relx = x - content_x;
+    int rely = y - content_y + a->grid_scroll;
+    if (relx < 0 || rely < 0) return false;
+    int col = relx / (layout.card_w + GRID_GAP);
+    int row = rely / layout.row_step;
+    if (col < 0 || col >= layout.cols ||
+        relx % (layout.card_w + GRID_GAP) >= layout.card_w ||
+        rely % layout.row_step >= layout.card_h) return false;
+    size_t fidx = (size_t)row * (size_t)layout.cols + (size_t)col;
+    if (fidx >= a->filtered_len) return false;
+    if (fidx_out) *fidx_out = fidx;
+    return true;
+}
+
+static int browse_control_at(app_t *a, int x, int y) {
+    if (!a || a->screen != SCREEN_BROWSE) return HOVER_NONE;
+    const int tab_x[3] = {8, 88, 174};
+    const int tab_w[3] = {74, 80, 88};
+    if (y >= 12 && y < 58 && x < SIDEBAR_W) {
+        for (int k = 0; k < 3; ++k)
+            if (point_in(x, y, tab_x[k], 12, tab_w[k], 46)) return HOVER_TAB_BASE + k;
+    }
+    int list_w = 94, fav_w = 174;
+    int list_x = a->width - list_w - 18;
+    int fav_x = list_x - fav_w - 10;
+    int search_w = fav_x - (SIDEBAR_W + 18) - 10;
+    if (search_w < 180) search_w = 180;
+    if (point_in(x, y, SIDEBAR_W + 18, 12, search_w, 46)) return HOVER_SEARCH;
+    if (point_in(x, y, fav_x, 12, fav_w, 46)) return HOVER_FAVORITES;
+    if (point_in(x, y, list_x, 12, list_w, 46)) return HOVER_LISTS;
+    if (x < SIDEBAR_W && y >= TOPBAR_H) {
+        int base = TOPBAR_H + 12;
+        if (a->series_episode_mode) {
+            if (point_in(x, y, 8, base, SIDEBAR_W - 16, 38)) return HOVER_BACK;
+            base += 48;
+        }
+        if (point_in(x, y, 8, base, SIDEBAR_W - 16, 36)) return HOVER_CATEGORY_ALL;
+        int local = y - (base + 42);
+        if (local >= 0) {
+            int row = local / 42;
+            if (local % 42 < 36) {
+                int idx = a->category_scroll + row;
+                if (idx >= 0 && (size_t)idx < ACTIVE_CATEGORIES(a).len)
+                    return HOVER_CATEGORY_BASE + idx;
+            }
+        }
+    }
+    return HOVER_NONE;
+}
+
+static void update_browse_hover(app_t *a, int x, int y) {
+    if (!a) return;
+    int64_t now = monotonic_ms();
+    a->mouse_x = x;
+    a->mouse_y = y;
+    a->mouse_inside = true;
+
+    int control = browse_control_at(a, x, y);
+    if (control != a->hovered_control) {
+        a->hovered_control = control;
+        vip_ui_motion_init(&a->control_motion, 0.0f, now);
+        if (control != HOVER_NONE) vip_ui_motion_set_target(&a->control_motion, 1.0f, now);
+        a->ui_motion_active = true;
+    } else if (control != HOVER_NONE) {
+        vip_ui_motion_set_target(&a->control_motion, 1.0f, now);
+    }
+
+    size_t hit = 0u;
+    if (browse_card_at(a, x, y, &hit)) {
+        if (!a->hovered_card_valid || a->hovered_filtered != hit) {
+            a->hovered_card_valid = true;
+            a->hovered_filtered = hit;
+            vip_ui_motion_init(&a->hover_motion, 0.0f, now);
+        }
+        vip_ui_motion_set_target(&a->hover_motion, 1.0f, now);
+        a->ui_motion_active = true;
+    } else if (a->hovered_card_valid) {
+        vip_ui_motion_set_target(&a->hover_motion, 0.0f, now);
+        a->ui_motion_active = true;
+    }
+}
+
+static bool step_browse_animations(app_t *a, int64_t now) {
+    if (!a || a->screen != SCREEN_BROWSE) return false;
+    bool active = false;
+    bool scroll_changed = false;
+    if (a->grid_scroll_animating) {
+        if (a->grid_scroll_last_ms <= 0) a->grid_scroll_last_ms = now;
+        int64_t elapsed = now - a->grid_scroll_last_ms;
+        if (elapsed < 1) elapsed = 1;
+        if (elapsed > 32) elapsed = 32;
+        a->grid_scroll_last_ms = now;
+        int diff = a->grid_scroll_target - a->grid_scroll;
+        if (diff == 0) {
+            a->grid_scroll_animating = false;
+        } else {
+            int step = (int)((int64_t)diff * elapsed / 85LL);
+            if (step == 0) step = diff > 0 ? 1 : -1;
+            if ((diff > 0 && step > diff) || (diff < 0 && step < diff)) step = diff;
+            a->grid_scroll += step;
+            scroll_changed = true;
+            if (a->grid_scroll == a->grid_scroll_target) a->grid_scroll_animating = false;
+            else active = true;
+        }
+    }
+    if (scroll_changed && a->mouse_inside)
+        update_browse_hover(a, a->mouse_x, a->mouse_y);
+    if (a->hovered_card_valid) {
+        if (vip_ui_motion_step(&a->hover_motion, now, 140)) active = true;
+        if (a->hover_motion.value <= 0.0f && a->hover_motion.target <= 0.0f)
+            a->hovered_card_valid = false;
+    }
+    if (a->hovered_control != HOVER_NONE) {
+        if (vip_ui_motion_step(&a->control_motion, now, 120)) active = true;
+    }
+    a->ui_motion_active = active;
+    return active;
 }
 
 static bool contains_ascii_case(const char *haystack, const char *needle) {
@@ -826,6 +991,14 @@ static void rebuild_filter(app_t *a) {
     free(seen);
     pthread_mutex_unlock(&a->data_mutex);
     a->grid_scroll = 0;
+    a->grid_scroll_target = 0;
+    a->grid_scroll_animating = false;
+    a->grid_scroll_last_ms = monotonic_ms();
+    a->hovered_card_valid = false;
+    a->hovered_control = HOVER_NONE;
+    vip_ui_motion_init(&a->hover_motion, 0.0f, a->grid_scroll_last_ms);
+    vip_ui_motion_init(&a->control_motion, 0.0f, a->grid_scroll_last_ms);
+    a->ui_motion_active = false;
     a->focused_filtered = 0;
 }
 
@@ -1411,13 +1584,29 @@ static void *series_worker(void *userdata) {
     vip_category_list_t seasons; vip_category_list_init(&seasons);
     vip_channel_list_t episodes; vip_channel_list_init(&episodes);
     vip_channel_list_t season_cards; vip_channel_list_init(&season_cards);
+    vip_media_metadata_t series_metadata; vip_media_metadata_init(&series_metadata);
     vip_error_t error = {0};
 
     vip_status_t st = vip_credentials_init(&credentials, job->server, job->username, job->password, &error);
     if (st == VIP_OK) st = vip_xtream_client_create(&client, &credentials, &error);
-    if (st == VIP_OK) st = vip_xtream_series_episodes(client, job->series_id, &seasons, &episodes, &error);
+    if (st == VIP_OK) st = vip_xtream_series_info(client, job->series_id, &series_metadata, &seasons, &episodes, &error);
 
     if (st == VIP_OK) {
+        const char *series_art = series_metadata.cover_url && series_metadata.cover_url[0]
+                                     ? series_metadata.cover_url
+                                     : (job->logo_url && job->logo_url[0] ? job->logo_url : NULL);
+        if (series_art) {
+            for (size_t i = 0; i < episodes.len; ++i) {
+                char *inherited = vip_strdup(series_art);
+                if (!inherited) {
+                    vip_error_set(&error, VIP_ERR_NOMEM, "sem memória para capa dos episódios");
+                    st = VIP_ERR_NOMEM;
+                    break;
+                }
+                free(episodes.items[i].logo_url);
+                episodes.items[i].logo_url = inherited;
+            }
+        }
         const char *fallback_provider = episodes.len > 0u ? episodes.items[0].provider_id : credentials.provider_id;
         for (size_t i = 0; i < seasons.len; ++i) {
             vip_category_t *season = &seasons.items[i];
@@ -1429,7 +1618,7 @@ static void *series_worker(void *userdata) {
                 .id = season_id,
                 .category_id = season->id,
                 .name = season->name ? season->name : "Temporada",
-                .logo_url = job->logo_url && job->logo_url[0] ? job->logo_url : NULL,
+                .logo_url = series_art,
                 .stream_url = "series://season",
                 .epg_channel_id = NULL,
                 .position = (int)i,
@@ -1466,6 +1655,7 @@ static void *series_worker(void *userdata) {
     vip_category_list_clear(&seasons);
     vip_channel_list_clear(&episodes);
     vip_channel_list_clear(&season_cards);
+    vip_media_metadata_clear(&series_metadata);
     if (job->password) {
         volatile char *wipe = job->password;
         size_t n = strlen(job->password);
@@ -2376,33 +2566,59 @@ static void draw_input(app_t *a, int x, int y, int w, int h, const char *value,
         size_t n = strlen(value); if (n > sizeof(masked)-1) n = sizeof(masked)-1;
         memset(masked, '*', n); masked[n] = '\0'; text = masked;
     }
-    draw_text(a, x + 16, y + h/2 + 6, text,
-              search_focused || (value && value[0]) ? a->colors.text : a->colors.muted);
+    bool bright = search_focused || (value && value[0]);
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, x + 16, y + (h - 16) / 2, w - 32, text, "Sans 10",
+                           bright ? 0xF6F8FCu : 0x91A0B7u, 1.0, false);
+    else
+        draw_text(a, x + 16, y + h/2 + 6, text, bright ? a->colors.text : a->colors.muted);
     if (search_focused) {
-        int caret_x = x + 16 + text_width(a, value && value[0] ? value : "");
+        const char *caret_text = value && value[0] ? value : "";
+        int measured = a->renderer.active ? vip_ui_render_text_width(&a->renderer, caret_text, "Sans 10")
+                                          : text_width(a, caret_text);
+        int caret_x = x + 16 + measured;
         if (caret_x < x + 16) caret_x = x + 16;
         if (caret_x > x + w - 18) caret_x = x + w - 18;
         set_fg(a, a->colors.accent);
-        XDrawLine(a->dpy, draw_target(a), a->gc, caret_x, y + 12, caret_x, y + h - 12);
+        XDrawLine(a->dpy, draw_target(a), a->gc, caret_x, y + 11, caret_x, y + h - 11);
     }
 }
 
 static void draw_login(app_t *a) {
-    fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.bg);
+    if (a->renderer.active)
+        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, a->height, 0x050811u, 0x0B1220u);
+    else
+        fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.bg);
     fill_rect(a, 0, 0, (unsigned)a->width, 7, a->colors.accent);
     int w = a->width > 1120 ? 1080 : a->width - 40;
     if (w < 720) w = 720;
     int h = 620;
     int x = (a->width - w) / 2, y = (a->height - h) / 2;
     if (y < 18) y = 18;
-    fill_round_rect(a, x + 8, y + 10, w, h, 24, a->colors.black);
-    fill_round_rect(a, x, y, w, h, 24, a->colors.panel);
-    stroke_round_rect(a, x, y, w, h, 24, a->colors.border);
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, x + 8, y + 10, w, h, 26, 0x000000u, 0.58);
+        vip_ui_render_round_rect(&a->renderer, x, y, w, h, 26, 0x0E1420u, 0.97);
+        vip_ui_render_round_stroke(&a->renderer, x, y, w, h, 26, 0x2B3950u, 1.0, 1.0);
+    } else {
+        fill_round_rect(a, x + 8, y + 10, w, h, 24, a->colors.black);
+        fill_round_rect(a, x, y, w, h, 24, a->colors.panel);
+        stroke_round_rect(a, x, y, w, h, 24, a->colors.border);
+    }
 
-    fill_round_rect(a, x + 30, y + 25, 42, 42, 13, a->colors.accent);
-    draw_centered_font(a, a->font_heading, x + 30, y + 53, 42, "B", a->colors.bg);
-    draw_text_font(a, a->font_title, x + 86, y + 49, "Blazzing", a->colors.text);
-    draw_text(a, x + 86, y + 69, "Streaming, listas e biblioteca em um só lugar", a->colors.muted);
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, x + 30, y + 25, 42, 42, 13, 0x62A9FFu, 1.0);
+        vip_ui_render_text(&a->renderer, x + 30, y + 35, 42, "B", "Sans Bold 13", 0x050811u, 1.0, true);
+    } else {
+        fill_round_rect(a, x + 30, y + 25, 42, 42, 13, a->colors.accent);
+        draw_centered_font(a, a->font_heading, x + 30, y + 53, 42, "B", a->colors.bg);
+    }
+    if (a->renderer.active) {
+        vip_ui_render_text(&a->renderer, x + 86, y + 27, 360, "Blazzing", "Sans Bold 22", 0xF6F8FCu, 1.0, false);
+        vip_ui_render_text(&a->renderer, x + 86, y + 55, 420, "Streaming, listas e biblioteca em um só lugar", "Sans 10", 0x91A0B7u, 1.0, false);
+    } else {
+        draw_text_font(a, a->font_title, x + 86, y + 49, "Blazzing", a->colors.text);
+        draw_text(a, x + 86, y + 69, "Streaming, listas e biblioteca em um só lugar", a->colors.muted);
+    }
 
     int form_x = x + 34, form_w = (w * 58) / 100 - 50;
     int list_x = x + (w * 60) / 100, list_w = w - (list_x - x) - 34;
@@ -2411,10 +2627,21 @@ static void draw_login(app_t *a) {
     for (int i = 0; i < 2; ++i) {
         bool selected = (int)a->login_mode == i;
         int bx = form_x + i * (mode_w + 10);
-        fill_round_rect(a, bx, mode_y, mode_w, 42, 12, selected ? a->colors.accent2 : a->colors.panel2);
-        stroke_round_rect(a, bx, mode_y, mode_w, 42, 12, selected ? a->colors.accent : a->colors.border);
-        draw_centered(a, bx, mode_y + 27, mode_w, i == LOGIN_XTREAM ? "Xtream" : "M3U",
-                      selected ? a->colors.text : a->colors.muted);
+        if (a->renderer.active) {
+            vip_ui_render_round_rect(&a->renderer, bx, mode_y, mode_w, 42, 12,
+                                     selected ? 0x183E6Bu : 0x151E2Du, 1.0);
+            vip_ui_render_round_stroke(&a->renderer, bx, mode_y, mode_w, 42, 12,
+                                       selected ? 0x62A9FFu : 0x2B3950u, 1.0, selected ? 1.5 : 1.0);
+            vip_ui_render_text(&a->renderer, bx, mode_y + 12, mode_w,
+                               i == LOGIN_XTREAM ? "Xtream" : "M3U",
+                               selected ? "Sans Bold 10" : "Sans 10",
+                               selected ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+        } else {
+            fill_round_rect(a, bx, mode_y, mode_w, 42, 12, selected ? a->colors.accent2 : a->colors.panel2);
+            stroke_round_rect(a, bx, mode_y, mode_w, 42, 12, selected ? a->colors.accent : a->colors.border);
+            draw_centered(a, bx, mode_y + 27, mode_w, i == LOGIN_XTREAM ? "Xtream" : "M3U",
+                          selected ? a->colors.text : a->colors.muted);
+        }
     }
 
     draw_input(a, form_x, y+142, form_w, 44, a->profile_name, "Nome da lista (opcional)", INPUT_PROFILE_NAME, false);
@@ -2425,46 +2652,90 @@ static void draw_login(app_t *a) {
         draw_input(a, form_x, y+358, form_w, 44, a->password, "Senha", INPUT_PASSWORD, true);
     } else {
         draw_input(a, form_x, y+196, form_w, 44, a->server, "URL ou caminho de playlist .m3u/.m3u8", INPUT_SERVER, false);
-        draw_text(a, form_x, y+266, "M3U remoto (HTTP/HTTPS) ou arquivo local.", a->colors.muted);
-        draw_text(a, form_x, y+292, "A playlist é processada diretamente pelo Blazzing.", a->colors.muted);
+        if (a->renderer.active) {
+            vip_ui_render_text(&a->renderer, form_x, y + 252, form_w, "M3U remoto (HTTP/HTTPS) ou arquivo local.", "Sans 9", 0x91A0B7u, 1.0, false);
+            vip_ui_render_text(&a->renderer, form_x, y + 278, form_w, "A playlist é processada diretamente pelo Blazzing.", "Sans 9", 0x91A0B7u, 1.0, false);
+        } else {
+            draw_text(a, form_x, y+266, "M3U remoto (HTTP/HTTPS) ou arquivo local.", a->colors.muted);
+            draw_text(a, form_x, y+292, "A playlist é processada diretamente pelo Blazzing.", a->colors.muted);
+        }
     }
     bool ready = a->server[0] && !atomic_load(&a->login_running) &&
                  (a->login_mode == LOGIN_M3U || (a->username[0] && a->password[0]));
     int connect_y = y + 430;
-    fill_round_rect(a, form_x + 2, connect_y + 4, form_w, 50, 14, a->colors.black);
-    fill_round_rect(a, form_x, connect_y, form_w, 50, 14, ready ? a->colors.accent : a->colors.panel2);
-    stroke_round_rect(a, form_x, connect_y, form_w, 50, 14, ready ? a->colors.accent : a->colors.border);
-    draw_centered_font(a, a->font_heading, form_x, connect_y+32, form_w,
-                       atomic_load(&a->login_running) ? "Conectando..." : "Conectar",
-                       ready ? a->colors.bg : a->colors.muted);
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, form_x + 3, connect_y + 5, form_w, 50, 15, 0x000000u, 0.48);
+        vip_ui_render_round_rect(&a->renderer, form_x, connect_y, form_w, 50, 15,
+                                 ready ? 0x62A9FFu : 0x151E2Du, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, form_x, connect_y, form_w, 50, 15,
+                                   ready ? 0x8BC1FFu : 0x2B3950u, 1.0, 1.0);
+        vip_ui_render_text(&a->renderer, form_x, connect_y + 15, form_w,
+                           atomic_load(&a->login_running) ? "Conectando..." : "Conectar",
+                           "Sans Bold 11", ready ? 0x050811u : 0x91A0B7u, 1.0, true);
+    } else {
+        fill_round_rect(a, form_x + 2, connect_y + 4, form_w, 50, 14, a->colors.black);
+        fill_round_rect(a, form_x, connect_y, form_w, 50, 14, ready ? a->colors.accent : a->colors.panel2);
+        stroke_round_rect(a, form_x, connect_y, form_w, 50, 14, ready ? a->colors.accent : a->colors.border);
+        draw_centered_font(a, a->font_heading, form_x, connect_y+32, form_w,
+                           atomic_load(&a->login_running) ? "Conectando..." : "Conectar",
+                           ready ? a->colors.bg : a->colors.muted);
+    }
 
-    fill_round_rect(a, list_x - 14, y + 88, list_w + 28, 438, 18, a->colors.panel2);
-    stroke_round_rect(a, list_x - 14, y + 88, list_w + 28, 438, 18, a->colors.border);
-    draw_text_font(a, a->font_heading, list_x, y+116, "Suas listas", a->colors.text);
-    draw_text(a, list_x, y+137, "Acesso rápido aos perfis salvos", a->colors.muted);
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, list_x - 14, y + 88, list_w + 28, 438, 18, 0x111A28u, 0.98);
+        vip_ui_render_round_stroke(&a->renderer, list_x - 14, y + 88, list_w + 28, 438, 18, 0x2B3950u, 1.0, 1.0);
+        vip_ui_render_text(&a->renderer, list_x, y + 102, list_w, "Suas listas", "Sans Bold 12", 0xF6F8FCu, 1.0, false);
+        vip_ui_render_text(&a->renderer, list_x, y + 126, list_w, "Acesso rápido aos perfis salvos", "Sans 9", 0x91A0B7u, 1.0, false);
+    } else {
+        fill_round_rect(a, list_x - 14, y + 88, list_w + 28, 438, 18, a->colors.panel2);
+        stroke_round_rect(a, list_x - 14, y + 88, list_w + 28, 438, 18, a->colors.border);
+        draw_text_font(a, a->font_heading, list_x, y+116, "Suas listas", a->colors.text);
+        draw_text(a, list_x, y+137, "Acesso rápido aos perfis salvos", a->colors.muted);
+    }
     int row_y = y + 154;
     int visible = 6;
     for (int r = 0; r < visible; ++r) {
         int idx = a->profile_scroll + r;
         if (idx < 0 || (size_t)idx >= a->profiles.len) break;
         vip_profile_t *p = &a->profiles.items[idx];
-        draw_surface(a, list_x, row_y, list_w, 52, 12, false);
+        if (a->renderer.active) {
+            vip_ui_render_round_rect(&a->renderer, list_x, row_y, list_w, 52, 12, 0x151E2Du, 1.0);
+            vip_ui_render_round_stroke(&a->renderer, list_x, row_y, list_w, 52, 12, 0x2B3950u, 1.0, 1.0);
+        } else {
+            draw_surface(a, list_x, row_y, list_w, 52, 12, false);
+        }
         char label[220];
         snprintf(label, sizeof(label), "%s  ·  %s", p->name ? p->name : "Lista", p->type == VIP_PROFILE_M3U ? "M3U" : "Xtream");
         bounded_text(label, sizeof(label), label, 44);
-        draw_text(a, list_x+13, row_y+22, label, a->colors.text);
         char sub[220]; bounded_text(sub, sizeof(sub), p->server ? p->server : "", 46);
-        draw_text_font(a, a->font_small, list_x+13, row_y+42, sub, a->colors.muted);
+        if (a->renderer.active) {
+            vip_ui_render_text(&a->renderer, list_x + 13, row_y + 8, list_w - 26, label, "Sans SemiBold 9", 0xF6F8FCu, 1.0, false);
+            vip_ui_render_text(&a->renderer, list_x + 13, row_y + 29, list_w - 26, sub, "Sans 8", 0x91A0B7u, 1.0, false);
+        } else {
+            draw_text(a, list_x+13, row_y+22, label, a->colors.text);
+            draw_text_font(a, a->font_small, list_x+13, row_y+42, sub, a->colors.muted);
+        }
         row_y += 60;
     }
-    if (a->profiles.len == 0u) draw_text(a, list_x, y+182, "Nenhuma lista salva ainda.", a->colors.muted);
+    if (a->profiles.len == 0u) {
+        if (a->renderer.active)
+            vip_ui_render_text(&a->renderer, list_x, y + 168, list_w, "Nenhuma lista salva ainda.",
+                               "Sans 9", 0x91A0B7u, 1.0, false);
+        else
+            draw_text(a, list_x, y+182, "Nenhuma lista salva ainda.", a->colors.muted);
+    }
 
     char status_copy[512];
     pthread_mutex_lock(&a->data_mutex);
     snprintf(status_copy, sizeof(status_copy), "%s", a->status);
     pthread_mutex_unlock(&a->data_mutex);
-    draw_text(a, form_x, y+h-42, status_copy,
-              (strstr(status_copy, "falha") || strstr(status_copy, "Erro")) ? a->colors.danger : a->colors.muted);
+    bool status_error = strstr(status_copy, "falha") || strstr(status_copy, "Erro");
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, form_x, y + h - 56, form_w, status_copy,
+                           "Sans 8", status_error ? 0xFF7185u : 0x91A0B7u, 1.0, false);
+    else
+        draw_text(a, form_x, y+h-42, status_copy,
+                  status_error ? a->colors.danger : a->colors.muted);
 }
 
 static int draw_wrapped_text(app_t *a, int x, int y, int width,
@@ -2539,9 +2810,15 @@ static void draw_details_panel(app_t *a) {
 
     int px, py, pw, ph;
     details_panel_geometry(a, &px, &py, &pw, &ph);
-    fill_round_rect(a, px + 4, py + 6, pw, ph, 18, a->colors.black);
-    fill_round_rect(a, px, py, pw, ph, 18, a->colors.panel);
-    stroke_round_rect(a, px, py, pw, ph, 18, a->colors.border);
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, px + 5, py + 8, pw, ph, 20, 0x000000u, 0.55);
+        vip_ui_render_round_rect(&a->renderer, px, py, pw, ph, 20, 0x0E1420u, 0.97);
+        vip_ui_render_round_stroke(&a->renderer, px, py, pw, ph, 20, 0x2B3950u, 1.0, 1.0);
+    } else {
+        fill_round_rect(a, px + 4, py + 6, pw, ph, 18, a->colors.black);
+        fill_round_rect(a, px, py, pw, ph, 18, a->colors.panel);
+        stroke_round_rect(a, px, py, pw, ph, 18, a->colors.border);
+    }
 
     char loaded_id[128], status[256], plot[3072], cover[1024], backdrop[1024];
     char genre[256], release_date[128], rating[64], duration[128], cast[768], director[512];
@@ -2559,16 +2836,29 @@ static void draw_details_panel(app_t *a) {
     snprintf(director, sizeof(director), "%s", a->details_metadata.director ? a->details_metadata.director : "");
     pthread_mutex_unlock(&a->data_mutex);
 
-    char title[256]; bounded_text(title, sizeof(title), ch->name, 44);
-    draw_text_font(a, a->font_heading, px + 16, py + 31, title, a->colors.text);
+    char title[256]; bounded_text(title, sizeof(title), ch->name, 72);
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, px + 16, py + 13, pw - 132, title, "Sans Bold 12", 0xF6F8FCu, 1.0, false);
+    else
+        draw_text_font(a, a->font_heading, px + 16, py + 31, title, a->colors.text);
     bool favorite = a->favorite_flags && a->favorite_flags[chidx];
     int fav_w = 92, fav_h = 32, fav_x = px + pw - fav_w - 14, fav_y = py + 10;
-    fill_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12,
-                    favorite ? a->colors.accent2 : a->colors.panel2);
-    stroke_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12,
-                      favorite ? a->colors.accent : a->colors.border);
-    draw_centered(a, fav_x, fav_y + 21, fav_w, favorite ? "SALVO" : "FAVORITAR",
-                  favorite ? a->colors.text : a->colors.muted);
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, fav_x, fav_y, fav_w, fav_h, 12,
+                                 favorite ? 0x183E6Bu : 0x151E2Du, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, fav_x, fav_y, fav_w, fav_h, 12,
+                                   favorite ? 0x62A9FFu : 0x2B3950u, 1.0, 1.0);
+        vip_ui_render_text(&a->renderer, fav_x, fav_y + 9, fav_w, favorite ? "SALVO" : "FAVORITAR",
+                           favorite ? "Sans Bold 8" : "Sans 8",
+                           favorite ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+    } else {
+        fill_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12,
+                        favorite ? a->colors.accent2 : a->colors.panel2);
+        stroke_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12,
+                          favorite ? a->colors.accent : a->colors.border);
+        draw_centered(a, fav_x, fav_y + 21, fav_w, favorite ? "SALVO" : "FAVORITAR",
+                      favorite ? a->colors.text : a->colors.muted);
+    }
 
     bool current = ch->id && strcmp(loaded_id, ch->id) == 0;
     int art_x = px + 16, art_y = py + 50, art_w = pw - 32, art_h = 170;
@@ -2641,13 +2931,32 @@ static void draw_toast(app_t *a) {
     draw_centered(a, x, y + 27, w, a->toast, a->colors.text);
 }
 
-static int category_visible_rows(app_t *a) { int n = (a->height - TOPBAR_H - 50) / 40; return n > 1 ? n : 1; }
+static int browse_sidebar_category_y(const app_t *a) {
+    return TOPBAR_H + 12 + (a && a->series_episode_mode ? 48 : 0);
+}
+
+static int category_visible_rows(app_t *a) {
+    int top = browse_sidebar_category_y(a);
+    int n = (a->height - top - 8) / 40;
+    return n > 1 ? n : 1;
+}
+
+static const char *browse_back_label(const app_t *a) {
+    if (!a || !a->series_episode_mode) return "Voltar";
+    return a->series_season_select ? "< Séries" : "< Temporadas";
+}
 
 static void draw_browse(app_t *a) {
-    fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.bg);
-    fill_rect(a, 0, 0, (unsigned)a->width, TOPBAR_H, a->colors.panel);
+    if (a->renderer.active) {
+        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, a->height, 0x050811u, 0x080D17u);
+        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, TOPBAR_H, 0x121C2Cu, 0x0C1420u);
+        vip_ui_render_linear_gradient(&a->renderer, 0, TOPBAR_H, SIDEBAR_W, a->height-TOPBAR_H, 0x121C2Au, 0x0C1320u);
+    } else {
+        fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.bg);
+        fill_rect(a, 0, 0, (unsigned)a->width, TOPBAR_H, a->colors.panel);
+        fill_rect(a, 0, TOPBAR_H, SIDEBAR_W, (unsigned)(a->height-TOPBAR_H), a->colors.panel2);
+    }
     fill_rect(a, 0, 0, (unsigned)a->width, 4, a->colors.accent);
-    fill_rect(a, 0, TOPBAR_H, SIDEBAR_W, (unsigned)(a->height-TOPBAR_H), a->colors.panel2);
     fill_rect(a, SIDEBAR_W-1, TOPBAR_H, 1, (unsigned)(a->height-TOPBAR_H), a->colors.border);
 
     const int tab_y = 12, tab_h = 46;
@@ -2655,12 +2964,23 @@ static void draw_browse(app_t *a) {
     const int tab_w[3] = {74, 80, 88};
     for (int k = 0; k < 3; ++k) {
         bool selected = (int)a->content_kind == k;
+        bool hovered = a->hovered_control == HOVER_TAB_BASE + k;
+        float hover_t = hovered ? vip_ui_ease_out_cubic(a->control_motion.value) : 0.0f;
         fill_round_rect(a, tab_x[k], tab_y, tab_w[k], tab_h, 13,
-                        selected ? a->colors.accent2 : a->colors.panel2);
+                        selected ? a->colors.accent2 : (hovered ? a->colors.hover : a->colors.panel2));
         stroke_round_rect(a, tab_x[k], tab_y, tab_w[k], tab_h, 13,
-                          selected ? a->colors.accent : a->colors.border);
-        draw_centered(a, tab_x[k], 42, tab_w[k], content_label((content_kind_t)k),
-                      selected ? a->colors.text : a->colors.muted);
+                          (selected || hovered) ? a->colors.accent : a->colors.border);
+        if (hovered && !selected) {
+            int line_w = (int)((float)(tab_w[k] - 24) * hover_t + 0.5f);
+            if (line_w > 0) fill_round_rect(a, tab_x[k] + (tab_w[k] - line_w)/2, tab_y + tab_h - 4, line_w, 3, 1, a->colors.accent);
+        }
+        if (a->renderer.active)
+            vip_ui_render_text(&a->renderer, tab_x[k], tab_y + 14, tab_w[k], content_label((content_kind_t)k),
+                               selected ? "Sans Bold 10" : "Sans 10",
+                               (selected || hovered) ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+        else
+            draw_centered(a, tab_x[k], 42, tab_w[k], content_label((content_kind_t)k),
+                          (selected || hovered) ? a->colors.text : a->colors.muted);
     }
 
     int list_w = 94, fav_w = 174;
@@ -2670,30 +2990,62 @@ static void draw_browse(app_t *a) {
     if (search_w < 180) search_w = 180;
     char search_hint[96]; snprintf(search_hint, sizeof(search_hint), "Buscar %s...", content_plural(a));
     draw_input(a, SIDEBAR_W+18, 12, search_w, 46, a->search, search_hint, INPUT_SEARCH, false);
-    fill_round_rect(a, fav_x, 12, fav_w, 46, 13, a->favorites_only ? a->colors.accent2 : a->colors.panel2);
-    stroke_round_rect(a, fav_x, 12, fav_w, 46, 13, a->favorites_only ? a->colors.accent : a->colors.border);
+    if (a->hovered_control == HOVER_SEARCH && a->input_focus != INPUT_SEARCH)
+        stroke_round_rect(a, SIDEBAR_W+18, 12, search_w, 46, 13, a->colors.accent);
+    bool fav_hover = a->hovered_control == HOVER_FAVORITES;
+    fill_round_rect(a, fav_x, 12, fav_w, 46, 13, a->favorites_only ? a->colors.accent2 : (fav_hover ? a->colors.hover : a->colors.panel2));
+    stroke_round_rect(a, fav_x, 12, fav_w, 46, 13, (a->favorites_only || fav_hover) ? a->colors.accent : a->colors.border);
     char fav_label[128]; snprintf(fav_label, sizeof(fav_label), "* Favoritos (%zu)", favorite_count(a));
-    draw_centered(a, fav_x, 42, fav_w, fav_label, a->favorites_only ? a->colors.text : a->colors.muted);
-    fill_round_rect(a, list_x, 12, list_w, 46, 13, a->colors.panel2);
-    stroke_round_rect(a, list_x, 12, list_w, 46, 13, a->colors.border);
-    draw_centered(a, list_x, 42, list_w, "Listas", a->colors.muted);
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, fav_x, 27, fav_w, fav_label, a->favorites_only ? "Sans Bold 10" : "Sans 10",
+                           (a->favorites_only || fav_hover) ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+    else
+        draw_centered(a, fav_x, 42, fav_w, fav_label, a->favorites_only ? a->colors.text : a->colors.muted);
+    bool list_hover = a->hovered_control == HOVER_LISTS;
+    fill_round_rect(a, list_x, 12, list_w, 46, 13, list_hover ? a->colors.hover : a->colors.panel2);
+    stroke_round_rect(a, list_x, 12, list_w, 46, 13, list_hover ? a->colors.accent : a->colors.border);
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, list_x, 27, list_w, "Listas", "Sans 10",
+                           list_hover ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+    else
+        draw_centered(a, list_x, 42, list_w, "Listas", list_hover ? a->colors.text : a->colors.muted);
 
     int y = TOPBAR_H + 12;
+    if (a->series_episode_mode) {
+        bool back_hover = a->hovered_control == HOVER_BACK;
+        fill_round_rect(a, 8, y, SIDEBAR_W-16, 38, 11, back_hover ? a->colors.accent2 : a->colors.panel);
+        stroke_round_rect(a, 8, y, SIDEBAR_W-16, 38, 11, a->colors.accent);
+        if (a->renderer.active)
+            vip_ui_render_text(&a->renderer, 18, y + 10, SIDEBAR_W - 36, browse_back_label(a), "Sans Bold 10", 0xF6F8FCu, 1.0, false);
+        else
+            draw_text_font(a, a->font_heading, 18, y+26, browse_back_label(a), a->colors.text);
+        y += 48;
+    }
     bool all_sel = a->selected_category < 0;
-    fill_round_rect(a, 8, y, SIDEBAR_W-16, 36, 11, all_sel ? a->colors.accent2 : a->colors.panel2);
+    bool all_hover = a->hovered_control == HOVER_CATEGORY_ALL;
+    fill_round_rect(a, 8, y, SIDEBAR_W-16, 36, 11, all_sel ? a->colors.accent2 : (all_hover ? a->colors.hover : a->colors.panel2));
     char all_label[128]; snprintf(all_label, sizeof(all_label), "%s (%zu)", all_content_label(a), ACTIVE_CHANNELS(a).len);
-    draw_text(a, 18, y+24, all_label, all_sel ? a->colors.text : a->colors.muted);
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, 18, y + 9, SIDEBAR_W - 36, all_label, all_sel ? "Sans Bold 9" : "Sans 9",
+                           (all_sel || all_hover) ? 0xF6F8FCu : 0x91A0B7u, 1.0, false);
+    else
+        draw_text(a, 18, y+24, all_label, (all_sel || all_hover) ? a->colors.text : a->colors.muted);
     y += 42;
     int rows = category_visible_rows(a) - 1;
     for (int r = 0; r < rows; ++r) {
         int idx = a->category_scroll + r;
         if (idx < 0 || (size_t)idx >= ACTIVE_CATEGORIES(a).len) break;
         bool selected = a->selected_category == idx;
-        fill_round_rect(a, 8, y, SIDEBAR_W-16, 36, 11, selected ? a->colors.accent2 : a->colors.panel2);
+        bool hovered = a->hovered_control == HOVER_CATEGORY_BASE + idx;
+        fill_round_rect(a, 8, y, SIDEBAR_W-16, 36, 11, selected ? a->colors.accent2 : (hovered ? a->colors.hover : a->colors.panel2));
         char full_label[512]; char label[256]; size_t count = a->category_counts ? a->category_counts[idx] : 0;
         snprintf(full_label, sizeof(full_label), "%s (%zu)", ACTIVE_CATEGORIES(a).items[idx].name, count);
         bounded_text(label, sizeof(label), full_label, 34);
-        draw_text(a, 18, y+24, label, selected ? a->colors.text : a->colors.muted);
+        if (a->renderer.active)
+            vip_ui_render_text(&a->renderer, 18, y + 9, SIDEBAR_W - 36, label, selected ? "Sans Bold 9" : "Sans 9",
+                               (selected || hovered) ? 0xF6F8FCu : 0x91A0B7u, 1.0, false);
+        else
+            draw_text(a, 18, y+24, label, (selected || hovered) ? a->colors.text : a->colors.muted);
         y += 42;
     }
 
@@ -2711,10 +3063,27 @@ static void draw_browse(app_t *a) {
         return;
     }
 
+    int grid_right = a->width - 18;
+    if (details_panel_active(a)) {
+        int px, py, pw, ph;
+        details_panel_geometry(a, &px, &py, &pw, &ph);
+        (void)py; (void)pw; (void)ph;
+        grid_right = px - 12;
+    }
+    if (grid_right > content_x && a->height > content_y) {
+        XRectangle grid_clip = {
+            .x = (short)content_x,
+            .y = (short)content_y,
+            .width = (unsigned short)(grid_right - content_x),
+            .height = (unsigned short)(a->height - content_y),
+        };
+        XSetClipRectangles(a->dpy, a->gc, 0, 0, &grid_clip, 1, Unsorted);
+    }
+
     for (int rr = 0; rr < visible_rows; ++rr) {
         int row = first_row + rr;
         int cy = content_y + y_offset + rr * layout.row_step;
-        if (cy > a->height || cy + layout.card_h < TOPBAR_H) continue;
+        if (cy > a->height || cy + layout.card_h < content_y) continue;
         for (int col = 0; col < layout.cols; ++col) {
             size_t fidx = (size_t)row * (size_t)layout.cols + (size_t)col;
             if (fidx >= a->filtered_len) break;
@@ -2722,9 +3091,21 @@ static void draw_browse(app_t *a) {
             vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
             int cx = content_x + col * (layout.card_w + GRID_GAP);
             bool focused = fidx == a->focused_filtered;
-            fill_round_rect(a, cx + 4, cy + 6, layout.card_w, layout.card_h, 16, a->colors.black);
+            bool hovered = a->hovered_card_valid && fidx == a->hovered_filtered &&
+                           a->hover_motion.value > 0.001f;
+            float hover_eased = hovered ? vip_ui_ease_out_cubic(a->hover_motion.value) : 0.0f;
+            int lift = (int)(8.0f * hover_eased + 0.5f);
+            int base_cy = cy;
+            cy = base_cy - lift;
+            bool active_card = focused || hovered;
+            if (a->renderer.active && active_card) {
+                vip_ui_render_round_rect(&a->renderer, cx + 5, cy + 8 + (int)(3.0f * hover_eased), layout.card_w, layout.card_h, 18, 0x000000u, 0.62);
+                vip_ui_render_round_stroke(&a->renderer, cx-3, cy-3, layout.card_w+6, layout.card_h+6, 19, 0x62A9FFu, 0.80, 2.0);
+            } else {
+                fill_round_rect(a, cx + 4, cy + 6 + (int)(3.0f * hover_eased), layout.card_w, layout.card_h, 16, a->colors.black);
+            }
             fill_round_rect(a, cx, cy, layout.card_w, layout.card_h, 16, a->colors.panel2);
-            if (focused) {
+            if (active_card) {
                 stroke_round_rect(a, cx-3, cy-3, layout.card_w+6, layout.card_h+6, 18, a->colors.accent);
                 stroke_round_rect(a, cx-1, cy-1, layout.card_w+2, layout.card_h+2, 17, a->colors.accent2);
             }
@@ -2733,13 +3114,26 @@ static void draw_browse(app_t *a) {
             char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
             bool image_ok = path && draw_cached_image_contain(a, path, cx, cy, layout.card_w, layout.art_h);
             if (!image_ok) {
-                draw_centered(a, cx, cy + layout.art_h/2 + 5, layout.card_w, "carregando imagem...", a->colors.muted);
+                if (a->renderer.active)
+                    vip_ui_render_text(&a->renderer, cx + 8, cy + layout.art_h/2 - 7, layout.card_w - 16, "carregando imagem...", "Sans 9", 0x91A0B7u, 1.0, true);
+                else
+                    draw_centered(a, cx, cy + layout.art_h/2 + 5, layout.card_w, "carregando imagem...", a->colors.muted);
                 int distance = rr >= 0 ? rr : -rr;
                 int64_t priority = 1000000LL - (int64_t)distance * 1000LL - col;
                 enqueue_thumbnail(a, ch, priority);
             }
             free(path);
-            stroke_round_rect(a, cx, cy, layout.card_w, layout.art_h, 14, focused ? a->colors.accent : a->colors.border);
+            stroke_round_rect(a, cx, cy, layout.card_w, layout.art_h, 14, active_card ? a->colors.accent : a->colors.border);
+            if (hovered && hover_eased > 0.30f) {
+                int open_w = 78, open_h = 30;
+                int open_x = cx + 8, open_y = cy + layout.art_h - open_h - 8;
+                fill_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent2);
+                stroke_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent);
+                if (a->renderer.active)
+                    vip_ui_render_text(&a->renderer, open_x, open_y + 7, open_w, "ABRIR", "Sans Bold 8", 0xF6F8FCu, 1.0, true);
+                else
+                    draw_centered_font(a, a->font_small, open_x, open_y + 20, open_w, "ABRIR", a->colors.text);
+            }
             bool favorite = a->favorite_flags && a->favorite_flags[chidx];
             int card_fav_w = 58, card_fav_h = 28, card_fav_x = cx + layout.card_w - card_fav_w - 6, card_fav_y = cy + 6;
             fill_round_rect(a, card_fav_x, card_fav_y, card_fav_w, card_fav_h, 10,
@@ -2774,8 +3168,12 @@ static void draw_browse(app_t *a) {
             }
             char grouped_title[256];
             const char *display_title = m3u_series_display_name(a, ch, grouped_title, sizeof(grouped_title));
-            char title[160]; bounded_text(title, sizeof(title), display_title, layout.mode == ART_PORTRAIT ? 28 : 42);
-            draw_text_font(a, focused ? a->font_heading : a->font, cx + 8, cy + layout.art_h + 25, title, a->colors.text);
+            char title[256]; bounded_text(title, sizeof(title), display_title, 92);
+            if (a->renderer.active)
+                vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 11, layout.card_w - 18, title,
+                                   active_card ? "Sans SemiBold 10" : "Sans 10", 0xF6F8FCu, 1.0, false);
+            else
+                draw_text_font(a, active_card ? a->font_heading : a->font, cx + 8, cy + layout.art_h + 25, title, a->colors.text);
             if (a->series_season_select) {
                 size_t season_count = 0u;
                 for (size_t ei = 0; ei < a->episode_channels.len; ++ei) {
@@ -2783,16 +3181,24 @@ static void draw_browse(app_t *a) {
                     if (cid && ch->category_id && strcmp(cid, ch->category_id) == 0) ++season_count;
                 }
                 char meta[72]; snprintf(meta, sizeof(meta), "%zu episódio%s", season_count, season_count == 1u ? "" : "s");
-                draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 44, meta, a->colors.muted);
+                if (a->renderer.active)
+                    vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 33, layout.card_w - 18, meta, "Sans 8", 0x91A0B7u, 1.0, false);
+                else
+                    draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 44, meta, a->colors.muted);
             } else if (a->content_kind == CONTENT_SERIES && !a->series_episode_mode &&
                 a->series_watched && a->series_total && a->series_total[chidx] > 0) {
                 char progress[80];
                 snprintf(progress, sizeof(progress), "%d/%d episódios", a->series_watched[chidx], a->series_total[chidx]);
-                draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 44, progress, a->colors.muted);
+                if (a->renderer.active)
+                    vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 33, layout.card_w - 18, progress, "Sans 8", 0x91A0B7u, 1.0, false);
+                else
+                    draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 44, progress, a->colors.muted);
             }
-        }
+                    cy = base_cy;
+}
     }
 
+    XSetClipMask(a->dpy, a->gc, None);
     draw_details_panel(a);
 
     if (atomic_load(&a->series_running)) {
@@ -2859,44 +3265,91 @@ static void draw_player(app_t *a) {
     bool hud = player_hud_visible(a);
 
     if (!a->fullscreen) {
-        fill_rect(a, 0, 0, (unsigned)a->width, PLAYER_HEADER_H, a->colors.panel);
-        fill_round_rect(a, 12, 10, 132, 44, 13, a->colors.panel2);
-        stroke_round_rect(a, 12, 10, 132, 44, 13, a->colors.border);
-        draw_text(a, 28, 39, "< Voltar", a->colors.text);
-        if (a->current_channel < ACTIVE_CHANNELS(a).len)
-            draw_text_font(a, a->font_heading, 168, 39, ACTIVE_CHANNELS(a).items[a->current_channel].name, a->colors.text);
+        if (a->renderer.active) {
+            vip_ui_render_round_rect(&a->renderer, 0, 0, a->width, PLAYER_HEADER_H, 0, 0x0E1420u, 0.97);
+            vip_ui_render_round_rect(&a->renderer, 12, 10, 132, 44, 13, 0x151E2Du, 1.0);
+            vip_ui_render_round_stroke(&a->renderer, 12, 10, 132, 44, 13, 0x2B3950u, 1.0, 1.0);
+            vip_ui_render_text(&a->renderer, 28, 24, 104, "<  Voltar", "Sans SemiBold 10", 0xF6F8FCu, 1.0, false);
+            if (a->current_channel < ACTIVE_CHANNELS(a).len)
+                vip_ui_render_text(&a->renderer, 168, 22, a->width - 190, ACTIVE_CHANNELS(a).items[a->current_channel].name,
+                                   "Sans Bold 12", 0xF6F8FCu, 1.0, false);
+        } else {
+            fill_rect(a, 0, 0, (unsigned)a->width, PLAYER_HEADER_H, a->colors.panel);
+            fill_round_rect(a, 12, 10, 132, 44, 13, a->colors.panel2);
+            stroke_round_rect(a, 12, 10, 132, 44, 13, a->colors.border);
+            draw_text(a, 28, 39, "< Voltar", a->colors.text);
+            if (a->current_channel < ACTIVE_CHANNELS(a).len)
+                draw_text_font(a, a->font_heading, 168, 39, ACTIVE_CHANNELS(a).items[a->current_channel].name, a->colors.text);
+        }
     }
 
     if (hud) {
         int y = a->height - PLAYER_CONTROLS_H;
-        fill_rect(a, 0, y, (unsigned)a->width, PLAYER_CONTROLS_H, a->colors.panel);
-        fill_rect(a, 0, y, (unsigned)a->width, 1, a->colors.border);
-        fill_round_rect(a, 16, y+18, 52, 46, 14, a->colors.panel2);
-        stroke_round_rect(a, 16, y+18, 52, 46, 14, a->colors.border);
-        draw_centered_font(a, a->font_heading, 16, y+48, 52, snap.paused ? ">" : "||", a->colors.text);
-        fill_round_rect(a, 76, y+18, 82, 46, 14, a->colors.panel2);
-        stroke_round_rect(a, 76, y+18, 82, 46, 14, a->colors.border);
-        draw_centered(a, 76, y+47, 82, "Voltar", a->colors.text);
+        if (a->renderer.active) {
+            vip_ui_render_round_rect(&a->renderer, 10, y + 7, a->width - 20, PLAYER_CONTROLS_H - 12, 18, 0x0E1420u, 0.96);
+            vip_ui_render_round_stroke(&a->renderer, 10, y + 7, a->width - 20, PLAYER_CONTROLS_H - 12, 18, 0x2B3950u, 0.95, 1.0);
+            vip_ui_render_round_rect(&a->renderer, 16, y+18, 52, 46, 14, 0x151E2Du, 1.0);
+            vip_ui_render_round_stroke(&a->renderer, 16, y+18, 52, 46, 14, 0x36506Fu, 1.0, 1.0);
+            vip_ui_render_text(&a->renderer, 16, y + 31, 52, snap.paused ? ">" : "||", "Sans Bold 12", 0xF6F8FCu, 1.0, true);
+            vip_ui_render_round_rect(&a->renderer, 76, y+18, 82, 46, 14, 0x151E2Du, 1.0);
+            vip_ui_render_round_stroke(&a->renderer, 76, y+18, 82, 46, 14, 0x36506Fu, 1.0, 1.0);
+            vip_ui_render_text(&a->renderer, 76, y + 32, 82, "Voltar", "Sans SemiBold 9", 0xF6F8FCu, 1.0, true);
+        } else {
+            fill_rect(a, 0, y, (unsigned)a->width, PLAYER_CONTROLS_H, a->colors.panel);
+            fill_rect(a, 0, y, (unsigned)a->width, 1, a->colors.border);
+            fill_round_rect(a, 16, y+18, 52, 46, 14, a->colors.panel2);
+            stroke_round_rect(a, 16, y+18, 52, 46, 14, a->colors.border);
+            draw_centered_font(a, a->font_heading, 16, y+48, 52, snap.paused ? ">" : "||", a->colors.text);
+            fill_round_rect(a, 76, y+18, 82, 46, 14, a->colors.panel2);
+            stroke_round_rect(a, 76, y+18, 82, 46, 14, a->colors.border);
+            draw_centered(a, 76, y+47, 82, "Voltar", a->colors.text);
+        }
         if (a->player_item_live) {
-            fill_round_rect(a, 176, y+22, 76, 30, 12, a->colors.danger);
-            draw_centered(a, 176, y+43, 76, "AO VIVO", a->colors.text);
-            draw_text(a, 270, y+44, "<- -> troca canal", a->colors.muted);
+            if (a->renderer.active) {
+                vip_ui_render_round_rect(&a->renderer, 176, y+22, 76, 30, 12, 0xFF7185u, 0.96);
+                vip_ui_render_text(&a->renderer, 176, y + 30, 76, "AO VIVO", "Sans Bold 8", 0xF6F8FCu, 1.0, true);
+                vip_ui_render_text(&a->renderer, 270, y + 31, 220, "<-  ->  troca canal", "Sans 9", 0x91A0B7u, 1.0, false);
+            } else {
+                fill_round_rect(a, 176, y+22, 76, 30, 12, a->colors.danger);
+                draw_centered(a, 176, y+43, 76, "AO VIVO", a->colors.text);
+                draw_text(a, 270, y+44, "<- -> troca canal", a->colors.muted);
+            }
         } else {
             int tx,ty,tw,th; timeline_geometry(a,&tx,&ty,&tw,&th);
-            fill_round_rect(a, tx, ty, tw, th, th/2, a->colors.panel2);
+            if (a->renderer.active)
+                vip_ui_render_round_rect(&a->renderer, tx, ty, tw, th, th/2, 0x26354Au, 1.0);
+            else
+                fill_round_rect(a, tx, ty, tw, th, th/2, a->colors.panel2);
             double ratio = snap.duration_seconds > 0.0 ? snap.position_seconds / snap.duration_seconds : 0.0;
             if (ratio < 0.0) ratio = 0.0;
             if (ratio > 1.0) ratio = 1.0;
             int fill = (int)((double)tw * ratio);
-            if (fill > 0) fill_round_rect(a, tx, ty, fill, th, th/2, a->colors.accent);
+            if (fill > 0) {
+                if (a->renderer.active)
+                    vip_ui_render_round_rect(&a->renderer, tx, ty, fill, th, th/2, 0x62A9FFu, 1.0);
+                else
+                    fill_round_rect(a, tx, ty, fill, th, th/2, a->colors.accent);
+            }
             char pos[32], dur[32]; format_clock(snap.position_seconds,pos); format_clock(snap.duration_seconds,dur);
-            draw_text(a, 166, y+45, pos, a->colors.text);
-            draw_text(a, a->width-150, y+45, dur, a->colors.text);
-            draw_text_font(a, a->font_small, tx, y+70, "Clique/arraste para buscar  ·  <- -> 10s", a->colors.muted);
+            if (a->renderer.active) {
+                vip_ui_render_text(&a->renderer, 166, y + 31, 60, pos, "Sans SemiBold 9", 0xF6F8FCu, 1.0, false);
+                vip_ui_render_text(&a->renderer, a->width - 150, y + 31, 132, dur, "Sans SemiBold 9", 0xF6F8FCu, 1.0, false);
+                vip_ui_render_text(&a->renderer, tx, y + 57, tw, "Clique/arraste para buscar  ·  <- -> 10s", "Sans 8", 0x91A0B7u, 1.0, false);
+            } else {
+                draw_text(a, 166, y+45, pos, a->colors.text);
+                draw_text(a, a->width-150, y+45, dur, a->colors.text);
+                draw_text_font(a, a->font_small, tx, y+70, "Clique/arraste para buscar  ·  <- -> 10s", a->colors.muted);
+            }
         }
-        int sw = text_width(a, state_text);
-        draw_text_font(a, a->font_small, a->width - sw - 18, y+72, state_text,
-                       player_state == VIP_PLAYER_ERROR ? a->colors.danger : a->colors.muted);
+        if (a->renderer.active) {
+            int sw = vip_ui_render_text_width(&a->renderer, state_text, "Sans 8");
+            vip_ui_render_text(&a->renderer, a->width - sw - 18, y + 58, sw + 2, state_text, "Sans 8",
+                               player_state == VIP_PLAYER_ERROR ? 0xFF7185u : 0x91A0B7u, 1.0, false);
+        } else {
+            int sw = text_width(a, state_text);
+            draw_text_font(a, a->font_small, a->width - sw - 18, y+72, state_text,
+                           player_state == VIP_PLAYER_ERROR ? a->colors.danger : a->colors.muted);
+        }
     }
 
     if (player_state == VIP_PLAYER_ERROR) {
@@ -2927,9 +3380,11 @@ static bool ensure_backbuffer(app_t *a) {
 static void redraw(app_t *a) {
     bool buffered = ensure_backbuffer(a);
     a->draw = buffered ? a->backbuffer : a->win;
+    (void)vip_ui_renderer_begin(&a->renderer, a->dpy, a->draw, a->visual, a->width, a->height);
     if (a->screen == SCREEN_LOGIN) draw_login(a);
     else if (a->screen == SCREEN_BROWSE) draw_browse(a);
     else draw_player(a);
+    vip_ui_renderer_end(&a->renderer);
     if (buffered) {
         XCopyArea(a->dpy, a->backbuffer, a->win, a->gc, 0, 0,
                   (unsigned)a->width, (unsigned)a->height, 0, 0);
@@ -2959,7 +3414,13 @@ static void handle_browse_click(app_t *a, int x, int y) {
         snprintf(a->status,sizeof(a->status),"Escolha uma lista salva ou conecte outra"); return;
     }
     if (x < SIDEBAR_W && y >= TOPBAR_H) {
-        int local=y-(TOPBAR_H+12); if (local>=0 && local<36) { choose_category(a,-1); return; }
+        int base = TOPBAR_H + 12;
+        if (a->series_episode_mode && point_in(x, y, 8, base, SIDEBAR_W-16, 38)) {
+            return_from_episode_list(a);
+            return;
+        }
+        int category_y = browse_sidebar_category_y(a);
+        int local=y-category_y; if (local>=0 && local<36) { choose_category(a,-1); return; }
         local-=42; if (local>=0) { int row=local/42; if (local%42<36) { int idx=a->category_scroll+row; if (idx>=0 && (size_t)idx<ACTIVE_CATEGORIES(a).len) choose_category(a,idx); } }
         return;
     }
@@ -3048,7 +3509,13 @@ static void handle_wheel(app_t *a, int x, int y, int direction) {
     } else {
         card_layout_t layout=browse_layout(a); int rows=(int)((a->filtered_len+(size_t)layout.cols-1u)/(size_t)layout.cols);
         int content_h=rows*layout.row_step; int maxscroll=content_h-(a->height-TOPBAR_H-18); if(maxscroll<0)maxscroll=0;
-        a->grid_scroll+=direction*(layout.mode==ART_PORTRAIT?220:180); if(a->grid_scroll<0)a->grid_scroll=0; if(a->grid_scroll>maxscroll)a->grid_scroll=maxscroll;
+        int base = a->grid_scroll_animating ? a->grid_scroll_target : a->grid_scroll;
+        int target = base + direction*(layout.mode==ART_PORTRAIT?220:180);
+        if(target<0)target=0; if(target>maxscroll)target=maxscroll;
+        a->grid_scroll_target=target;
+        a->grid_scroll_last_ms=monotonic_ms();
+        a->grid_scroll_animating=target!=a->grid_scroll;
+        if(a->grid_scroll_animating)a->ui_motion_active=true;
     }
     (void)y;
 }
@@ -3065,6 +3532,8 @@ static void ensure_grid_focus_visible(app_t *a) {
     if(row_top<a->grid_scroll)a->grid_scroll=row_top;
     else if(row_top+layout.card_h>a->grid_scroll+viewport_h)a->grid_scroll=row_top+layout.card_h-viewport_h;
     if(a->grid_scroll<0)a->grid_scroll=0;
+    a->grid_scroll_target=a->grid_scroll;
+    a->grid_scroll_animating=false;
 }
 
 static void move_grid_focus(app_t *a, int dx, int dy) {
@@ -3250,12 +3719,23 @@ static void process_event(app_t *a, XEvent *e) {
             }
             break;
         case MotionNotify:
-            if(a->screen==SCREEN_PLAYER){
+            if(a->screen==SCREEN_BROWSE && e->xmotion.window==a->win){
+                update_browse_hover(a,e->xmotion.x,e->xmotion.y);
+            } else if(a->screen==SCREEN_PLAYER){
                 show_player_hud(a);
                 if(getenv("VIPTV_MPV_DEBUG"))
                     fprintf(stderr,"[mpv-debug] input MotionNotify window=%lu\n",(unsigned long)e->xmotion.window);
                 if(a->timeline_dragging&&!a->player_item_live&&a->player&&e->xmotion.window==a->win){int tx,ty,tw,th;timeline_geometry(a,&tx,&ty,&tw,&th);vip_mpv_player_snapshot_t sn={0};vip_mpv_player_snapshot(a->player,&sn);if(sn.duration_seconds>0&&e->xmotion.x>=tx&&e->xmotion.x<=tx+tw){double pos=((double)(e->xmotion.x-tx)/(double)tw)*sn.duration_seconds;vip_error_t er={0};(void)vip_mpv_player_seek(a->player,pos,&er);}}
             }break;
+        case LeaveNotify:
+            if(a->screen==SCREEN_BROWSE){
+                a->mouse_inside=false;
+                if(a->hovered_card_valid) vip_ui_motion_set_target(&a->hover_motion,0.0f,monotonic_ms());
+                a->hovered_control=HOVER_NONE;
+                vip_ui_motion_init(&a->control_motion,0.0f,monotonic_ms());
+                a->ui_motion_active=true;
+            }
+            break;
         case ButtonRelease: if(e->xbutton.button==Button1){a->mouse_down=false;if(a->screen==SCREEN_PLAYER){a->timeline_dragging=false;save_current_progress(a,true);show_player_hud(a);}}break;
         case ButtonPress:
             a->mouse_down=true;
@@ -3303,7 +3783,7 @@ static bool init_x11(app_t *a, vip_error_t *error) {
                                  (unsigned)a->width,(unsigned)a->height,0,
                                  BlackPixel(a->dpy,a->screen_num),BlackPixel(a->dpy,a->screen_num));
     XStoreName(a->dpy,a->win,APP_TITLE);
-    XSelectInput(a->dpy,a->win,ExposureMask|KeyPressMask|ButtonPressMask|ButtonReleaseMask|PointerMotionMask|StructureNotifyMask|FocusChangeMask|PropertyChangeMask);
+    XSelectInput(a->dpy,a->win,ExposureMask|KeyPressMask|ButtonPressMask|ButtonReleaseMask|PointerMotionMask|EnterWindowMask|LeaveWindowMask|StructureNotifyMask|FocusChangeMask|PropertyChangeMask);
     a->wm_delete=XInternAtom(a->dpy,"WM_DELETE_WINDOW",False);
     XSetWMProtocols(a->dpy,a->win,&a->wm_delete,1);
     a->clipboard=XInternAtom(a->dpy,"CLIPBOARD",False);
@@ -3491,6 +3971,7 @@ int vip_x11_app_run(void) {
         maybe_enforce_fullscreen(&a);
         sync_video_window(&a);
         int64_t now=monotonic_ms();
+        bool ui_animating=step_browse_animations(&a,now);
         if (a.screen==SCREEN_PLAYER) save_current_progress(&a,false);
         if (a.screen==SCREEN_PLAYER && a.test_autoback_delay_ms>0 && !a.test_autoback_done &&
             now-a.player_open_ms >= a.test_autoback_delay_ms) {
@@ -3499,7 +3980,10 @@ int vip_x11_app_run(void) {
             fprintf(stderr,"[test] voltar do player OK\n");
         }
         if (a.test_exit_at_ms>0 && now>=a.test_exit_at_ms) a.quit=true;
-        if (now>=next_draw) { redraw(&a); next_draw=now+(a.screen==SCREEN_PLAYER?33:100); }
+        if (now>=next_draw || ui_animating) {
+            redraw(&a);
+            next_draw=now+(a.screen==SCREEN_PLAYER?33:(ui_animating?16:100));
+        }
         fd_set rfds; FD_ZERO(&rfds); FD_SET(xfd,&rfds);
         struct timeval tv={.tv_sec=0,.tv_usec=16000};
         (void)select(xfd+1,&rfds,NULL,NULL,&tv);

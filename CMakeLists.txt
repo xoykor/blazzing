@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(visual_iptv_x11 VERSION 1.2.16 LANGUAGES C)
+project(visual_iptv_x11 VERSION 1.3.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -18,6 +18,8 @@ pkg_check_modules(SQLITE3 REQUIRED IMPORTED_TARGET sqlite3)
 pkg_check_modules(JPEG REQUIRED IMPORTED_TARGET libjpeg)
 pkg_check_modules(PNG REQUIRED IMPORTED_TARGET libpng)
 pkg_check_modules(WEBP REQUIRED IMPORTED_TARGET libwebp)
+pkg_check_modules(CAIRO REQUIRED IMPORTED_TARGET cairo)
+pkg_check_modules(PANGOCAIRO REQUIRED IMPORTED_TARGET pangocairo)
 find_program(FFMPEG_EXECUTABLE NAMES ffmpeg REQUIRED)
 find_program(MPV_EXECUTABLE NAMES mpv)
 
@@ -66,10 +68,13 @@ add_library(vip_player_mpv src/player_mpv/player_mpv.c)
 target_link_libraries(vip_player_mpv PUBLIC vip_core Threads::Threads PkgConfig::JSONC PkgConfig::X11)
 vip_warnings(vip_player_mpv)
 
-add_library(vip_ui_x11 src/ui_x11/x11_app.c)
+add_library(vip_ui_x11
+    src/ui_x11/x11_app.c
+    src/ui_x11/ui_motion.c
+    src/ui_x11/ui_render.c)
 target_link_libraries(vip_ui_x11 PUBLIC
     vip_core vip_provider vip_database vip_decoder vip_thumbnails vip_player_mpv
-    PkgConfig::X11 PkgConfig::JPEG PkgConfig::CURL Threads::Threads)
+    PkgConfig::X11 PkgConfig::JPEG PkgConfig::CURL PkgConfig::CAIRO PkgConfig::PANGOCAIRO Threads::Threads)
 vip_warnings(vip_ui_x11)
 
 add_executable(visual-iptv
@@ -147,6 +152,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_player_mpv PRIVATE vip_player_mpv)
     vip_warnings(test_player_mpv)
     add_test(NAME player_mpv COMMAND test_player_mpv)
+
+    add_executable(test_ui_motion tests/test_ui_motion.c src/ui_x11/ui_motion.c)
+    target_include_directories(test_ui_motion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    vip_warnings(test_ui_motion)
+    add_test(NAME ui_motion COMMAND test_ui_motion)
 endif()
 
 install(TARGETS visual-iptv RUNTIME DESTINATION bin)

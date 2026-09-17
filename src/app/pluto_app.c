@@ -6,6 +6,7 @@
 #include "visual_iptv/player_mpv.h"
 #include "visual_iptv/provider_pluto.h"
 #include "visual_iptv/thumbnails.h"
+#include "visual_iptv/ui_render.h"
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -53,6 +54,7 @@ typedef struct {
     Window win;
     Window video_win;
     GC gc;
+    vip_ui_renderer_t renderer;
     XFontStruct *font;
     Atom wm_delete;
     Visual *visual;
@@ -154,6 +156,7 @@ static void bounded_text(char *dst, size_t cap, const char *src, size_t max_byte
     size_t n = strlen(src);
     if (n > max_bytes) n = max_bytes;
     if (n >= cap) n = cap - 1u;
+    while (n > 0u && (((unsigned char)src[n] & 0xc0u) == 0x80u)) --n;
     memcpy(dst, src, n);
     dst[n] = '\0';
     if (strlen(src) > n && cap >= 4u) {
@@ -408,7 +411,9 @@ static int grid_rows(const pluto_app_t *a) {
 
 static int grid_max_scroll(const pluto_app_t *a) {
     int content_height = grid_rows(a) * (PLUTO_CARD_H + PLUTO_GAP);
-    int viewport = a->height - PLUTO_HEADER_H - 24;
+    int status_reserve = a->status[0] ? 42 : 8;
+    int viewport = a->height - PLUTO_HEADER_H - status_reserve;
+    if (viewport < PLUTO_CARD_H) viewport = PLUTO_CARD_H;
     int max_scroll = content_height - viewport;
     return max_scroll > 0 ? max_scroll : 0;
 }
@@ -422,7 +427,9 @@ static void ensure_selected_visible(pluto_app_t *a) {
     int cols = grid_columns(a);
     int row = (int)(a->selected / (size_t)cols);
     int row_top = row * (PLUTO_CARD_H + PLUTO_GAP);
-    int viewport = a->height - PLUTO_HEADER_H - 24;
+    int status_reserve = a->status[0] ? 42 : 8;
+    int viewport = a->height - PLUTO_HEADER_H - status_reserve;
+    if (viewport < PLUTO_CARD_H) viewport = PLUTO_CARD_H;
     if (row_top < a->scroll) a->scroll = row_top;
     if (row_top + PLUTO_CARD_H > a->scroll + viewport)
         a->scroll = row_top + PLUTO_CARD_H - viewport;
@@ -482,6 +489,24 @@ static void switch_channel(pluto_app_t *a, int delta) {
 }
 
 static void draw_header(pluto_app_t *a) {
+    if (a->renderer.active) {
+        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, PLUTO_HEADER_H, 0x121C2Cu, 0x0C1420u);
+        vip_ui_render_round_rect(&a->renderer, 12, 11, 112, 44, 13, 0x151E2Du, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, 12, 11, 112, 44, 13, 0x2B3950u, 1.0, 1.0);
+        vip_ui_render_text(&a->renderer, 12, 25, 112, a->playing ? "<  Voltar" : "<  Hub",
+                           "Sans SemiBold 9", 0xF6F8FCu, 1.0, true);
+        vip_ui_render_text(&a->renderer, 146, 18, 180, "Pluto TV", "Sans Bold 13", 0xF6F8FCu, 1.0, false);
+        if (!a->playing) {
+            char count[96];
+            snprintf(count, sizeof(count), "%zu canais  ·  sem login", a->channels.len);
+            vip_ui_render_text(&a->renderer, 146, 43, 240, count, "Sans 8", 0x91A0B7u, 1.0, false);
+        } else if (a->selected < a->channels.len) {
+            char title[220];
+            bounded_text(title, sizeof(title), a->channels.items[a->selected].name, 80u);
+            vip_ui_render_text(&a->renderer, 300, 20, a->width - 320, title, "Sans 10", 0x91A0B7u, 1.0, false);
+        }
+        return;
+    }
     fill_rect(a, 0, 0, a->width, PLUTO_HEADER_H, a->panel);
     fill_rect(a, 12, 11, 112, 44, a->panel2);
     stroke_rect(a, 12, 11, 112, 44, a->border);
@@ -499,26 +524,41 @@ static void draw_header(pluto_app_t *a) {
 }
 
 static void draw_grid(pluto_app_t *a) {
-    fill_rect(a, 0, 0, a->width, a->height, a->bg);
+    if (a->renderer.active)
+        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, a->height, 0x050811u, 0x090F1Au);
+    else
+        fill_rect(a, 0, 0, a->width, a->height, a->bg);
     draw_header(a);
     if (a->channels.len == 0u) {
-        draw_center(a, 0, a->height / 2, a->width,
-                    a->status[0] ? a->status : "Nenhum canal recebido do Pluto TV", a->muted);
+        if (a->renderer.active)
+            vip_ui_render_text(&a->renderer, 40, a->height / 2 - 10, a->width - 80,
+                               a->status[0] ? a->status : "Nenhum canal recebido do Pluto TV",
+                               "Sans 10", 0x91A0B7u, 1.0, true);
+        else
+            draw_center(a, 0, a->height / 2, a->width,
+                        a->status[0] ? a->status : "Nenhum canal recebido do Pluto TV", a->muted);
         return;
     }
 
     int cols = grid_columns(a);
     int start_x = 30;
     int start_y = PLUTO_HEADER_H + 18;
+    int content_bottom = a->height - (a->status[0] ? 42 : 8);
     for (size_t i = 0u; i < a->channels.len; ++i) {
         int row = (int)(i / (size_t)cols);
         int col = (int)(i % (size_t)cols);
         int x = start_x + col * (PLUTO_CARD_W + PLUTO_GAP);
         int y = start_y + row * (PLUTO_CARD_H + PLUTO_GAP) - a->scroll;
-        if (y > a->height || y + PLUTO_CARD_H < PLUTO_HEADER_H) continue;
+        if (y + PLUTO_CARD_H > content_bottom || y + PLUTO_CARD_H < PLUTO_HEADER_H) continue;
         vip_channel_t *channel = &a->channels.items[i];
         bool selected = i == a->selected;
-        if (selected) {
+        if (a->renderer.active) {
+            vip_ui_render_round_rect(&a->renderer, x + 4, y + 6, PLUTO_CARD_W, PLUTO_CARD_H, 16, 0x000000u, 0.46);
+            vip_ui_render_round_rect(&a->renderer, x, y, PLUTO_CARD_W, PLUTO_CARD_H, 16,
+                                     selected ? 0x173B67u : 0x151E2Du, 1.0);
+            vip_ui_render_round_stroke(&a->renderer, x, y, PLUTO_CARD_W, PLUTO_CARD_H, 16,
+                                       selected ? 0x62A9FFu : 0x2B3950u, 1.0, selected ? 1.8 : 1.0);
+        } else if (selected) {
             stroke_rect(a, x - 3, y - 3, PLUTO_CARD_W + 6, PLUTO_CARD_H + 6, a->accent);
             stroke_rect(a, x - 2, y - 2, PLUTO_CARD_W + 4, PLUTO_CARD_H + 4, a->accent);
         }
@@ -528,18 +568,31 @@ static void draw_grid(pluto_app_t *a) {
         bool image_ok = path && draw_cached_image(a, path, x, y, PLUTO_CARD_W, PLUTO_ART_H);
         free(path);
         if (!image_ok) {
-            draw_center(a, x, y + PLUTO_ART_H / 2 + 5, PLUTO_CARD_W, "carregando imagem...", a->muted);
+            if (a->renderer.active)
+                vip_ui_render_text(&a->renderer, x + 8, y + PLUTO_ART_H / 2 - 7, PLUTO_CARD_W - 16,
+                                   "carregando imagem...", "Sans 9", 0x91A0B7u, 1.0, true);
+            else
+                draw_center(a, x, y + PLUTO_ART_H / 2 + 5, PLUTO_CARD_W, "carregando imagem...", a->muted);
             enqueue_thumbnail(a, channel, 1000000LL - (int64_t)i);
         }
-        stroke_rect(a, x, y, PLUTO_CARD_W, PLUTO_ART_H, a->border);
-        char title[160];
-        bounded_text(title, sizeof(title), channel->name, 38u);
-        draw_text(a, x, y + PLUTO_ART_H + 24, title, a->text);
+        stroke_rect(a, x, y, PLUTO_CARD_W, PLUTO_ART_H, selected ? a->accent : a->border);
+        char title[192];
+        bounded_text(title, sizeof(title), channel->name, 72u);
+        if (a->renderer.active)
+            vip_ui_render_text(&a->renderer, x + 10, y + PLUTO_ART_H + 12, PLUTO_CARD_W - 20, title,
+                               selected ? "Sans SemiBold 10" : "Sans 10", 0xF6F8FCu, 1.0, false);
+        else
+            draw_text(a, x, y + PLUTO_ART_H + 24, title, a->text);
     }
 
     if (a->status[0]) {
-        fill_rect(a, 0, a->height - 32, a->width, 32, a->panel);
-        draw_text(a, 30, a->height - 11, a->status, a->muted);
+        if (a->renderer.active) {
+            vip_ui_render_round_rect(&a->renderer, 0, a->height - 34, a->width, 34, 0, 0x0E1420u, 0.96);
+            vip_ui_render_text(&a->renderer, 30, a->height - 25, a->width - 60, a->status, "Sans 8", 0x91A0B7u, 1.0, false);
+        } else {
+            fill_rect(a, 0, a->height - 32, a->width, 32, a->panel);
+            draw_text(a, 30, a->height - 11, a->status, a->muted);
+        }
     }
 }
 
@@ -547,33 +600,59 @@ static void draw_player(pluto_app_t *a) {
     fill_rect(a, 0, 0, a->width, a->height, a->black);
     draw_header(a);
     int footer_y = a->height - PLUTO_PLAYER_FOOTER_H;
-    fill_rect(a, 0, footer_y, a->width, PLUTO_PLAYER_FOOTER_H, a->panel);
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, 10, footer_y + 6, a->width - 20, PLUTO_PLAYER_FOOTER_H - 10, 18, 0x0E1420u, 0.96);
+        vip_ui_render_round_stroke(&a->renderer, 10, footer_y + 6, a->width - 20, PLUTO_PLAYER_FOOTER_H - 10, 18, 0x2B3950u, 1.0, 1.0);
+    } else {
+        fill_rect(a, 0, footer_y, a->width, PLUTO_PLAYER_FOOTER_H, a->panel);
+    }
 
     vip_mpv_player_snapshot_t snapshot = {0};
     if (a->player) vip_mpv_player_snapshot(a->player, &snapshot);
-    fill_rect(a, 16, footer_y + 14, 54, 44, a->panel2);
-    stroke_rect(a, 16, footer_y + 14, 54, 44, a->border);
-    draw_center(a, 16, footer_y + 42, 54, snapshot.paused ? ">" : "||", a->text);
-    fill_rect(a, 80, footer_y + 14, 88, 44, a->panel2);
-    stroke_rect(a, 80, footer_y + 14, 88, 44, a->border);
-    draw_center(a, 80, footer_y + 42, 88, "< Voltar", a->text);
-    draw_text(a, 190, footer_y + 40, "<- -> troca canal", a->muted);
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, 16, footer_y + 14, 54, 44, 14, 0x151E2Du, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, 16, footer_y + 14, 54, 44, 14, 0x36506Fu, 1.0, 1.0);
+        vip_ui_render_text(&a->renderer, 16, footer_y + 27, 54, snapshot.paused ? ">" : "||", "Sans Bold 11", 0xF6F8FCu, 1.0, true);
+        vip_ui_render_round_rect(&a->renderer, 80, footer_y + 14, 88, 44, 14, 0x151E2Du, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, 80, footer_y + 14, 88, 44, 14, 0x36506Fu, 1.0, 1.0);
+        vip_ui_render_text(&a->renderer, 80, footer_y + 27, 88, "<  Voltar", "Sans SemiBold 9", 0xF6F8FCu, 1.0, true);
+        vip_ui_render_text(&a->renderer, 190, footer_y + 29, 220, "<-  ->  troca canal", "Sans 9", 0x91A0B7u, 1.0, false);
+    } else {
+        fill_rect(a, 16, footer_y + 14, 54, 44, a->panel2);
+        stroke_rect(a, 16, footer_y + 14, 54, 44, a->border);
+        draw_center(a, 16, footer_y + 42, 54, snapshot.paused ? ">" : "||", a->text);
+        fill_rect(a, 80, footer_y + 14, 88, 44, a->panel2);
+        stroke_rect(a, 80, footer_y + 14, 88, 44, a->border);
+        draw_center(a, 80, footer_y + 42, 88, "< Voltar", a->text);
+        draw_text(a, 190, footer_y + 40, "<- -> troca canal", a->muted);
+    }
 
     const char *state = a->player ? vip_mpv_player_state_name(snapshot.state) : "sem player";
-    int tw = text_width(a, state);
-    draw_text(a, a->width - tw - 20, footer_y + 42, state,
-              snapshot.state == VIP_PLAYER_ERROR ? a->danger : a->muted);
+    if (a->renderer.active) {
+        int tw = vip_ui_render_text_width(&a->renderer, state, "Sans 8");
+        vip_ui_render_text(&a->renderer, a->width - tw - 20, footer_y + 30, tw + 2, state, "Sans 8",
+                           snapshot.state == VIP_PLAYER_ERROR ? 0xFF7185u : 0x91A0B7u, 1.0, false);
+    } else {
+        int tw = text_width(a, state);
+        draw_text(a, a->width - tw - 20, footer_y + 42, state,
+                  snapshot.state == VIP_PLAYER_ERROR ? a->danger : a->muted);
+    }
     if (snapshot.state == VIP_PLAYER_ERROR) {
         const char *message = vip_mpv_player_last_error(a->player);
         char bounded[220];
         bounded_text(bounded, sizeof(bounded), message && message[0] ? message : "Falha no stream", 90u);
-        draw_center(a, 0, a->height / 2, a->width, bounded, a->danger);
+        if (a->renderer.active)
+            vip_ui_render_text(&a->renderer, 40, a->height / 2 - 10, a->width - 80, bounded, "Sans SemiBold 10", 0xFF7185u, 1.0, true);
+        else
+            draw_center(a, 0, a->height / 2, a->width, bounded, a->danger);
     }
 }
 
 static void redraw(pluto_app_t *a) {
+    (void)vip_ui_renderer_begin(&a->renderer, a->dpy, a->win, a->visual, a->width, a->height);
     if (a->playing) draw_player(a);
     else draw_grid(a);
+    vip_ui_renderer_end(&a->renderer);
     XFlush(a->dpy);
 }
 
@@ -684,10 +763,19 @@ static bool init_x11(pluto_app_t *a, vip_error_t *error) {
 }
 
 static void draw_loading(pluto_app_t *a, const char *message) {
-    fill_rect(a, 0, 0, a->width, a->height, a->bg);
-    fill_rect(a, 0, 0, a->width, PLUTO_HEADER_H, a->panel);
-    draw_text(a, 30, 40, "Pluto TV", a->text);
-    draw_center(a, 0, a->height / 2, a->width, message, a->muted);
+    bool modern = vip_ui_renderer_begin(&a->renderer, a->dpy, a->win, a->visual, a->width, a->height);
+    if (modern) {
+        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, a->height, 0x050811u, 0x090F1Au);
+        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, PLUTO_HEADER_H, 0x121C2Cu, 0x0C1420u);
+        vip_ui_render_text(&a->renderer, 30, 22, 200, "Pluto TV", "Sans Bold 13", 0xF6F8FCu, 1.0, false);
+        vip_ui_render_text(&a->renderer, 40, a->height / 2 - 10, a->width - 80, message, "Sans 10", 0x91A0B7u, 1.0, true);
+        vip_ui_renderer_end(&a->renderer);
+    } else {
+        fill_rect(a, 0, 0, a->width, a->height, a->bg);
+        fill_rect(a, 0, 0, a->width, PLUTO_HEADER_H, a->panel);
+        draw_text(a, 30, 40, "Pluto TV", a->text);
+        draw_center(a, 0, a->height / 2, a->width, message, a->muted);
+    }
     XFlush(a->dpy);
 }
 
