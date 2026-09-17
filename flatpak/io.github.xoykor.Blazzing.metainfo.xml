@@ -20,6 +20,11 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.2.14" date="2026-09-17">
+      <description>
+        <p>Hardens thumbnail scheduling, corrupt-artwork handling, mpv IPC and Secret Service writes while prioritizing the active catalog during background prefetch.</p>
+      </description>
+    </release>
     <release version="1.2.13" date="2026-09-17">
       <description>
         <p>Raises the M3U playlist size limit from 32 MiB to 128 MiB for large local and remote playlists, with consistent limit diagnostics.</p>
