@@ -41,7 +41,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define APP_TITLE "Visual IPTV"
+#define APP_TITLE "Blazzing"
 #define DEFAULT_W 1600
 #define DEFAULT_H 900
 #define SIDEBAR_W 270
@@ -125,6 +125,7 @@ typedef struct {
     char *password;
     char *series_id;
     char *title;
+    char *logo_url;
 } series_job_t;
 
 typedef struct {
@@ -156,6 +157,9 @@ struct app {
     Colormap cmap;
     GC gc;
     XFontStruct *font;
+    XFontStruct *font_title;
+    XFontStruct *font_heading;
+    XFontStruct *font_small;
     Atom wm_delete;
     Atom clipboard;
     Atom utf8;
@@ -202,8 +206,10 @@ struct app {
     catalog_t catalogs[3];
     vip_category_list_t episode_categories;
     vip_channel_list_t episode_channels;
+    vip_channel_list_t season_channels;
     content_kind_t content_kind;
     bool series_episode_mode;
+    bool series_season_select;
     char series_title[256];
     char series_parent_id[128];
     vip_media_metadata_t details_metadata;
@@ -263,7 +269,9 @@ static vip_category_list_t *active_categories(app_t *a) {
 }
 
 static vip_channel_list_t *active_channels(app_t *a) {
-    return a->series_episode_mode ? &a->episode_channels : &a->catalogs[(int)a->content_kind].channels;
+    if (a->series_season_select) return &a->season_channels;
+    if (a->series_episode_mode) return &a->episode_channels;
+    return &a->catalogs[(int)a->content_kind].channels;
 }
 
 #define ACTIVE_CATEGORIES(a) (*active_categories((a)))
@@ -288,16 +296,16 @@ static unsigned long alloc_color(app_t *a, const char *hex) {
 }
 
 static void init_palette(app_t *a) {
-    a->colors.bg = alloc_color(a, "#111416");
-    a->colors.panel = alloc_color(a, "#202428");
-    a->colors.panel2 = alloc_color(a, "#171a1d");
-    a->colors.border = alloc_color(a, "#394047");
-    a->colors.text = alloc_color(a, "#f1f3f5");
-    a->colors.muted = alloc_color(a, "#9aa0a6");
-    a->colors.accent = alloc_color(a, "#4ba3ff");
-    a->colors.accent2 = alloc_color(a, "#275d84");
-    a->colors.danger = alloc_color(a, "#ff6b6b");
-    a->colors.black = BlackPixel(a->dpy, a->screen_num);
+    a->colors.bg = alloc_color(a, "#070A12");
+    a->colors.panel = alloc_color(a, "#0E1420");
+    a->colors.panel2 = alloc_color(a, "#151E2D");
+    a->colors.border = alloc_color(a, "#2B3950");
+    a->colors.text = alloc_color(a, "#F6F8FC");
+    a->colors.muted = alloc_color(a, "#91A0B7");
+    a->colors.accent = alloc_color(a, "#62A9FF");
+    a->colors.accent2 = alloc_color(a, "#183E6B");
+    a->colors.danger = alloc_color(a, "#FF7185");
+    a->colors.black = alloc_color(a, "#030509");
 }
 
 static Drawable draw_target(app_t *a) { return a->draw ? a->draw : a->win; }
@@ -307,6 +315,44 @@ static void fill_rect(app_t *a, int x, int y, unsigned w, unsigned h, unsigned l
 }
 static void stroke_rect(app_t *a, int x, int y, unsigned w, unsigned h, unsigned long color) {
     set_fg(a, color); XDrawRectangle(a->dpy, draw_target(a), a->gc, x, y, w, h);
+}
+
+static void fill_round_rect(app_t *a, int x, int y, int w, int h, int r, unsigned long color) {
+    if (w <= 0 || h <= 0) return;
+    if (r < 0) r = 0;
+    if (r * 2 > w) r = w / 2;
+    if (r * 2 > h) r = h / 2;
+    if (r == 0) { fill_rect(a, x, y, (unsigned)w, (unsigned)h, color); return; }
+    set_fg(a, color);
+    XFillRectangle(a->dpy, draw_target(a), a->gc, x + r, y, (unsigned)(w - 2*r), (unsigned)h);
+    XFillRectangle(a->dpy, draw_target(a), a->gc, x, y + r, (unsigned)w, (unsigned)(h - 2*r));
+    XFillArc(a->dpy, draw_target(a), a->gc, x, y, (unsigned)(2*r), (unsigned)(2*r), 90*64, 90*64);
+    XFillArc(a->dpy, draw_target(a), a->gc, x+w-2*r, y, (unsigned)(2*r), (unsigned)(2*r), 0, 90*64);
+    XFillArc(a->dpy, draw_target(a), a->gc, x, y+h-2*r, (unsigned)(2*r), (unsigned)(2*r), 180*64, 90*64);
+    XFillArc(a->dpy, draw_target(a), a->gc, x+w-2*r, y+h-2*r, (unsigned)(2*r), (unsigned)(2*r), 270*64, 90*64);
+}
+
+static void stroke_round_rect(app_t *a, int x, int y, int w, int h, int r, unsigned long color) {
+    if (w <= 0 || h <= 0) return;
+    if (r < 0) r = 0;
+    if (r * 2 > w) r = w / 2;
+    if (r * 2 > h) r = h / 2;
+    if (r == 0) { stroke_rect(a, x, y, (unsigned)w, (unsigned)h, color); return; }
+    set_fg(a, color);
+    XDrawLine(a->dpy, draw_target(a), a->gc, x+r, y, x+w-r, y);
+    XDrawLine(a->dpy, draw_target(a), a->gc, x+r, y+h, x+w-r, y+h);
+    XDrawLine(a->dpy, draw_target(a), a->gc, x, y+r, x, y+h-r);
+    XDrawLine(a->dpy, draw_target(a), a->gc, x+w, y+r, x+w, y+h-r);
+    XDrawArc(a->dpy, draw_target(a), a->gc, x, y, (unsigned)(2*r), (unsigned)(2*r), 90*64, 90*64);
+    XDrawArc(a->dpy, draw_target(a), a->gc, x+w-2*r, y, (unsigned)(2*r), (unsigned)(2*r), 0, 90*64);
+    XDrawArc(a->dpy, draw_target(a), a->gc, x, y+h-2*r, (unsigned)(2*r), (unsigned)(2*r), 180*64, 90*64);
+    XDrawArc(a->dpy, draw_target(a), a->gc, x+w-2*r, y+h-2*r, (unsigned)(2*r), (unsigned)(2*r), 270*64, 90*64);
+}
+
+static void draw_surface(app_t *a, int x, int y, int w, int h, int r, bool focused) {
+    fill_round_rect(a, x + 3, y + 5, w, h, r, a->colors.black);
+    fill_round_rect(a, x, y, w, h, r, focused ? a->colors.accent2 : a->colors.panel2);
+    stroke_round_rect(a, x, y, w, h, r, focused ? a->colors.accent : a->colors.border);
 }
 
 static size_t utf8_to_latin1(char *dst, size_t cap, const char *src) {
@@ -359,6 +405,7 @@ static void draw_text(app_t *a, int x, int y, const char *text, unsigned long co
     if (!text) return;
     char latin[2048];
     size_t len = utf8_to_latin1(latin, sizeof(latin), text);
+    if (a->font) XSetFont(a->dpy, a->gc, a->font->fid);
     set_fg(a, color);
     XDrawString(a->dpy, draw_target(a), a->gc, x, y, latin, (int)len);
 }
@@ -367,6 +414,30 @@ static void draw_centered(app_t *a, int x, int y, int w, const char *text, unsig
     int tw = text_width(a, text);
     draw_text(a, x + (w - tw) / 2, y, text, color);
 }
+
+static int text_width_font(app_t *a, XFontStruct *font, const char *text) {
+    if (!text) return 0;
+    char latin[2048];
+    size_t len = utf8_to_latin1(latin, sizeof(latin), text);
+    XFontStruct *f = font ? font : a->font;
+    return f ? XTextWidth(f, latin, (int)len) : (int)len * 8;
+}
+
+static void draw_text_font(app_t *a, XFontStruct *font, int x, int y, const char *text, unsigned long color) {
+    if (!text) return;
+    char latin[2048];
+    size_t len = utf8_to_latin1(latin, sizeof(latin), text);
+    XFontStruct *f = font ? font : a->font;
+    if (f) XSetFont(a->dpy, a->gc, f->fid);
+    set_fg(a, color);
+    XDrawString(a->dpy, draw_target(a), a->gc, x, y, latin, (int)len);
+}
+
+static void draw_centered_font(app_t *a, XFontStruct *font, int x, int y, int w, const char *text, unsigned long color) {
+    int tw = text_width_font(a, font, text);
+    draw_text_font(a, font, x + (w - tw) / 2, y, text, color);
+}
+
 
 static void bounded_text(char *dst, size_t cap, const char *src, size_t max_bytes) {
     if (!dst || cap == 0) return;
@@ -588,6 +659,7 @@ static bool draw_cached_image_contain(app_t *a, const char *path,
 
 
 static artwork_mode_t default_artwork_mode(const app_t *a) {
+    if (a->series_season_select) return ART_PORTRAIT;
     if (a->series_episode_mode) return ART_LANDSCAPE;
     if (a->content_kind == CONTENT_VOD || a->content_kind == CONTENT_SERIES) return ART_PORTRAIT;
     return ART_LANDSCAPE;
@@ -745,7 +817,8 @@ static void load_media_state(app_t *a) {
     if (a->favorite_flags)
         (void)vip_database_load_favorite_flags(a->db, ACTIVE_CHANNELS(a).items[0].provider_id,
                                                &ACTIVE_CHANNELS(a), a->favorite_flags, count, &error);
-    if (a->progress_flags && (a->content_kind == CONTENT_VOD || a->series_episode_mode)) {
+    if (a->progress_flags &&
+        (a->content_kind == CONTENT_VOD || (a->series_episode_mode && !a->series_season_select))) {
         vip_error_clear(&error);
         (void)vip_database_load_progress(a->db, ACTIVE_CHANNELS(a).items[0].provider_id,
                                          &ACTIVE_CHANNELS(a), a->progress_flags, count, &error);
@@ -783,6 +856,7 @@ static const char *content_label(content_kind_t kind) {
 }
 
 static const char *content_plural(app_t *a) {
+    if (a->series_season_select) return "temporadas";
     if (a->series_episode_mode) return "episódios";
     switch (a->content_kind) {
         case CONTENT_VOD: return "filmes";
@@ -793,6 +867,7 @@ static const char *content_plural(app_t *a) {
 }
 
 static const char *all_content_label(app_t *a) {
+    if (a->series_season_select) return "Todas as temporadas";
     if (a->series_episode_mode) return "Todos os episódios";
     switch (a->content_kind) {
         case CONTENT_VOD: return "Todos os filmes";
@@ -806,6 +881,7 @@ static void switch_content(app_t *a, content_kind_t kind) {
     if (!a || kind < CONTENT_LIVE || kind > CONTENT_SERIES) return;
     if (atomic_load(&a->series_running) || a->series_thread_started) return;
     a->series_episode_mode = false;
+    a->series_season_select = false;
     clear_details_view(a);
     a->content_kind = kind;
     a->favorites_only = false;
@@ -824,7 +900,22 @@ static void switch_content(app_t *a, content_kind_t kind) {
 
 static void return_from_episode_list(app_t *a) {
     if (!a || !a->series_episode_mode) return;
+    if (!a->series_season_select) {
+        a->series_season_select = true;
+        a->selected_category = -1;
+        a->category_scroll = 0;
+        a->grid_scroll = 0;
+        a->focused_filtered = 0;
+        a->search[0] = '\0';
+        a->input_focus = INPUT_SEARCH;
+        snprintf(a->status, sizeof(a->status), "Escolha uma temporada de %s", a->series_title);
+        recalc_category_counts(a);
+        load_media_state(a);
+        rebuild_filter(a);
+        return;
+    }
     a->series_episode_mode = false;
+    a->series_season_select = false;
     clear_details_view(a);
     a->selected_category = -1;
     a->category_scroll = 0;
@@ -934,14 +1025,15 @@ static void prefetch_thumbnail_batch(app_t *a) {
 
     size_t budget = THUMB_PREFETCH_BATCH;
     const size_t primary_budget = (THUMB_PREFETCH_BATCH * 3u) / 4u;
-    bool episode_source = a->series_episode_mode && a->episode_channels.len > 0u;
+    vip_channel_list_t *series_source = a->series_season_select ? &a->season_channels : &a->episode_channels;
+    bool episode_source = a->series_episode_mode && series_source->len > 0u;
     int active_kind = (int)a->content_kind;
 
     /* Spend most of every batch on what the user can actually see. Older
        versions split bandwidth evenly across TV/VOD/series, making the active
        catalog look slow even while invisible catalogs were downloading. */
     if (episode_source) {
-        size_t used = prefetch_thumbnail_list(a, &a->episode_channels,
+        size_t used = prefetch_thumbnail_list(a, series_source,
                                               &a->episode_prefetch_cursor,
                                               primary_budget, THUMB_BACKGROUND_PRIORITY + 1000LL);
         budget -= used > budget ? budget : used;
@@ -1169,6 +1261,7 @@ static void *login_worker(void *userdata) {
         a->active_server_alt = used_alternate;
         a->content_kind = CONTENT_LIVE;
         a->series_episode_mode = false;
+        a->series_season_select = false;
         snprintf(a->active_profile_id, sizeof(a->active_profile_id), "%s", provider_id);
         if (job->mode == LOGIN_XTREAM) {
             fprintf(stderr, "[catalog] filmes: %zu itens/%zu categorias; séries: %zu itens/%zu categorias\n",
@@ -1248,6 +1341,7 @@ static void *series_worker(void *userdata) {
     vip_xtream_client_t *client = NULL;
     vip_category_list_t seasons; vip_category_list_init(&seasons);
     vip_channel_list_t episodes; vip_channel_list_init(&episodes);
+    vip_channel_list_t season_cards; vip_channel_list_init(&season_cards);
     vip_error_t error = {0};
 
     vip_status_t st = vip_credentials_init(&credentials, job->server, job->username, job->password, &error);
@@ -1255,16 +1349,42 @@ static void *series_worker(void *userdata) {
     if (st == VIP_OK) st = vip_xtream_series_episodes(client, job->series_id, &seasons, &episodes, &error);
 
     if (st == VIP_OK) {
+        const char *fallback_provider = episodes.len > 0u ? episodes.items[0].provider_id : credentials.provider_id;
+        for (size_t i = 0; i < seasons.len; ++i) {
+            vip_category_t *season = &seasons.items[i];
+            char season_id[512];
+            snprintf(season_id, sizeof(season_id), "season:%s:%s", job->series_id,
+                     season->id ? season->id : "0");
+            vip_channel_t card = {
+                .provider_id = season->provider_id && season->provider_id[0] ? season->provider_id : (char *)fallback_provider,
+                .id = season_id,
+                .category_id = season->id,
+                .name = season->name ? season->name : "Temporada",
+                .logo_url = job->logo_url && job->logo_url[0] ? job->logo_url : NULL,
+                .stream_url = "series://season",
+                .epg_channel_id = NULL,
+                .position = (int)i,
+            };
+            st = vip_channel_list_push(&season_cards, &card, &error);
+            if (st != VIP_OK) break;
+        }
+    }
+
+    if (st == VIP_OK && season_cards.len > 0u) {
         pthread_mutex_lock(&a->data_mutex);
         vip_category_list_clear(&a->episode_categories);
         vip_channel_list_clear(&a->episode_channels);
+        vip_channel_list_clear(&a->season_channels);
         a->episode_categories = seasons; memset(&seasons, 0, sizeof(seasons));
         a->episode_channels = episodes; memset(&episodes, 0, sizeof(episodes));
+        a->season_channels = season_cards; memset(&season_cards, 0, sizeof(season_cards));
         snprintf(a->series_title, sizeof(a->series_title), "%s", job->title ? job->title : "Série");
-        snprintf(a->status, sizeof(a->status), "%zu episódios", a->episode_channels.len);
+        snprintf(a->status, sizeof(a->status), "%zu temporadas • %zu episódios",
+                 a->season_channels.len, a->episode_channels.len);
         pthread_mutex_unlock(&a->data_mutex);
         atomic_store(&a->series_success, true);
     } else {
+        if (st == VIP_OK) vip_error_set(&error, VIP_ERR_MALFORMED, "nenhuma temporada encontrada");
         pthread_mutex_lock(&a->data_mutex);
         snprintf(a->status, sizeof(a->status), "Falha ao carregar episódios: %s",
                  error.message[0] ? error.message : "erro desconhecido");
@@ -1276,12 +1396,13 @@ static void *series_worker(void *userdata) {
     vip_credentials_clear(&credentials);
     vip_category_list_clear(&seasons);
     vip_channel_list_clear(&episodes);
+    vip_channel_list_clear(&season_cards);
     if (job->password) {
         volatile char *wipe = job->password;
         size_t n = strlen(job->password);
         while (n-- > 0u) *wipe++ = 0;
     }
-    free(job->server); free(job->username); free(job->password); free(job->series_id); free(job->title); free(job);
+    free(job->server); free(job->username); free(job->password); free(job->series_id); free(job->title); free(job->logo_url); free(job);
     atomic_store(&a->series_running, false);
     atomic_store(&a->series_done, true);
     return NULL;
@@ -1303,13 +1424,14 @@ static void start_series_load(app_t *a, size_t channel_index) {
     job->password = vip_strdup(a->password);
     job->series_id = vip_strdup(series->id);
     job->title = vip_strdup(series->name);
-    if (!job->server || !job->username || !job->password || !job->series_id || !job->title) {
+    job->logo_url = vip_strdup(series->logo_url ? series->logo_url : "");
+    if (!job->server || !job->username || !job->password || !job->series_id || !job->title || !job->logo_url) {
         if (job->password) { volatile char *wipe = job->password; size_t n = strlen(job->password); while (n-- > 0u) *wipe++ = 0; }
-        free(job->server); free(job->username); free(job->password); free(job->series_id); free(job->title); free(job);
+        free(job->server); free(job->username); free(job->password); free(job->series_id); free(job->title); free(job->logo_url); free(job);
         return;
     }
     pthread_mutex_lock(&a->data_mutex);
-    snprintf(a->status, sizeof(a->status), "Carregando episódios de %s...", series->name);
+    snprintf(a->status, sizeof(a->status), "Carregando temporadas de %s...", series->name);
     pthread_mutex_unlock(&a->data_mutex);
     atomic_store(&a->series_done, false);
     atomic_store(&a->series_success, false);
@@ -1317,7 +1439,7 @@ static void start_series_load(app_t *a, size_t channel_index) {
     if (pthread_create(&a->series_thread, NULL, series_worker, job) != 0) {
         atomic_store(&a->series_running, false);
         if (job->password) { volatile char *wipe = job->password; size_t n = strlen(job->password); while (n-- > 0u) *wipe++ = 0; }
-        free(job->server); free(job->username); free(job->password); free(job->series_id); free(job->title); free(job);
+        free(job->server); free(job->username); free(job->password); free(job->series_id); free(job->title); free(job->logo_url); free(job);
         return;
     }
     a->series_thread_started = true;
@@ -1501,12 +1623,37 @@ static void maybe_start_details_load(app_t *a) {
     if (!same) start_details_load(a, channel_index);
 }
 
+static void select_season(app_t *a, size_t season_channel_index) {
+    if (!a || !a->series_season_select || season_channel_index >= a->season_channels.len) return;
+    vip_channel_t *season = &a->season_channels.items[season_channel_index];
+    int season_index = season->position;
+    if (season_index < 0 || (size_t)season_index >= a->episode_categories.len) return;
+    a->series_season_select = false;
+    a->selected_category = season_index;
+    a->category_scroll = 0;
+    a->grid_scroll = 0;
+    a->focused_filtered = 0;
+    a->search[0] = '\0';
+    a->input_focus = INPUT_SEARCH;
+    snprintf(a->status, sizeof(a->status), "%s • %s", a->series_title,
+             a->episode_categories.items[season_index].name);
+    recalc_category_counts(a);
+    load_media_state(a);
+    rebuild_filter(a);
+}
+
 static void activate_item(app_t *a, size_t channel_index) {
-    if (a->content_kind == CONTENT_SERIES && !a->series_episode_mode) {
-        start_series_load(a, channel_index);
-    } else {
-        enter_player(a, channel_index);
+    if (a->content_kind == CONTENT_SERIES) {
+        if (a->series_season_select) {
+            select_season(a, channel_index);
+            return;
+        }
+        if (!a->series_episode_mode) {
+            start_series_load(a, channel_index);
+            return;
+        }
     }
+    enter_player(a, channel_index);
 }
 
 static void request_paste(app_t *a, Atom selection) {
@@ -1587,7 +1734,7 @@ static bool keyring_store_password(const char *profile_id, const char *password)
     if (pid == 0) {
         dup2(inpipe[0], STDIN_FILENO);
         close(inpipe[0]); close(inpipe[1]);
-        execlp("secret-tool", "secret-tool", "store", "--label=Visual IPTV", "application", "visual-iptv", "profile", profile_id, (char *)NULL);
+        execlp("secret-tool", "secret-tool", "store", "--label=Blazzing", "application", "visual-iptv", "profile", profile_id, (char *)NULL);
         _exit(127);
     }
     close(inpipe[0]);
@@ -1890,30 +2037,36 @@ static void maybe_failover_player(app_t *a) {
 
 static void draw_input(app_t *a, int x, int y, int w, int h, const char *value,
                        const char *placeholder, int focus_id, bool password) {
-    unsigned long bg = a->colors.panel2;
-    fill_rect(a, x, y, (unsigned)w, (unsigned)h, bg);
-    stroke_rect(a, x, y, (unsigned)w, (unsigned)h,
-                a->input_focus == focus_id ? a->colors.accent : a->colors.border);
+    bool focused = a->input_focus == focus_id;
+    fill_round_rect(a, x + 2, y + 3, w, h, 12, a->colors.black);
+    fill_round_rect(a, x, y, w, h, 12, a->colors.panel2);
+    stroke_round_rect(a, x, y, w, h, 12, focused ? a->colors.accent : a->colors.border);
+    if (focused) stroke_round_rect(a, x + 2, y + 2, w - 4, h - 4, 10, a->colors.accent2);
     const char *text = value && value[0] ? value : placeholder;
     char masked[256];
     if (password && value && value[0]) {
         size_t n = strlen(value); if (n > sizeof(masked)-1) n = sizeof(masked)-1;
         memset(masked, '*', n); masked[n] = '\0'; text = masked;
     }
-    draw_text(a, x + 12, y + h/2 + 6, text, value && value[0] ? a->colors.text : a->colors.muted);
+    draw_text(a, x + 14, y + h/2 + 6, text, value && value[0] ? a->colors.text : a->colors.muted);
 }
 
 static void draw_login(app_t *a) {
     fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.bg);
+    fill_rect(a, 0, 0, (unsigned)a->width, 7, a->colors.accent);
     int w = a->width > 1120 ? 1080 : a->width - 40;
     if (w < 720) w = 720;
     int h = 620;
     int x = (a->width - w) / 2, y = (a->height - h) / 2;
     if (y < 18) y = 18;
-    fill_rect(a, x, y, (unsigned)w, (unsigned)h, a->colors.panel);
-    stroke_rect(a, x, y, (unsigned)w, (unsigned)h, a->colors.border);
-    draw_text(a, x + 34, y + 42, "Visual IPTV", a->colors.text);
-    draw_text(a, x + 34, y + 66, "mpv integrado | Xtream e M3U | perfis locais", a->colors.muted);
+    fill_round_rect(a, x + 8, y + 10, w, h, 24, a->colors.black);
+    fill_round_rect(a, x, y, w, h, 24, a->colors.panel);
+    stroke_round_rect(a, x, y, w, h, 24, a->colors.border);
+
+    fill_round_rect(a, x + 30, y + 25, 42, 42, 13, a->colors.accent);
+    draw_centered_font(a, a->font_heading, x + 30, y + 53, 42, "B", a->colors.bg);
+    draw_text_font(a, a->font_title, x + 86, y + 49, "Blazzing", a->colors.text);
+    draw_text(a, x + 86, y + 69, "Streaming, listas e biblioteca em um só lugar", a->colors.muted);
 
     int form_x = x + 34, form_w = (w * 58) / 100 - 50;
     int list_x = x + (w * 60) / 100, list_w = w - (list_x - x) - 34;
@@ -1922,9 +2075,10 @@ static void draw_login(app_t *a) {
     for (int i = 0; i < 2; ++i) {
         bool selected = (int)a->login_mode == i;
         int bx = form_x + i * (mode_w + 10);
-        fill_rect(a, bx, mode_y, (unsigned)mode_w, 42, selected ? a->colors.accent2 : a->colors.panel2);
-        stroke_rect(a, bx, mode_y, (unsigned)mode_w, 42, selected ? a->colors.accent : a->colors.border);
-        draw_centered(a, bx, mode_y + 27, mode_w, i == LOGIN_XTREAM ? "Xtream" : "M3U", selected ? a->colors.text : a->colors.muted);
+        fill_round_rect(a, bx, mode_y, mode_w, 42, 12, selected ? a->colors.accent2 : a->colors.panel2);
+        stroke_round_rect(a, bx, mode_y, mode_w, 42, 12, selected ? a->colors.accent : a->colors.border);
+        draw_centered(a, bx, mode_y + 27, mode_w, i == LOGIN_XTREAM ? "Xtream" : "M3U",
+                      selected ? a->colors.text : a->colors.muted);
     }
 
     draw_input(a, form_x, y+142, form_w, 44, a->profile_name, "Nome da lista (opcional)", INPUT_PROFILE_NAME, false);
@@ -1936,34 +2090,38 @@ static void draw_login(app_t *a) {
     } else {
         draw_input(a, form_x, y+196, form_w, 44, a->server, "URL ou caminho de playlist .m3u/.m3u8", INPUT_SERVER, false);
         draw_text(a, form_x, y+266, "M3U remoto (HTTP/HTTPS) ou arquivo local.", a->colors.muted);
-        draw_text(a, form_x, y+292, "A playlist é carregada diretamente, sem emulador.", a->colors.muted);
+        draw_text(a, form_x, y+292, "A playlist é processada diretamente pelo Blazzing.", a->colors.muted);
     }
     bool ready = a->server[0] && !atomic_load(&a->login_running) &&
                  (a->login_mode == LOGIN_M3U || (a->username[0] && a->password[0]));
     int connect_y = y + 430;
-    fill_rect(a, form_x, connect_y, (unsigned)form_w, 50, ready ? a->colors.accent2 : a->colors.panel2);
-    stroke_rect(a, form_x, connect_y, (unsigned)form_w, 50, ready ? a->colors.accent : a->colors.border);
-    draw_centered(a, form_x, connect_y+31, form_w, atomic_load(&a->login_running) ? "Conectando..." : "Conectar",
-                  ready ? a->colors.text : a->colors.muted);
+    fill_round_rect(a, form_x + 2, connect_y + 4, form_w, 50, 14, a->colors.black);
+    fill_round_rect(a, form_x, connect_y, form_w, 50, 14, ready ? a->colors.accent : a->colors.panel2);
+    stroke_round_rect(a, form_x, connect_y, form_w, 50, 14, ready ? a->colors.accent : a->colors.border);
+    draw_centered_font(a, a->font_heading, form_x, connect_y+32, form_w,
+                       atomic_load(&a->login_running) ? "Conectando..." : "Conectar",
+                       ready ? a->colors.bg : a->colors.muted);
 
-    draw_text(a, list_x, y+106, "Listas salvas", a->colors.text);
-    int row_y = y + 132;
-    int visible = 7;
+    fill_round_rect(a, list_x - 14, y + 88, list_w + 28, 438, 18, a->colors.panel2);
+    stroke_round_rect(a, list_x - 14, y + 88, list_w + 28, 438, 18, a->colors.border);
+    draw_text_font(a, a->font_heading, list_x, y+116, "Suas listas", a->colors.text);
+    draw_text(a, list_x, y+137, "Acesso rápido aos perfis salvos", a->colors.muted);
+    int row_y = y + 154;
+    int visible = 6;
     for (int r = 0; r < visible; ++r) {
         int idx = a->profile_scroll + r;
         if (idx < 0 || (size_t)idx >= a->profiles.len) break;
         vip_profile_t *p = &a->profiles.items[idx];
-        fill_rect(a, list_x, row_y, (unsigned)list_w, 52, a->colors.panel2);
-        stroke_rect(a, list_x, row_y, (unsigned)list_w, 52, a->colors.border);
+        draw_surface(a, list_x, row_y, list_w, 52, 12, false);
         char label[220];
-        snprintf(label, sizeof(label), "%s  [%s]", p->name ? p->name : "Lista", p->type == VIP_PROFILE_M3U ? "M3U" : "Xtream");
+        snprintf(label, sizeof(label), "%s  ·  %s", p->name ? p->name : "Lista", p->type == VIP_PROFILE_M3U ? "M3U" : "Xtream");
         bounded_text(label, sizeof(label), label, 44);
-        draw_text(a, list_x+12, row_y+23, label, a->colors.text);
-        char sub[220]; bounded_text(sub, sizeof(sub), p->server ? p->server : "", 48);
-        draw_text(a, list_x+12, row_y+43, sub, a->colors.muted);
+        draw_text(a, list_x+13, row_y+22, label, a->colors.text);
+        char sub[220]; bounded_text(sub, sizeof(sub), p->server ? p->server : "", 46);
+        draw_text_font(a, a->font_small, list_x+13, row_y+42, sub, a->colors.muted);
         row_y += 60;
     }
-    if (a->profiles.len == 0u) draw_text(a, list_x, y+154, "Nenhuma lista salva ainda.", a->colors.muted);
+    if (a->profiles.len == 0u) draw_text(a, list_x, y+182, "Nenhuma lista salva ainda.", a->colors.muted);
 
     char status_copy[512];
     pthread_mutex_lock(&a->data_mutex);
@@ -2045,8 +2203,9 @@ static void draw_details_panel(app_t *a) {
 
     int px, py, pw, ph;
     details_panel_geometry(a, &px, &py, &pw, &ph);
-    fill_rect(a, px, py, (unsigned)pw, (unsigned)ph, a->colors.panel);
-    stroke_rect(a, px, py, (unsigned)pw, (unsigned)ph, a->colors.border);
+    fill_round_rect(a, px + 4, py + 6, pw, ph, 18, a->colors.black);
+    fill_round_rect(a, px, py, pw, ph, 18, a->colors.panel);
+    stroke_round_rect(a, px, py, pw, ph, 18, a->colors.border);
 
     char loaded_id[128], status[256], plot[3072], cover[1024], backdrop[1024];
     char genre[256], release_date[128], rating[64], duration[128], cast[768], director[512];
@@ -2065,13 +2224,13 @@ static void draw_details_panel(app_t *a) {
     pthread_mutex_unlock(&a->data_mutex);
 
     char title[256]; bounded_text(title, sizeof(title), ch->name, 44);
-    draw_text(a, px + 16, py + 30, title, a->colors.text);
+    draw_text_font(a, a->font_heading, px + 16, py + 31, title, a->colors.text);
     bool favorite = a->favorite_flags && a->favorite_flags[chidx];
     int fav_w = 92, fav_h = 32, fav_x = px + pw - fav_w - 14, fav_y = py + 10;
-    fill_rect(a, fav_x, fav_y, (unsigned)fav_w, (unsigned)fav_h,
-              favorite ? a->colors.accent2 : a->colors.panel2);
-    stroke_rect(a, fav_x, fav_y, (unsigned)fav_w, (unsigned)fav_h,
-                favorite ? a->colors.accent : a->colors.border);
+    fill_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12,
+                    favorite ? a->colors.accent2 : a->colors.panel2);
+    stroke_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12,
+                      favorite ? a->colors.accent : a->colors.border);
     draw_centered(a, fav_x, fav_y + 21, fav_w, favorite ? "SALVO" : "FAVORITAR",
                   favorite ? a->colors.text : a->colors.muted);
 
@@ -2135,14 +2294,15 @@ static void draw_details_panel(app_t *a) {
 
 static void draw_toast(app_t *a) {
     if (!a || !a->toast[0] || monotonic_ms() >= a->toast_until_ms) return;
-    int w = text_width(a, a->toast) + 38;
+    int w = text_width(a, a->toast) + 44;
     if (w < 220) w = 220;
     if (w > a->width - 40) w = a->width - 40;
     int x = (a->width - w) / 2;
     int y = TOPBAR_H + 10;
-    fill_rect(a, x, y, (unsigned)w, 40, a->colors.panel2);
-    stroke_rect(a, x, y, (unsigned)w, 40, a->colors.accent);
-    draw_centered(a, x, y + 26, w, a->toast, a->colors.text);
+    fill_round_rect(a, x + 3, y + 4, w, 42, 14, a->colors.black);
+    fill_round_rect(a, x, y, w, 42, 14, a->colors.panel2);
+    stroke_round_rect(a, x, y, w, 42, 14, a->colors.accent);
+    draw_centered(a, x, y + 27, w, a->toast, a->colors.text);
 }
 
 static int category_visible_rows(app_t *a) { int n = (a->height - TOPBAR_H - 50) / 40; return n > 1 ? n : 1; }
@@ -2150,17 +2310,19 @@ static int category_visible_rows(app_t *a) { int n = (a->height - TOPBAR_H - 50)
 static void draw_browse(app_t *a) {
     fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.bg);
     fill_rect(a, 0, 0, (unsigned)a->width, TOPBAR_H, a->colors.panel);
+    fill_rect(a, 0, 0, (unsigned)a->width, 4, a->colors.accent);
     fill_rect(a, 0, TOPBAR_H, SIDEBAR_W, (unsigned)(a->height-TOPBAR_H), a->colors.panel2);
+    fill_rect(a, SIDEBAR_W-1, TOPBAR_H, 1, (unsigned)(a->height-TOPBAR_H), a->colors.border);
 
     const int tab_y = 12, tab_h = 46;
     const int tab_x[3] = {8, 88, 174};
     const int tab_w[3] = {74, 80, 88};
     for (int k = 0; k < 3; ++k) {
         bool selected = (int)a->content_kind == k;
-        fill_rect(a, tab_x[k], tab_y, (unsigned)tab_w[k], (unsigned)tab_h,
-                  selected ? a->colors.accent2 : a->colors.panel2);
-        stroke_rect(a, tab_x[k], tab_y, (unsigned)tab_w[k], (unsigned)tab_h,
-                    selected ? a->colors.accent : a->colors.border);
+        fill_round_rect(a, tab_x[k], tab_y, tab_w[k], tab_h, 13,
+                        selected ? a->colors.accent2 : a->colors.panel2);
+        stroke_round_rect(a, tab_x[k], tab_y, tab_w[k], tab_h, 13,
+                          selected ? a->colors.accent : a->colors.border);
         draw_centered(a, tab_x[k], 42, tab_w[k], content_label((content_kind_t)k),
                       selected ? a->colors.text : a->colors.muted);
     }
@@ -2172,17 +2334,17 @@ static void draw_browse(app_t *a) {
     if (search_w < 180) search_w = 180;
     char search_hint[96]; snprintf(search_hint, sizeof(search_hint), "Buscar %s...", content_plural(a));
     draw_input(a, SIDEBAR_W+18, 12, search_w, 46, a->search, search_hint, INPUT_SEARCH, false);
-    fill_rect(a, fav_x, 12, (unsigned)fav_w, 46, a->favorites_only ? a->colors.accent2 : a->colors.panel2);
-    stroke_rect(a, fav_x, 12, (unsigned)fav_w, 46, a->favorites_only ? a->colors.accent : a->colors.border);
+    fill_round_rect(a, fav_x, 12, fav_w, 46, 13, a->favorites_only ? a->colors.accent2 : a->colors.panel2);
+    stroke_round_rect(a, fav_x, 12, fav_w, 46, 13, a->favorites_only ? a->colors.accent : a->colors.border);
     char fav_label[128]; snprintf(fav_label, sizeof(fav_label), "* Favoritos (%zu)", favorite_count(a));
     draw_centered(a, fav_x, 42, fav_w, fav_label, a->favorites_only ? a->colors.text : a->colors.muted);
-    fill_rect(a, list_x, 12, (unsigned)list_w, 46, a->colors.panel2);
-    stroke_rect(a, list_x, 12, (unsigned)list_w, 46, a->colors.border);
+    fill_round_rect(a, list_x, 12, list_w, 46, 13, a->colors.panel2);
+    stroke_round_rect(a, list_x, 12, list_w, 46, 13, a->colors.border);
     draw_centered(a, list_x, 42, list_w, "Listas", a->colors.muted);
 
     int y = TOPBAR_H + 12;
     bool all_sel = a->selected_category < 0;
-    fill_rect(a, 8, y, SIDEBAR_W-16, 36, all_sel ? a->colors.accent2 : a->colors.panel2);
+    fill_round_rect(a, 8, y, SIDEBAR_W-16, 36, 11, all_sel ? a->colors.accent2 : a->colors.panel2);
     char all_label[128]; snprintf(all_label, sizeof(all_label), "%s (%zu)", all_content_label(a), ACTIVE_CHANNELS(a).len);
     draw_text(a, 18, y+24, all_label, all_sel ? a->colors.text : a->colors.muted);
     y += 42;
@@ -2191,7 +2353,7 @@ static void draw_browse(app_t *a) {
         int idx = a->category_scroll + r;
         if (idx < 0 || (size_t)idx >= ACTIVE_CATEGORIES(a).len) break;
         bool selected = a->selected_category == idx;
-        fill_rect(a, 8, y, SIDEBAR_W-16, 36, selected ? a->colors.accent2 : a->colors.panel2);
+        fill_round_rect(a, 8, y, SIDEBAR_W-16, 36, 11, selected ? a->colors.accent2 : a->colors.panel2);
         char full_label[512]; char label[256]; size_t count = a->category_counts ? a->category_counts[idx] : 0;
         snprintf(full_label, sizeof(full_label), "%s (%zu)", ACTIVE_CATEGORIES(a).items[idx].name, count);
         bounded_text(label, sizeof(label), full_label, 34);
@@ -2224,11 +2386,13 @@ static void draw_browse(app_t *a) {
             vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
             int cx = content_x + col * (layout.card_w + GRID_GAP);
             bool focused = fidx == a->focused_filtered;
+            fill_round_rect(a, cx + 4, cy + 6, layout.card_w, layout.card_h, 16, a->colors.black);
+            fill_round_rect(a, cx, cy, layout.card_w, layout.card_h, 16, a->colors.panel2);
             if (focused) {
-                stroke_rect(a, cx-3, cy-3, (unsigned)(layout.card_w+6), (unsigned)(layout.card_h+6), a->colors.accent);
-                stroke_rect(a, cx-2, cy-2, (unsigned)(layout.card_w+4), (unsigned)(layout.card_h+4), a->colors.accent);
+                stroke_round_rect(a, cx-3, cy-3, layout.card_w+6, layout.card_h+6, 18, a->colors.accent);
+                stroke_round_rect(a, cx-1, cy-1, layout.card_w+2, layout.card_h+2, 17, a->colors.accent2);
             }
-            fill_rect(a, cx, cy, (unsigned)layout.card_w, (unsigned)layout.art_h, a->colors.black);
+            fill_round_rect(a, cx, cy, layout.card_w, layout.art_h, 14, a->colors.black);
             vip_error_t error = {0};
             char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
             bool image_ok = path && draw_cached_image_contain(a, path, cx, cy, layout.card_w, layout.art_h);
@@ -2239,16 +2403,17 @@ static void draw_browse(app_t *a) {
                 enqueue_thumbnail(a, ch, priority);
             }
             free(path);
-            stroke_rect(a, cx, cy, (unsigned)layout.card_w, (unsigned)layout.art_h, a->colors.border);
+            stroke_round_rect(a, cx, cy, layout.card_w, layout.art_h, 14, focused ? a->colors.accent : a->colors.border);
             bool favorite = a->favorite_flags && a->favorite_flags[chidx];
             int card_fav_w = 58, card_fav_h = 28, card_fav_x = cx + layout.card_w - card_fav_w - 6, card_fav_y = cy + 6;
-            fill_rect(a, card_fav_x, card_fav_y, (unsigned)card_fav_w, (unsigned)card_fav_h,
-                      favorite ? a->colors.accent2 : a->colors.panel2);
-            stroke_rect(a, card_fav_x, card_fav_y, (unsigned)card_fav_w, (unsigned)card_fav_h,
-                        favorite ? a->colors.accent : a->colors.border);
+            fill_round_rect(a, card_fav_x, card_fav_y, card_fav_w, card_fav_h, 10,
+                            favorite ? a->colors.accent2 : a->colors.panel);
+            stroke_round_rect(a, card_fav_x, card_fav_y, card_fav_w, card_fav_h, 10,
+                              favorite ? a->colors.accent : a->colors.border);
             draw_centered(a, card_fav_x, card_fav_y + 19, card_fav_w, favorite ? "SALVO" : "FAV",
                           favorite ? a->colors.text : a->colors.muted);
-            if (a->progress_flags && (a->content_kind == CONTENT_VOD || a->series_episode_mode)) {
+            if (a->progress_flags &&
+                (a->content_kind == CONTENT_VOD || (a->series_episode_mode && !a->series_season_select))) {
                 vip_watch_progress_t *pr = &a->progress_flags[chidx];
                 if (pr->duration_seconds > 1.0 || pr->completed) {
                     double ratio = pr->completed ? 1.0 : pr->position_seconds / pr->duration_seconds;
@@ -2272,12 +2437,20 @@ static void draw_browse(app_t *a) {
                 }
             }
             char title[160]; bounded_text(title, sizeof(title), ch->name, layout.mode == ART_PORTRAIT ? 28 : 42);
-            draw_text(a, cx, cy + layout.art_h + 24, title, a->colors.text);
-            if (a->content_kind == CONTENT_SERIES && !a->series_episode_mode &&
+            draw_text_font(a, focused ? a->font_heading : a->font, cx + 8, cy + layout.art_h + 25, title, a->colors.text);
+            if (a->series_season_select) {
+                size_t season_count = 0u;
+                for (size_t ei = 0; ei < a->episode_channels.len; ++ei) {
+                    const char *cid = a->episode_channels.items[ei].category_id;
+                    if (cid && ch->category_id && strcmp(cid, ch->category_id) == 0) ++season_count;
+                }
+                char meta[72]; snprintf(meta, sizeof(meta), "%zu episódio%s", season_count, season_count == 1u ? "" : "s");
+                draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 44, meta, a->colors.muted);
+            } else if (a->content_kind == CONTENT_SERIES && !a->series_episode_mode &&
                 a->series_watched && a->series_total && a->series_total[chidx] > 0) {
                 char progress[80];
                 snprintf(progress, sizeof(progress), "%d/%d episódios", a->series_watched[chidx], a->series_total[chidx]);
-                draw_text(a, cx, cy + layout.art_h + 43, progress, a->colors.muted);
+                draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 44, progress, a->colors.muted);
             }
         }
     }
@@ -2288,8 +2461,9 @@ static void draw_browse(app_t *a) {
         char loading[512];
         pthread_mutex_lock(&a->data_mutex); snprintf(loading, sizeof(loading), "%s", a->status); pthread_mutex_unlock(&a->data_mutex);
         int box_w = avail_w > 680 ? 680 : avail_w; int box_x = content_x + (avail_w - box_w) / 2; int box_y = content_y + 20;
-        fill_rect(a, box_x, box_y, (unsigned)box_w, 56, a->colors.panel2);
-        stroke_rect(a, box_x, box_y, (unsigned)box_w, 56, a->colors.accent);
+        fill_round_rect(a, box_x + 3, box_y + 4, box_w, 56, 16, a->colors.black);
+        fill_round_rect(a, box_x, box_y, box_w, 56, 16, a->colors.panel2);
+        stroke_round_rect(a, box_x, box_y, box_w, 56, 16, a->colors.accent);
         draw_centered(a, box_x, box_y + 35, box_w, loading, a->colors.text);
     }
     draw_toast(a);
@@ -2348,52 +2522,53 @@ static void draw_player(app_t *a) {
 
     if (!a->fullscreen) {
         fill_rect(a, 0, 0, (unsigned)a->width, PLAYER_HEADER_H, a->colors.panel);
-        fill_rect(a, 12, 10, 132, 44, a->colors.panel2);
-        stroke_rect(a, 12, 10, 132, 44, a->colors.border);
+        fill_round_rect(a, 12, 10, 132, 44, 13, a->colors.panel2);
+        stroke_round_rect(a, 12, 10, 132, 44, 13, a->colors.border);
         draw_text(a, 28, 39, "< Voltar", a->colors.text);
         if (a->current_channel < ACTIVE_CHANNELS(a).len)
-            draw_text(a, 168, 39, ACTIVE_CHANNELS(a).items[a->current_channel].name, a->colors.text);
+            draw_text_font(a, a->font_heading, 168, 39, ACTIVE_CHANNELS(a).items[a->current_channel].name, a->colors.text);
     }
 
     if (hud) {
         int y = a->height - PLAYER_CONTROLS_H;
         fill_rect(a, 0, y, (unsigned)a->width, PLAYER_CONTROLS_H, a->colors.panel);
-        fill_rect(a, 16, y+18, 52, 46, a->colors.panel2);
-        stroke_rect(a, 16, y+18, 52, 46, a->colors.border);
-        draw_centered(a, 16, y+47, 52, snap.paused ? ">" : "||", a->colors.text);
-        fill_rect(a, 76, y+18, 82, 46, a->colors.panel2);
-        stroke_rect(a, 76, y+18, 82, 46, a->colors.border);
-        draw_centered(a, 76, y+47, 82, "< Voltar", a->colors.text);
+        fill_rect(a, 0, y, (unsigned)a->width, 1, a->colors.border);
+        fill_round_rect(a, 16, y+18, 52, 46, 14, a->colors.panel2);
+        stroke_round_rect(a, 16, y+18, 52, 46, 14, a->colors.border);
+        draw_centered_font(a, a->font_heading, 16, y+48, 52, snap.paused ? ">" : "||", a->colors.text);
+        fill_round_rect(a, 76, y+18, 82, 46, 14, a->colors.panel2);
+        stroke_round_rect(a, 76, y+18, 82, 46, 14, a->colors.border);
+        draw_centered(a, 76, y+47, 82, "Voltar", a->colors.text);
         if (a->player_item_live) {
-            draw_text(a, 176, y+48, "AO VIVO", a->colors.text);
-            draw_text(a, 258, y+48, "<- -> troca canal", a->colors.muted);
+            fill_round_rect(a, 176, y+22, 76, 30, 12, a->colors.danger);
+            draw_centered(a, 176, y+43, 76, "AO VIVO", a->colors.text);
+            draw_text(a, 270, y+44, "<- -> troca canal", a->colors.muted);
         } else {
             int tx,ty,tw,th; timeline_geometry(a,&tx,&ty,&tw,&th);
-            fill_rect(a, tx, ty, (unsigned)tw, (unsigned)th, a->colors.panel2);
+            fill_round_rect(a, tx, ty, tw, th, th/2, a->colors.panel2);
             double ratio = snap.duration_seconds > 0.0 ? snap.position_seconds / snap.duration_seconds : 0.0;
             if (ratio < 0.0) ratio = 0.0;
             if (ratio > 1.0) ratio = 1.0;
             int fill = (int)((double)tw * ratio);
-            if (fill > 0) fill_rect(a, tx, ty, (unsigned)fill, (unsigned)th, a->colors.accent);
-            stroke_rect(a, tx, ty, (unsigned)tw, (unsigned)th, a->colors.border);
+            if (fill > 0) fill_round_rect(a, tx, ty, fill, th, th/2, a->colors.accent);
             char pos[32], dur[32]; format_clock(snap.position_seconds,pos); format_clock(snap.duration_seconds,dur);
             draw_text(a, 166, y+45, pos, a->colors.text);
             draw_text(a, a->width-150, y+45, dur, a->colors.text);
-            draw_text(a, tx, y+70, "Clique/arraste para buscar | <- -> 10s", a->colors.muted);
+            draw_text_font(a, a->font_small, tx, y+70, "Clique/arraste para buscar  ·  <- -> 10s", a->colors.muted);
         }
         int sw = text_width(a, state_text);
-        draw_text(a, a->width - sw - 18, y+72, state_text,
-                  player_state == VIP_PLAYER_ERROR ? a->colors.danger : a->colors.muted);
+        draw_text_font(a, a->font_small, a->width - sw - 18, y+72, state_text,
+                       player_state == VIP_PLAYER_ERROR ? a->colors.danger : a->colors.muted);
     }
 
     if (player_state == VIP_PLAYER_ERROR) {
         const char *err = a->player ? vip_mpv_player_last_error(a->player) : a->player_status;
         char bounded[220]; bounded_text(bounded, sizeof(bounded), err && err[0] ? err : "Falha desconhecida no stream", 90);
-        draw_centered(a, 0, a->height / 2 - 12, a->width, "Erro ao reproduzir", a->colors.danger);
+        draw_centered_font(a, a->font_heading, 0, a->height / 2 - 12, a->width, "Não foi possível reproduzir", a->colors.danger);
         draw_centered(a, 20, a->height / 2 + 22, a->width - 40, bounded, a->colors.muted);
         draw_centered(a, 0, a->height / 2 + 56, a->width, "Pressione Esc para voltar", a->colors.muted);
     } else if (!a->video_mapped) {
-        draw_centered(a, 0, a->height / 2, a->width, state_text, a->colors.muted);
+        draw_centered_font(a, a->font_heading, 0, a->height / 2, a->width, state_text, a->colors.muted);
     }
 }
 
@@ -2794,6 +2969,9 @@ static bool init_x11(app_t *a, vip_error_t *error) {
     a->font=XLoadQueryFont(a->dpy,"-misc-fixed-medium-r-normal--15-*-*-*-*-*-iso8859-1");
     if (!a->font) a->font=XLoadQueryFont(a->dpy,"9x15");
     if (!a->font) a->font=XLoadQueryFont(a->dpy,"fixed");
+    a->font_title=XLoadQueryFont(a->dpy,"-*-helvetica-bold-r-normal--24-*-*-*-*-*-iso8859-1");
+    a->font_heading=XLoadQueryFont(a->dpy,"-*-helvetica-bold-r-normal--18-*-*-*-*-*-iso8859-1");
+    a->font_small=XLoadQueryFont(a->dpy,"-*-helvetica-medium-r-normal--13-*-*-*-*-*-iso8859-1");
     if (a->font) XSetFont(a->dpy,a->gc,a->font->fid);
     a->video_win = XCreateSimpleWindow(a->dpy, a->win, 0, 0, 1, 1, 0,
                                        BlackPixel(a->dpy,a->screen_num),
@@ -2868,8 +3046,12 @@ static void destroy_app(app_t *a) {
     }
     vip_category_list_clear(&a->episode_categories);
     vip_channel_list_clear(&a->episode_channels);
+    vip_channel_list_clear(&a->season_channels);
     pthread_mutex_destroy(&a->data_mutex);
     if (a->dpy) {
+        if (a->font_title) XFreeFont(a->dpy,a->font_title);
+        if (a->font_heading) XFreeFont(a->dpy,a->font_heading);
+        if (a->font_small) XFreeFont(a->dpy,a->font_small);
         if (a->font) XFreeFont(a->dpy,a->font);
         if (a->backbuffer) XFreePixmap(a->dpy,a->backbuffer);
         if (a->gc) XFreeGC(a->dpy,a->gc);
@@ -2896,7 +3078,7 @@ static void handle_async(app_t *a) {
         if(a->series_thread_started){pthread_join(a->series_thread,NULL);a->series_thread_started=false;}
         if(atomic_load(&a->series_success)&&a->content_kind==CONTENT_SERIES){
             clear_details_view(a);
-            a->series_episode_mode=true;a->favorites_only=false;a->selected_category=-1;a->category_scroll=0;a->grid_scroll=0;a->focused_filtered=0;a->search[0]='\0';
+            a->series_episode_mode=true;a->series_season_select=true;a->favorites_only=false;a->selected_category=-1;a->category_scroll=0;a->grid_scroll=0;a->focused_filtered=0;a->search[0]='\0';
             recalc_category_counts(a);load_media_state(a);rebuild_filter(a);
             fprintf(stderr,"[series] %zu episódios carregados\n",ACTIVE_CHANNELS(a).len);
         }
@@ -2937,6 +3119,7 @@ int vip_x11_app_run(void) {
     }
     vip_category_list_init(&a.episode_categories);
     vip_channel_list_init(&a.episode_channels);
+    vip_channel_list_init(&a.season_channels);
     vip_profile_list_init(&a.profiles);
     atomic_init(&a.login_running,false); atomic_init(&a.login_done,false); atomic_init(&a.login_success,false);
     atomic_init(&a.series_running,false); atomic_init(&a.series_done,false); atomic_init(&a.series_success,false);

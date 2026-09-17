@@ -1,3 +1,14 @@
+## 1.2.15 — 2026-09-17
+
+Atualização de UI/UX e navegação de séries:
+
+- redesenha a interface principal de IPTV com visual azul-escuro, superfícies arredondadas e hierarquia tipográfica mais clara;
+- renova login, navegação do catálogo, painel de detalhes/metadados e HUD do player incorporado sem alterar os atalhos existentes de teclado e mouse;
+- séries agora abrem primeiro na seleção de temporada e, depois, exibem apenas os episódios da temporada escolhida;
+- redesenha o hub de streaming e identifica serviços com DRM como sessões externas abertas no navegador, sem sugerir importação ou login integrado;
+- mantém o identificador existente do Secret Service para compatibilidade com senhas já salvas, usando “Blazzing” como novo rótulo visível;
+- valida o redesign combinado com a suíte completa de 11 testes.
+
 ## 1.2.14 — 2026-09-17
 
 Hardening de confiabilidade, segurança e desempenho das miniaturas:

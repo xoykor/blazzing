@@ -1,3 +1,14 @@
+## 1.2.15 — 2026-09-17
+
+UI/UX and series-navigation update:
+
+- redesigns the main IPTV interface with a darker blue visual system, rounded surfaces and clearer typography hierarchy;
+- refreshes login, catalog browsing, metadata/details and the embedded-player HUD while preserving existing keyboard and mouse navigation;
+- series now open with a season-first flow, then show the episodes for the selected season;
+- redesigns the streaming hub and labels DRM services as external browser sessions instead of imported/integrated account sessions;
+- keeps the existing Secret Service identifier for backward compatibility while presenting new saved credentials under the Blazzing label;
+- validates the combined redesign with the full 11-test suite.
+
 ## 1.2.14 — 2026-09-17
 
 Reliability, security and thumbnail performance hardening:

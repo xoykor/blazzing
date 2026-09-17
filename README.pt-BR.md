@@ -21,7 +21,7 @@ Cliente IPTV desktop nativo para Linux/X11, escrito em C17, com foco em uma inte
 - Download e cache assíncronos de thumbnails com 4 workers.
 - Decodificação direta de JPEG, PNG e WebP; FFmpeg é usado como fallback para captura de frames.
 - Metadados de filmes e séries: sinopse, capa, backdrop, gênero, lançamento, nota, duração, elenco, direção e trailer quando fornecidos pelo provedor.
-- Temporadas e episódios.
+- Navegação de séries por temporada antes da seleção dos episódios.
 - Favoritos persistentes.
 - Progresso e retomada de filmes/episódios, incluindo progresso agregado de séries.
 - Perfis/listas salvos localmente.
