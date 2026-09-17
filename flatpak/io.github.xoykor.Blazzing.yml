@@ -150,6 +150,24 @@ modules:
         url: https://s3.amazonaws.com/json-c_releases/releases/json-c-0.18.tar.gz
         sha256: 876ab046479166b869afc6896d288183bbc0e5843f141200c677b3e8dfb11724
 
+  - name: libqrencode
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DWITH_TOOLS=OFF
+      - -DWITH_TESTS=OFF
+      - -DWITHOUT_PNG=ON
+      - -DBUILD_SHARED_LIBS=ON
+      - -DCMAKE_BUILD_TYPE=Release
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /share/man
+    sources:
+      - type: git
+        url: https://github.com/fukuchi/libqrencode.git
+        tag: v4.1.1
+        commit: 715e29fd4cd71b6e452ae0f4e36d917b43122ce8
+
   - name: blazzing
     buildsystem: cmake-ninja
     config-opts:
