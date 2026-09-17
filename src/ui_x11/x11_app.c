@@ -11,6 +11,7 @@
 #include "visual_iptv/database.h"
 #include "visual_iptv/decoder.h"
 #include "visual_iptv/player_mpv.h"
+#include "visual_iptv/pairing_server.h"
 #include "visual_iptv/provider.h"
 #include "visual_iptv/provider_m3u.h"
 #include "visual_iptv/server_resolver.h"
@@ -219,6 +220,12 @@ struct app {
     bool active_server_alt;
     vip_profile_list_t profiles;
     int profile_scroll;
+
+    vip_pairing_server_t *pairing_server;
+    atomic_bool pairing_submission;
+    char pairing_pending_url[512];
+    char pairing_pending_name[128];
+    char pairing_page_url[256];
 
     pthread_t login_thread;
     bool login_thread_started;
@@ -1919,6 +1926,41 @@ static void start_login(app_t *a) {
     a->login_thread_started = true;
 }
 
+static void pairing_submission_cb(const char *profile_name,
+                                  const char *playlist_url,
+                                  void *userdata) {
+    app_t *a = userdata;
+    if (!a || !playlist_url || !playlist_url[0])
+        return;
+    pthread_mutex_lock(&a->data_mutex);
+    snprintf(a->pairing_pending_url, sizeof(a->pairing_pending_url), "%s", playlist_url);
+    snprintf(a->pairing_pending_name, sizeof(a->pairing_pending_name), "%s",
+             profile_name ? profile_name : "");
+    pthread_mutex_unlock(&a->data_mutex);
+    atomic_store(&a->pairing_submission, true);
+}
+
+static void start_phone_pairing(app_t *a) {
+    if (!a || a->login_mode != LOGIN_M3U)
+        return;
+    if (a->pairing_server) {
+        vip_pairing_server_url(a->pairing_server, a->pairing_page_url, sizeof(a->pairing_page_url));
+        snprintf(a->status, sizeof(a->status), "Abra no celular: %s", a->pairing_page_url);
+        return;
+    }
+
+    vip_error_t error = {0};
+    if (vip_pairing_server_start(&a->pairing_server, pairing_submission_cb, a, &error) != VIP_OK) {
+        snprintf(a->status, sizeof(a->status), "%s",
+                 error.message[0] ? error.message : "Falha ao iniciar pareamento");
+        return;
+    }
+
+    vip_pairing_server_url(a->pairing_server, a->pairing_page_url, sizeof(a->pairing_page_url));
+    snprintf(a->status, sizeof(a->status), "Abra no celular: %s", a->pairing_page_url);
+    fprintf(stderr, "[pairing] aguardando playlist em %s\n", a->pairing_page_url);
+}
+
 /* Run the series background worker. */
 static void *series_worker(void *userdata) {
     series_job_t *job = userdata;
@@ -3262,6 +3304,32 @@ static void draw_login(app_t *a) {
             draw_text(a, form_x, y + 292, "A playlist é processada diretamente pelo Blazzing.",
                       a->colors.muted);
         }
+
+        int phone_y = y + 314;
+        bool waiting_phone = a->pairing_server != NULL;
+        if (a->renderer.active) {
+            vip_ui_render_round_rect(&a->renderer, form_x, phone_y, form_w, 46, 12,
+                                     waiting_phone ? 0x183E6Bu : 0x151E2Du, 1.0);
+            vip_ui_render_round_stroke(&a->renderer, form_x, phone_y, form_w, 46, 12,
+                                       waiting_phone ? 0x62A9FFu : 0x2B3950u, 1.0, 1.0);
+            vip_ui_render_text(&a->renderer, form_x, phone_y + 13, form_w,
+                               waiting_phone ? "Aguardando celular..." : "Adicionar pelo celular",
+                               waiting_phone ? "Sans Bold 10" : "Sans 10",
+                               waiting_phone ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+            if (waiting_phone && a->pairing_page_url[0])
+                vip_ui_render_text(&a->renderer, form_x, phone_y + 57, form_w,
+                                   a->pairing_page_url, "Sans 8", 0x91A0B7u, 1.0, false);
+        } else {
+            fill_round_rect(a, form_x, phone_y, form_w, 46, 12,
+                            waiting_phone ? a->colors.accent2 : a->colors.panel2);
+            stroke_round_rect(a, form_x, phone_y, form_w, 46, 12,
+                              waiting_phone ? a->colors.accent : a->colors.border);
+            draw_centered(a, form_x, phone_y + 29, form_w,
+                          waiting_phone ? "Aguardando celular..." : "Adicionar pelo celular",
+                          waiting_phone ? a->colors.text : a->colors.muted);
+            if (waiting_phone && a->pairing_page_url[0])
+                draw_text(a, form_x, phone_y + 69, a->pairing_page_url, a->colors.muted);
+        }
     }
     bool ready = a->server[0] && !atomic_load(&a->login_running) &&
                  (a->login_mode == LOGIN_M3U || (a->username[0] && a->password[0]));
@@ -4256,6 +4324,8 @@ static void handle_click(app_t *a, int x, int y) {
             a->input_focus = INPUT_USERNAME;
         else if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 358, form_w, 44))
             a->input_focus = INPUT_PASSWORD;
+        else if (a->login_mode == LOGIN_M3U && point_in(x, y, form_x, py + 314, form_w, 46))
+            start_phone_pairing(a);
         else if (point_in(x, y, form_x, py + 430, form_w, 50))
             start_login(a);
         else {
@@ -4588,6 +4658,10 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
         return;
     }
 
+    if (a->login_mode == LOGIN_M3U && sym == XK_F2) {
+        start_phone_pairing(a);
+        return;
+    }
     if (sym == XK_Escape)
         return;
     if (ctrl && (sym == XK_v || sym == XK_V)) {
@@ -4903,6 +4977,10 @@ static void destroy_app(app_t *a) {
     vip_category_list_clear(&a->episode_categories);
     vip_channel_list_clear(&a->episode_channels);
     vip_channel_list_clear(&a->season_channels);
+    if (a->pairing_server) {
+        vip_pairing_server_stop(a->pairing_server);
+        a->pairing_server = NULL;
+    }
     pthread_mutex_destroy(&a->data_mutex);
     if (a->dpy) {
         if (a->font_title)
@@ -4930,6 +5008,27 @@ static void destroy_app(app_t *a) {
 
 /* Handle async. */
 static void handle_async(app_t *a) {
+    if (atomic_exchange(&a->pairing_submission, false)) {
+        char url[sizeof(a->server)];
+        char name[sizeof(a->profile_name)];
+        pthread_mutex_lock(&a->data_mutex);
+        snprintf(url, sizeof(url), "%s", a->pairing_pending_url);
+        snprintf(name, sizeof(name), "%s", a->pairing_pending_name);
+        a->pairing_pending_url[0] = '\0';
+        a->pairing_pending_name[0] = '\0';
+        pthread_mutex_unlock(&a->data_mutex);
+
+        if (a->pairing_server) {
+            vip_pairing_server_stop(a->pairing_server);
+            a->pairing_server = NULL;
+        }
+        a->pairing_page_url[0] = '\0';
+        a->login_mode = LOGIN_M3U;
+        snprintf(a->server, sizeof(a->server), "%s", url);
+        snprintf(a->profile_name, sizeof(a->profile_name), "%s", name);
+        snprintf(a->status, sizeof(a->status), "Playlist recebida do celular; carregando...");
+        start_login(a);
+    }
     if (atomic_exchange(&a->login_done, false)) {
         if (a->login_thread_started) {
             pthread_join(a->login_thread, NULL);
@@ -5027,6 +5126,7 @@ int vip_x11_app_run(void) {
     atomic_init(&a.login_running, false);
     atomic_init(&a.login_done, false);
     atomic_init(&a.login_success, false);
+    atomic_init(&a.pairing_submission, false);
     atomic_init(&a.series_running, false);
     atomic_init(&a.series_done, false);
     atomic_init(&a.series_success, false);
