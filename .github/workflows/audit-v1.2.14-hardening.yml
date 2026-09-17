@@ -6,6 +6,7 @@ on:
       - audit-v1.2.14
     paths:
       - .github/scripts/apply_audit_hardening.py
+      - .github/scripts/fix_audit_hardening_order.py
       - .github/workflows/audit-v1.2.14-hardening.yml
 
 permissions:
@@ -21,7 +22,9 @@ jobs:
           ref: audit-v1.2.14
 
       - name: Apply final hardening
-        run: python3 .github/scripts/apply_audit_hardening.py
+        run: |
+          python3 .github/scripts/apply_audit_hardening.py
+          python3 .github/scripts/fix_audit_hardening_order.py
 
       - name: Install dependencies
         run: |
