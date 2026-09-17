@@ -16,6 +16,7 @@
 #include "visual_iptv/server_resolver.h"
 #include "visual_iptv/thumbnails.h"
 #include "visual_iptv/ui_motion.h"
+#include "visual_iptv/ui_render.h"
 
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
@@ -166,6 +167,7 @@ struct app {
     int depth;
     Colormap cmap;
     GC gc;
+    vip_ui_renderer_t renderer;
     XFontStruct *font;
     XFontStruct *font_title;
     XFontStruct *font_heading;
@@ -2566,7 +2568,10 @@ static void draw_input(app_t *a, int x, int y, int w, int h, const char *value,
 }
 
 static void draw_login(app_t *a) {
-    fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.bg);
+    if (a->renderer.active)
+        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, a->height, 0x050811u, 0x0B1220u);
+    else
+        fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.bg);
     fill_rect(a, 0, 0, (unsigned)a->width, 7, a->colors.accent);
     int w = a->width > 1120 ? 1080 : a->width - 40;
     if (w < 720) w = 720;
@@ -2579,8 +2584,13 @@ static void draw_login(app_t *a) {
 
     fill_round_rect(a, x + 30, y + 25, 42, 42, 13, a->colors.accent);
     draw_centered_font(a, a->font_heading, x + 30, y + 53, 42, "B", a->colors.bg);
-    draw_text_font(a, a->font_title, x + 86, y + 49, "Blazzing", a->colors.text);
-    draw_text(a, x + 86, y + 69, "Streaming, listas e biblioteca em um só lugar", a->colors.muted);
+    if (a->renderer.active) {
+        vip_ui_render_text(&a->renderer, x + 86, y + 27, 360, "Blazzing", "Sans Bold 22", 0xF6F8FCu, 1.0, false);
+        vip_ui_render_text(&a->renderer, x + 86, y + 55, 420, "Streaming, listas e biblioteca em um só lugar", "Sans 10", 0x91A0B7u, 1.0, false);
+    } else {
+        draw_text_font(a, a->font_title, x + 86, y + 49, "Blazzing", a->colors.text);
+        draw_text(a, x + 86, y + 69, "Streaming, listas e biblioteca em um só lugar", a->colors.muted);
+    }
 
     int form_x = x + 34, form_w = (w * 58) / 100 - 50;
     int list_x = x + (w * 60) / 100, list_w = w - (list_x - x) - 34;
@@ -2717,9 +2727,15 @@ static void draw_details_panel(app_t *a) {
 
     int px, py, pw, ph;
     details_panel_geometry(a, &px, &py, &pw, &ph);
-    fill_round_rect(a, px + 4, py + 6, pw, ph, 18, a->colors.black);
-    fill_round_rect(a, px, py, pw, ph, 18, a->colors.panel);
-    stroke_round_rect(a, px, py, pw, ph, 18, a->colors.border);
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, px + 5, py + 8, pw, ph, 20, 0x000000u, 0.55);
+        vip_ui_render_round_rect(&a->renderer, px, py, pw, ph, 20, 0x0E1420u, 0.97);
+        vip_ui_render_round_stroke(&a->renderer, px, py, pw, ph, 20, 0x2B3950u, 1.0, 1.0);
+    } else {
+        fill_round_rect(a, px + 4, py + 6, pw, ph, 18, a->colors.black);
+        fill_round_rect(a, px, py, pw, ph, 18, a->colors.panel);
+        stroke_round_rect(a, px, py, pw, ph, 18, a->colors.border);
+    }
 
     char loaded_id[128], status[256], plot[3072], cover[1024], backdrop[1024];
     char genre[256], release_date[128], rating[64], duration[128], cast[768], director[512];
@@ -2835,10 +2851,16 @@ static const char *browse_back_label(const app_t *a) {
 }
 
 static void draw_browse(app_t *a) {
-    fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.bg);
-    fill_rect(a, 0, 0, (unsigned)a->width, TOPBAR_H, a->colors.panel);
+    if (a->renderer.active) {
+        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, a->height, 0x050811u, 0x080D17u);
+        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, TOPBAR_H, 0x121C2Cu, 0x0C1420u);
+        vip_ui_render_linear_gradient(&a->renderer, 0, TOPBAR_H, SIDEBAR_W, a->height-TOPBAR_H, 0x121C2Au, 0x0C1320u);
+    } else {
+        fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.bg);
+        fill_rect(a, 0, 0, (unsigned)a->width, TOPBAR_H, a->colors.panel);
+        fill_rect(a, 0, TOPBAR_H, SIDEBAR_W, (unsigned)(a->height-TOPBAR_H), a->colors.panel2);
+    }
     fill_rect(a, 0, 0, (unsigned)a->width, 4, a->colors.accent);
-    fill_rect(a, 0, TOPBAR_H, SIDEBAR_W, (unsigned)(a->height-TOPBAR_H), a->colors.panel2);
     fill_rect(a, SIDEBAR_W-1, TOPBAR_H, 1, (unsigned)(a->height-TOPBAR_H), a->colors.border);
 
     const int tab_y = 12, tab_h = 46;
@@ -2956,7 +2978,12 @@ static void draw_browse(app_t *a) {
             int base_cy = cy;
             cy = base_cy - lift;
             bool active_card = focused || hovered;
-            fill_round_rect(a, cx + 4, cy + 6 + (int)(3.0f * hover_eased), layout.card_w, layout.card_h, 16, a->colors.black);
+            if (a->renderer.active && active_card) {
+                vip_ui_render_round_rect(&a->renderer, cx + 5, cy + 8 + (int)(3.0f * hover_eased), layout.card_w, layout.card_h, 18, 0x000000u, 0.62);
+                vip_ui_render_round_stroke(&a->renderer, cx-3, cy-3, layout.card_w+6, layout.card_h+6, 19, 0x62A9FFu, 0.80, 2.0);
+            } else {
+                fill_round_rect(a, cx + 4, cy + 6 + (int)(3.0f * hover_eased), layout.card_w, layout.card_h, 16, a->colors.black);
+            }
             fill_round_rect(a, cx, cy, layout.card_w, layout.card_h, 16, a->colors.panel2);
             if (active_card) {
                 stroke_round_rect(a, cx-3, cy-3, layout.card_w+6, layout.card_h+6, 18, a->colors.accent);
@@ -3170,9 +3197,11 @@ static bool ensure_backbuffer(app_t *a) {
 static void redraw(app_t *a) {
     bool buffered = ensure_backbuffer(a);
     a->draw = buffered ? a->backbuffer : a->win;
+    (void)vip_ui_renderer_begin(&a->renderer, a->dpy, a->draw, a->visual, a->width, a->height);
     if (a->screen == SCREEN_LOGIN) draw_login(a);
     else if (a->screen == SCREEN_BROWSE) draw_browse(a);
     else draw_player(a);
+    vip_ui_renderer_end(&a->renderer);
     if (buffered) {
         XCopyArea(a->dpy, a->backbuffer, a->win, a->gc, 0, 0,
                   (unsigned)a->width, (unsigned)a->height, 0, 0);
