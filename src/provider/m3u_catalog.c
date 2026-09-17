@@ -15,7 +15,7 @@
 #include <string.h>
 #include <strings.h>
 
-/* Implement the fold_accent helper. */
+/* Fold the supported UTF-8 Latin accent byte into a lowercase ASCII letter. */
 static char fold_accent(unsigned char second) {
     switch (second) {
     case 0x80:
@@ -121,7 +121,7 @@ static bool has_word(const char *text, const char *word) {
     return false;
 }
 
-/* Implement the vip_m3u_classify_group helper. */
+/* Classify group in the M3U provider. */
 vip_m3u_content_kind_t vip_m3u_classify_group(const char *group_name) {
     char norm[512];
     normalize_ascii(group_name, norm, sizeof(norm));
@@ -155,7 +155,7 @@ static bool parse_uint_at(const char *s, size_t len, size_t *pos, int *value) {
     return true;
 }
 
-/* Implement the episode_marker_at helper. */
+/* Handle the episode marker at operation. */
 static bool episode_marker_at(const char *name, size_t len, size_t pos, size_t *end_out, int *season_out,
                               int *episode_out) {
     if (!name || pos >= len)
@@ -202,7 +202,7 @@ static bool episode_marker_at(const char *name, size_t len, size_t pos, size_t *
     return false;
 }
 
-/* Implement the vip_m3u_parse_episode_label helper. */
+/* Parse episode label using the M3U provider. */
 bool vip_m3u_parse_episode_label(const char *name, char *series_out, size_t series_cap, int *season_out,
                                  int *episode_out) {
     if (series_out && series_cap > 0u)
@@ -257,7 +257,7 @@ static const vip_category_t *find_category(const vip_category_list_t *cats, cons
     return NULL;
 }
 
-/* Implement the category_is_used helper. */
+/* Return whether used for the category. */
 static bool category_is_used(const vip_channel_list_t *channels, const char *category_id) {
     if (!channels || !category_id)
         return false;
@@ -278,7 +278,7 @@ static vip_status_t push_channel_for_kind(vip_m3u_content_kind_t kind, const vip
     return vip_channel_list_push(live_channels, channel, error);
 }
 
-/* Implement the vip_m3u_split_catalog helper. */
+/* Handle the m3u split catalog operation. */
 vip_status_t vip_m3u_split_catalog(const vip_category_list_t *source_categories,
                                    const vip_channel_list_t *source_channels,
                                    vip_category_list_t *live_categories, vip_channel_list_t *live_channels,

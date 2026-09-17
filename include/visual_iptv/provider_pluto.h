@@ -20,7 +20,7 @@ typedef struct vip_pluto_client vip_pluto_client_t;
  * anonymous web session from Pluto and normalizes its live catalog into the
  * same structures used by Xtream/M3U. */
 vip_status_t vip_pluto_client_create(vip_pluto_client_t **out, vip_error_t *error);
-/* Implement the vip_pluto_client_destroy helper. */
+/* Destroy the requested state in the pluto client. */
 void vip_pluto_client_destroy(vip_pluto_client_t *client);
 
 /* Stable provider identifier for database/favorites separation. */

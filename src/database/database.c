@@ -18,13 +18,13 @@ struct vip_database {
     pthread_mutex_t mutex;
 };
 
-/* Implement the db_error helper. */
+/* Handle the db error operation. */
 static vip_status_t db_error(vip_database_t *db, vip_error_t *error, const char *prefix) {
     vip_error_set(error, VIP_ERR_DATABASE, "%s: %s", prefix, sqlite3_errmsg(db->conn));
     return VIP_ERR_DATABASE;
 }
 
-/* Implement the exec_sql helper. */
+/* Handle the exec sql operation. */
 static vip_status_t exec_sql(vip_database_t *db, const char *sql, vip_error_t *error) {
     char *msg = NULL;
     int rc = sqlite3_exec(db->conn, sql, NULL, NULL, &msg);
@@ -116,17 +116,17 @@ static vip_status_t open_common(vip_database_t **out, const char *path, vip_erro
     return VIP_OK;
 }
 
-/* Implement the vip_database_open helper. */
+/* Open the requested state in the database. */
 vip_status_t vip_database_open(vip_database_t **out, const char *path, vip_error_t *error) {
     return open_common(out, path, error);
 }
 
-/* Implement the vip_database_open_memory helper. */
+/* Open memory in the database. */
 vip_status_t vip_database_open_memory(vip_database_t **out, vip_error_t *error) {
     return open_common(out, ":memory:", error);
 }
 
-/* Implement the vip_database_close helper. */
+/* Close the requested state in the database. */
 void vip_database_close(vip_database_t *db) {
     if (!db)
         return;
@@ -136,7 +136,7 @@ void vip_database_close(vip_database_t *db) {
     free(db);
 }
 
-/* Implement the bind_nullable helper. */
+/* Handle the bind nullable operation. */
 static void bind_nullable(sqlite3_stmt *stmt, int index, const char *value) {
     if (value && value[0])
         sqlite3_bind_text(stmt, index, value, -1, SQLITE_TRANSIENT);
@@ -144,7 +144,7 @@ static void bind_nullable(sqlite3_stmt *stmt, int index, const char *value) {
         sqlite3_bind_null(stmt, index);
 }
 
-/* Implement the vip_database_replace_catalog helper. */
+/* Replace catalog in the database. */
 vip_status_t vip_database_replace_catalog(vip_database_t *db, const char *provider_id,
                                           const vip_category_list_t *categories,
                                           const vip_channel_list_t *channels, vip_error_t *error) {
@@ -226,7 +226,7 @@ done:
     return st;
 }
 
-/* Implement the vip_database_load_channels helper. */
+/* Load channels using the database. */
 vip_status_t vip_database_load_channels(vip_database_t *db, const char *provider_id, vip_channel_list_t *out,
                                         vip_error_t *error) {
     if (!db || !provider_id || !out)
@@ -264,7 +264,7 @@ vip_status_t vip_database_load_channels(vip_database_t *db, const char *provider
     return st;
 }
 
-/* Implement the vip_database_set_favorite helper. */
+/* Set favorite in the database. */
 vip_status_t vip_database_set_favorite(vip_database_t *db, const char *provider_id, const char *channel_id,
                                        bool favorite, vip_error_t *error) {
     if (!db || !provider_id || !channel_id)
@@ -288,7 +288,7 @@ vip_status_t vip_database_set_favorite(vip_database_t *db, const char *provider_
     return VIP_OK;
 }
 
-/* Implement the vip_database_set_thumbnail helper. */
+/* Set thumbnail in the database. */
 vip_status_t vip_database_set_thumbnail(vip_database_t *db, const char *provider_id, const char *channel_id,
                                         const char *path, vip_thumbnail_source_t source, int64_t generated_at,
                                         int64_t last_verified, vip_error_t *error) {
@@ -319,7 +319,7 @@ vip_status_t vip_database_set_thumbnail(vip_database_t *db, const char *provider
     return VIP_OK;
 }
 
-/* Implement the vip_database_load_favorite_flags helper. */
+/* Load favorite flags using the database. */
 vip_status_t vip_database_load_favorite_flags(vip_database_t *db, const char *provider_id,
                                               const vip_channel_list_t *channels, bool *flags,
                                               size_t flags_len, vip_error_t *error) {
@@ -351,7 +351,7 @@ vip_status_t vip_database_load_favorite_flags(vip_database_t *db, const char *pr
     return VIP_OK;
 }
 
-/* Implement the vip_database_thumbnail_path helper. */
+/* Handle the database thumbnail path operation. */
 char *vip_database_thumbnail_path(vip_database_t *db, const char *provider_id, const char *channel_id,
                                   vip_error_t *error) {
     if (!db || !provider_id || !channel_id)
@@ -378,13 +378,13 @@ char *vip_database_thumbnail_path(vip_database_t *db, const char *provider_id, c
     return path;
 }
 
-/* Implement the vip_profile_list_init helper. */
+/* List init using the profile. */
 void vip_profile_list_init(vip_profile_list_t *list) {
     if (list)
         memset(list, 0, sizeof(*list));
 }
 
-/* Implement the profile_clear helper. */
+/* Clear owned state from the requested state in the profile. */
 static void profile_clear(vip_profile_t *profile) {
     if (!profile)
         return;
@@ -396,7 +396,7 @@ static void profile_clear(vip_profile_t *profile) {
     memset(profile, 0, sizeof(*profile));
 }
 
-/* Implement the vip_profile_list_clear helper. */
+/* List clear using the profile. */
 void vip_profile_list_clear(vip_profile_list_t *list) {
     if (!list)
         return;
@@ -406,7 +406,7 @@ void vip_profile_list_clear(vip_profile_list_t *list) {
     memset(list, 0, sizeof(*list));
 }
 
-/* Implement the profile_list_push helper. */
+/* List push using the profile. */
 static vip_status_t profile_list_push(vip_profile_list_t *list, const vip_profile_t *profile,
                                       vip_error_t *error) {
     if (list->len == list->cap) {
@@ -439,7 +439,7 @@ static vip_status_t profile_list_push(vip_profile_list_t *list, const vip_profil
     return VIP_OK;
 }
 
-/* Implement the vip_database_save_profile helper. */
+/* Persist profile in the database. */
 vip_status_t vip_database_save_profile(vip_database_t *db, const vip_profile_t *profile, vip_error_t *error) {
     if (!db || !profile || !profile->profile_id || !profile->profile_id[0] || !profile->name ||
         !profile->name[0] || !profile->server || !profile->server[0])
@@ -470,7 +470,7 @@ vip_status_t vip_database_save_profile(vip_database_t *db, const vip_profile_t *
     return VIP_OK;
 }
 
-/* Implement the vip_database_list_profiles helper. */
+/* List profiles using the database. */
 vip_status_t vip_database_list_profiles(vip_database_t *db, vip_profile_list_t *out, vip_error_t *error) {
     if (!db || !out)
         return VIP_ERR_INVALID_ARGUMENT;
@@ -514,7 +514,7 @@ vip_status_t vip_database_list_profiles(vip_database_t *db, vip_profile_list_t *
     return VIP_OK;
 }
 
-/* Implement the vip_database_touch_profile helper. */
+/* Update the last-used state for profile in the database. */
 vip_status_t vip_database_touch_profile(vip_database_t *db, const char *profile_id, vip_error_t *error) {
     if (!db || !profile_id || !profile_id[0])
         return VIP_ERR_INVALID_ARGUMENT;
@@ -535,7 +535,7 @@ vip_status_t vip_database_touch_profile(vip_database_t *db, const char *profile_
     return VIP_OK;
 }
 
-/* Implement the vip_database_set_progress helper. */
+/* Set progress in the database. */
 vip_status_t vip_database_set_progress(vip_database_t *db, const char *provider_id, const char *channel_id,
                                        double position_seconds, double duration_seconds, bool completed,
                                        vip_error_t *error) {
@@ -571,7 +571,7 @@ vip_status_t vip_database_set_progress(vip_database_t *db, const char *provider_
     return VIP_OK;
 }
 
-/* Implement the vip_database_get_progress helper. */
+/* Return progress from the database. */
 vip_status_t vip_database_get_progress(vip_database_t *db, const char *provider_id, const char *channel_id,
                                        vip_watch_progress_t *out, vip_error_t *error) {
     if (!db || !provider_id || !channel_id || !out)
@@ -600,7 +600,7 @@ vip_status_t vip_database_get_progress(vip_database_t *db, const char *provider_
     return VIP_OK;
 }
 
-/* Implement the vip_database_load_progress helper. */
+/* Load progress using the database. */
 vip_status_t vip_database_load_progress(vip_database_t *db, const char *provider_id,
                                         const vip_channel_list_t *channels, vip_watch_progress_t *progress,
                                         size_t progress_len, vip_error_t *error) {
@@ -637,7 +637,7 @@ vip_status_t vip_database_load_progress(vip_database_t *db, const char *provider
     return VIP_OK;
 }
 
-/* Implement the vip_database_set_series_progress helper. */
+/* Set series progress in the database. */
 vip_status_t vip_database_set_series_progress(vip_database_t *db, const char *provider_id,
                                               const char *series_id, const char *last_episode_id,
                                               int watched_count, int total_count, vip_error_t *error) {
@@ -673,7 +673,7 @@ vip_status_t vip_database_set_series_progress(vip_database_t *db, const char *pr
     return VIP_OK;
 }
 
-/* Implement the vip_database_load_series_progress helper. */
+/* Load series progress using the database. */
 vip_status_t vip_database_load_series_progress(vip_database_t *db, const char *provider_id,
                                                const vip_channel_list_t *series, int *watched, int *total,
                                                size_t len, vip_error_t *error) {
@@ -711,7 +711,7 @@ vip_status_t vip_database_load_series_progress(vip_database_t *db, const char *p
     return VIP_OK;
 }
 
-/* Implement the vip_series_progress_clear helper. */
+/* Clear owned state from the requested state in the series progress. */
 void vip_series_progress_clear(vip_series_progress_t *progress) {
     if (!progress)
         return;
@@ -719,7 +719,7 @@ void vip_series_progress_clear(vip_series_progress_t *progress) {
     memset(progress, 0, sizeof(*progress));
 }
 
-/* Implement the vip_database_get_series_progress helper. */
+/* Return series progress from the database. */
 vip_status_t vip_database_get_series_progress(vip_database_t *db, const char *provider_id,
                                               const char *series_id, vip_series_progress_t *out,
                                               vip_error_t *error) {
@@ -751,7 +751,7 @@ vip_status_t vip_database_get_series_progress(vip_database_t *db, const char *pr
     return VIP_OK;
 }
 
-/* Implement the vip_database_set_media_metadata helper. */
+/* Set media metadata in the database. */
 vip_status_t vip_database_set_media_metadata(vip_database_t *db, const char *provider_id,
                                              const char *media_id, const vip_media_metadata_t *metadata,
                                              vip_error_t *error) {
@@ -794,13 +794,13 @@ vip_status_t vip_database_set_media_metadata(vip_database_t *db, const char *pro
     return VIP_OK;
 }
 
-/* Implement the column_strdup helper. */
+/* Handle the column strdup operation. */
 static char *column_strdup(sqlite3_stmt *stmt, int column) {
     const unsigned char *text = sqlite3_column_text(stmt, column);
     return text && text[0] ? vip_strdup((const char *)text) : NULL;
 }
 
-/* Implement the vip_database_get_media_metadata helper. */
+/* Return media metadata from the database. */
 vip_status_t vip_database_get_media_metadata(vip_database_t *db, const char *provider_id,
                                              const char *media_id, vip_media_metadata_t *metadata_out,
                                              int64_t *updated_at_out, bool *found_out, vip_error_t *error) {

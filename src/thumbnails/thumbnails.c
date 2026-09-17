@@ -33,7 +33,7 @@ typedef struct {
     jmp_buf env;
 } thumbnail_jpeg_error_t;
 
-/* Implement the thumbnail_jpeg_fail helper. */
+/* Handle the thumbnail jpeg fail operation. */
 static void thumbnail_jpeg_fail(j_common_ptr cinfo) {
     thumbnail_jpeg_error_t *err = (thumbnail_jpeg_error_t *)cinfo->err;
     longjmp(err->env, 1);
@@ -56,7 +56,7 @@ static bool cached_jpeg_valid(const char *path) {
     return ok && head[0] == 0xffu && head[1] == 0xd8u && tail[0] == 0xffu && tail[1] == 0xd9u;
 }
 
-/* Implement the temporary_cache_path helper. */
+/* Handle the temporary cache path operation. */
 static char *temporary_cache_path(const char *path) {
     if (!path)
         return NULL;
@@ -99,7 +99,7 @@ struct vip_thumbnail_scheduler {
     void *ready_userdata;
 };
 
-/* Implement the key_hash helper. */
+/* Handle the key hash operation. */
 static uint64_t key_hash(const char *a, const char *b) {
     uint64_t h = UINT64_C(14695981039346656037);
     for (const unsigned char *p = (const unsigned char *)a; p && *p; ++p) {
@@ -115,7 +115,7 @@ static uint64_t key_hash(const char *a, const char *b) {
     return h;
 }
 
-/* Implement the request_clear helper. */
+/* Clear owned state from the requested state in the request. */
 static void request_clear(vip_thumbnail_request_t *r) {
     if (!r)
         return;
@@ -126,7 +126,7 @@ static void request_clear(vip_thumbnail_request_t *r) {
     memset(r, 0, sizeof(*r));
 }
 
-/* Implement the request_copy helper. */
+/* Copy the requested state in the request. */
 static vip_status_t request_copy(vip_thumbnail_request_t *dst, const vip_thumbnail_request_t *src,
                                  vip_error_t *error) {
     memset(dst, 0, sizeof(*dst));
@@ -143,7 +143,7 @@ static vip_status_t request_copy(vip_thumbnail_request_t *dst, const vip_thumbna
     return VIP_OK;
 }
 
-/* Implement the map_find helper. */
+/* Find the requested state in the map. */
 static sched_entry_t *map_find(vip_thumbnail_scheduler_t *s, const char *provider, const char *channel) {
     size_t bucket = (size_t)(key_hash(provider, channel) % MAP_BUCKETS);
     for (sched_entry_t *e = s->buckets[bucket]; e; e = e->next)
@@ -152,7 +152,7 @@ static sched_entry_t *map_find(vip_thumbnail_scheduler_t *s, const char *provide
     return NULL;
 }
 
-/* Implement the map_insert helper. */
+/* Handle the map insert operation. */
 static sched_entry_t *map_insert(vip_thumbnail_scheduler_t *s, const char *provider, const char *channel,
                                  vip_error_t *error) {
     size_t bucket = (size_t)(key_hash(provider, channel) % MAP_BUCKETS);
@@ -175,7 +175,7 @@ static sched_entry_t *map_insert(vip_thumbnail_scheduler_t *s, const char *provi
     return e;
 }
 
-/* Implement the map_remove helper. */
+/* Remove the requested state in the map. */
 static void map_remove(vip_thumbnail_scheduler_t *s, const char *provider, const char *channel) {
     size_t bucket = (size_t)(key_hash(provider, channel) % MAP_BUCKETS);
     sched_entry_t **pp = &s->buckets[bucket];
@@ -200,7 +200,7 @@ static bool queue_higher(const queue_item_t *a, const queue_item_t *b) {
     return a->generation < b->generation;
 }
 
-/* Implement the heap_push helper. */
+/* Append the requested state in the heap. */
 static vip_status_t heap_push(vip_thumbnail_scheduler_t *s, queue_item_t item, vip_error_t *error) {
     if (s->heap_len == s->heap_cap) {
         size_t cap = s->heap_cap ? s->heap_cap * 2 : 128;
@@ -226,7 +226,7 @@ static vip_status_t heap_push(vip_thumbnail_scheduler_t *s, queue_item_t item, v
     return VIP_OK;
 }
 
-/* Implement the heap_pop helper. */
+/* Handle the heap pop operation. */
 static queue_item_t heap_pop(vip_thumbnail_scheduler_t *s) {
     queue_item_t out = s->heap[0];
     s->heap[0] = s->heap[--s->heap_len];
@@ -296,7 +296,7 @@ static void *worker_main(void *userdata) {
     return NULL;
 }
 
-/* Implement the vip_thumbnail_scheduler_create helper. */
+/* Create the requested state in the thumbnail scheduler. */
 vip_status_t vip_thumbnail_scheduler_create(vip_thumbnail_scheduler_t **out, size_t worker_count,
                                             vip_thumbnail_capture_fn capture, void *capture_userdata,
                                             vip_thumbnail_ready_fn ready, void *ready_userdata,
@@ -342,7 +342,7 @@ vip_status_t vip_thumbnail_scheduler_create(vip_thumbnail_scheduler_t **out, siz
     return VIP_OK;
 }
 
-/* Implement the vip_thumbnail_scheduler_destroy helper. */
+/* Destroy the requested state in the thumbnail scheduler. */
 void vip_thumbnail_scheduler_destroy(vip_thumbnail_scheduler_t *s) {
     if (!s)
         return;
@@ -371,7 +371,7 @@ void vip_thumbnail_scheduler_destroy(vip_thumbnail_scheduler_t *s) {
     free(s);
 }
 
-/* Implement the vip_thumbnail_scheduler_set_paused helper. */
+/* Set paused in the thumbnail scheduler. */
 void vip_thumbnail_scheduler_set_paused(vip_thumbnail_scheduler_t *s, bool paused) {
     if (!s)
         return;
@@ -381,7 +381,7 @@ void vip_thumbnail_scheduler_set_paused(vip_thumbnail_scheduler_t *s, bool pause
     pthread_mutex_unlock(&s->mutex);
 }
 
-/* Implement the vip_thumbnail_scheduler_cancel_pending helper. */
+/* Handle the thumbnail scheduler cancel pending operation. */
 void vip_thumbnail_scheduler_cancel_pending(vip_thumbnail_scheduler_t *s) {
     if (!s)
         return;
@@ -397,7 +397,7 @@ void vip_thumbnail_scheduler_cancel_pending(vip_thumbnail_scheduler_t *s) {
     pthread_mutex_unlock(&s->mutex);
 }
 
-/* Implement the vip_thumbnail_scheduler_enqueue helper. */
+/* Handle the thumbnail scheduler enqueue operation. */
 vip_status_t vip_thumbnail_scheduler_enqueue(vip_thumbnail_scheduler_t *s,
                                              const vip_thumbnail_request_t *request, vip_error_t *error) {
     if (!s || !request || !request->provider_id || !request->channel_id || !request->stream_url)
@@ -461,7 +461,7 @@ vip_status_t vip_thumbnail_scheduler_enqueue(vip_thumbnail_scheduler_t *s,
     return st;
 }
 
-/* Implement the mkdir_parents helper. */
+/* Handle the mkdir parents operation. */
 static vip_status_t mkdir_parents(const char *path, vip_error_t *error) {
     char *tmp = vip_strdup(path);
     if (!tmp)
@@ -481,7 +481,7 @@ static vip_status_t mkdir_parents(const char *path, vip_error_t *error) {
     return VIP_OK;
 }
 
-/* Implement the vip_thumbnail_cache_path helper. */
+/* Handle the thumbnail cache path operation. */
 char *vip_thumbnail_cache_path(const char *cache_dir, const char *provider_id, const char *channel_id,
                                vip_error_t *error) {
     if (!cache_dir || !provider_id || !channel_id)
@@ -512,7 +512,7 @@ char *vip_thumbnail_cache_path(const char *cache_dir, const char *provider_id, c
     return path;
 }
 
-/* Implement the vip_thumbnail_validate_rgb helper. */
+/* Validate rgb in the thumbnail subsystem. */
 vip_status_t vip_thumbnail_validate_rgb(const uint8_t *rgb, size_t width, size_t height, size_t stride,
                                         vip_error_t *error) {
     if (!rgb || width == 0 || height == 0 || stride < width * 3)
@@ -543,7 +543,7 @@ vip_status_t vip_thumbnail_validate_rgb(const uint8_t *rgb, size_t width, size_t
     return VIP_OK;
 }
 
-/* Implement the vip_thumbnail_save_rgb_jpeg helper. */
+/* Persist rgb jpeg in the thumbnail subsystem. */
 vip_status_t vip_thumbnail_save_rgb_jpeg(const uint8_t *rgb, size_t width, size_t height, size_t stride,
                                          const char *path, int quality, vip_error_t *error) {
     vip_status_t st = vip_thumbnail_validate_rgb(rgb, width, height, stride, error);
@@ -638,7 +638,7 @@ typedef struct {
     size_t stride;
 } decoded_image_t;
 
-/* Implement the decoded_image_clear helper. */
+/* Clear owned state from the requested state in the decoded image. */
 static void decoded_image_clear(decoded_image_t *image) {
     if (!image)
         return;
@@ -646,7 +646,7 @@ static void decoded_image_clear(decoded_image_t *image) {
     memset(image, 0, sizeof(*image));
 }
 
-/* Implement the image_download_write helper. */
+/* Write the requested state in the image download. */
 static size_t image_download_write(void *ptr, size_t size, size_t nmemb, void *userdata) {
     image_download_t *buf = userdata;
     const size_t max_bytes = 12u * 1024u * 1024u;
@@ -678,18 +678,18 @@ static size_t image_download_write(void *ptr, size_t size, size_t nmemb, void *u
 static pthread_key_t logo_curl_key;
 static pthread_once_t logo_curl_key_once = PTHREAD_ONCE_INIT;
 
-/* Implement the logo_curl_destroy helper. */
+/* Destroy the requested state in the logo curl. */
 static void logo_curl_destroy(void *ptr) {
     if (ptr)
         curl_easy_cleanup((CURL *)ptr);
 }
 
-/* Implement the logo_curl_key_init helper. */
+/* Initialize the requested state in the logo curl key. */
 static void logo_curl_key_init(void) {
     (void)pthread_key_create(&logo_curl_key, logo_curl_destroy);
 }
 
-/* Implement the logo_curl_for_worker helper. */
+/* Run the logo curl for background worker. */
 static CURL *logo_curl_for_worker(void) {
     if (pthread_once(&logo_curl_key_once, logo_curl_key_init) != 0)
         return NULL;
@@ -706,7 +706,7 @@ static CURL *logo_curl_for_worker(void) {
     return curl;
 }
 
-/* Implement the download_logo helper. */
+/* Handle the download logo operation. */
 static vip_status_t download_logo(const char *url, image_download_t *buf, vip_error_t *error) {
     CURL *curl = logo_curl_for_worker();
     if (!curl) {
@@ -1012,7 +1012,7 @@ static vip_status_t save_logo_preserving_aspect(const decoded_image_t *image, co
     return st;
 }
 
-/* Implement the capture_logo_direct helper. */
+/* Capture logo direct. */
 static vip_status_t capture_logo_direct(const char *logo_url, const char *path, int quality,
                                         vip_error_t *error) {
     image_download_t raw = {0};
@@ -1034,7 +1034,7 @@ static vip_status_t capture_logo_direct(const char *logo_url, const char *path, 
 
 #define THUMB_FAILURE_BACKOFF_SECONDS 30
 
-/* Implement the failure_marker_path helper. */
+/* Handle the failure marker path operation. */
 static char *failure_marker_path(const char *path) {
     if (!path)
         return NULL;
@@ -1045,7 +1045,7 @@ static char *failure_marker_path(const char *path) {
     return marker;
 }
 
-/* Implement the failure_backoff_active helper. */
+/* Handle the failure backoff active operation. */
 static bool failure_backoff_active(const char *path) {
     char *marker = failure_marker_path(path);
     if (!marker)
@@ -1062,7 +1062,7 @@ static bool failure_backoff_active(const char *path) {
     return active;
 }
 
-/* Implement the failure_marker_set helper. */
+/* Set the requested state in the failure marker. */
 static void failure_marker_set(const char *path) {
     char *marker = failure_marker_path(path);
     if (!marker)
@@ -1073,7 +1073,7 @@ static void failure_marker_set(const char *path) {
     free(marker);
 }
 
-/* Implement the failure_marker_clear helper. */
+/* Clear owned state from the requested state in the failure marker. */
 static void failure_marker_clear(const char *path) {
     char *marker = failure_marker_path(path);
     if (marker) {
@@ -1082,7 +1082,7 @@ static void failure_marker_clear(const char *path) {
     }
 }
 
-/* Implement the vip_thumbnail_capture_context_init helper. */
+/* Capture context init in the thumbnail subsystem. */
 vip_status_t vip_thumbnail_capture_context_init(vip_thumbnail_capture_context_t *context,
                                                 vip_thumbnail_decoder_t *decoder, const char *cache_dir,
                                                 int jpeg_quality, vip_error_t *error) {
@@ -1102,7 +1102,7 @@ vip_status_t vip_thumbnail_capture_context_init(vip_thumbnail_capture_context_t 
     return VIP_OK;
 }
 
-/* Implement the vip_thumbnail_capture_context_clear helper. */
+/* Capture context clear in the thumbnail subsystem. */
 void vip_thumbnail_capture_context_clear(vip_thumbnail_capture_context_t *context) {
     if (!context)
         return;
@@ -1110,7 +1110,7 @@ void vip_thumbnail_capture_context_clear(vip_thumbnail_capture_context_t *contex
     memset(context, 0, sizeof(*context));
 }
 
-/* Implement the vip_thumbnail_capture_with_decoder helper. */
+/* Capture with decoder in the thumbnail subsystem. */
 vip_status_t vip_thumbnail_capture_with_decoder(const vip_thumbnail_request_t *request, char **path_out,
                                                 vip_error_t *error, void *userdata) {
     vip_thumbnail_capture_context_t *context = userdata;

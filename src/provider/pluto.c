@@ -72,7 +72,7 @@ static size_t write_response(void *ptr, size_t size, size_t nmemb, void *userdat
     return bytes;
 }
 
-/* Implement the random_client_id helper. */
+/* Handle the random client id operation. */
 static void random_client_id(char out[33]) {
     unsigned char bytes[16];
     if (RAND_bytes(bytes, (int)sizeof(bytes)) != 1) {
@@ -84,7 +84,7 @@ static void random_client_id(char out[33]) {
     out[32] = '\0';
 }
 
-/* Implement the http_get helper. */
+/* Return the requested state from the http. */
 static vip_status_t http_get(vip_pluto_client_t *client, const char *url, struct curl_slist *headers,
                              char **body_out, vip_error_t *error) {
     if (!client || !client->curl || !url || !body_out)
@@ -135,7 +135,7 @@ static vip_status_t http_get(vip_pluto_client_t *client, const char *url, struct
     return VIP_OK;
 }
 
-/* Implement the jstr helper. */
+/* Handle the jstr operation. */
 static const char *jstr(json_object *obj, const char *key) {
     json_object *v = NULL;
     if (!obj || !json_object_object_get_ex(obj, key, &v) || !v || json_object_get_type(v) == json_type_null)
@@ -143,13 +143,13 @@ static const char *jstr(json_object *obj, const char *key) {
     return json_object_get_string(v);
 }
 
-/* Implement the dup_json_string helper. */
+/* Handle the dup json string operation. */
 static char *dup_json_string(json_object *obj, const char *key) {
     const char *s = jstr(obj, key);
     return s && s[0] ? vip_strdup(s) : NULL;
 }
 
-/* Implement the vip_pluto_client_create helper. */
+/* Create the requested state in the pluto client. */
 vip_status_t vip_pluto_client_create(vip_pluto_client_t **out, vip_error_t *error) {
     if (!out)
         return VIP_ERR_INVALID_ARGUMENT;
@@ -171,7 +171,7 @@ vip_status_t vip_pluto_client_create(vip_pluto_client_t **out, vip_error_t *erro
     return VIP_OK;
 }
 
-/* Implement the vip_pluto_client_destroy helper. */
+/* Destroy the requested state in the pluto client. */
 void vip_pluto_client_destroy(vip_pluto_client_t *client) {
     if (!client)
         return;
@@ -183,12 +183,12 @@ void vip_pluto_client_destroy(vip_pluto_client_t *client) {
     free(client);
 }
 
-/* Implement the vip_pluto_provider_id helper. */
+/* Handle the pluto provider id operation. */
 const char *vip_pluto_provider_id(void) {
     return PLUTO_PROVIDER_ID;
 }
 
-/* Implement the vip_pluto_boot helper. */
+/* Handle the pluto boot operation. */
 vip_status_t vip_pluto_boot(vip_pluto_client_t *client, vip_error_t *error) {
     if (!client)
         return VIP_ERR_INVALID_ARGUMENT;
@@ -254,7 +254,7 @@ vip_status_t vip_pluto_boot(vip_pluto_client_t *client, vip_error_t *error) {
     return VIP_OK;
 }
 
-/* Implement the channel_logo helper. */
+/* Handle the channel logo operation. */
 static const char *channel_logo(json_object *channel) {
     json_object *images = NULL;
     if (json_object_object_get_ex(channel, "images", &images) && images &&
@@ -319,7 +319,7 @@ static vip_status_t append_channel(json_object *obj, size_t index, const char *s
     return st;
 }
 
-/* Implement the vip_pluto_parse_channels_json helper. */
+/* Parse channels json using the Pluto provider. */
 vip_status_t vip_pluto_parse_channels_json(const char *json, const char *session_token,
                                            const char *stitcher_base, vip_channel_list_t *out,
                                            vip_error_t *error) {
@@ -362,7 +362,7 @@ vip_status_t vip_pluto_parse_channels_json(const char *json, const char *session
     return VIP_OK;
 }
 
-/* Implement the vip_pluto_live_catalog helper. */
+/* Handle the pluto live catalog operation. */
 vip_status_t vip_pluto_live_catalog(vip_pluto_client_t *client, vip_category_list_t *categories_out,
                                     vip_channel_list_t *channels_out, vip_error_t *error) {
     if (!client || !categories_out || !channels_out)

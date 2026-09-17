@@ -58,7 +58,7 @@ typedef struct {
 vip_status_t vip_database_open(vip_database_t **out, const char *path, vip_error_t *error);
 /** Open an in-memory database; primarily useful for tests. */
 vip_status_t vip_database_open_memory(vip_database_t **out, vip_error_t *error);
-/* Implement the vip_database_close helper. */
+/* Close the requested state in the database. */
 void vip_database_close(vip_database_t *db);
 
 /** Atomically replace one provider's cached category/channel catalog. */
@@ -90,20 +90,20 @@ char *vip_database_thumbnail_path(vip_database_t *db, const char *provider_id, c
 
 /* Saved list/profile metadata. Passwords are intentionally not stored here. */
 void vip_profile_list_init(vip_profile_list_t *list);
-/* Implement the vip_profile_list_clear helper. */
+/* List clear using the profile. */
 void vip_profile_list_clear(vip_profile_list_t *list);
-/* Implement the vip_database_save_profile helper. */
+/* Persist profile in the database. */
 vip_status_t vip_database_save_profile(vip_database_t *db, const vip_profile_t *profile, vip_error_t *error);
-/* Implement the vip_database_list_profiles helper. */
+/* List profiles using the database. */
 vip_status_t vip_database_list_profiles(vip_database_t *db, vip_profile_list_t *out, vip_error_t *error);
-/* Implement the vip_database_touch_profile helper. */
+/* Update the last-used state for profile in the database. */
 vip_status_t vip_database_touch_profile(vip_database_t *db, const char *profile_id, vip_error_t *error);
 
 /* Playback progress for VOD/episodes. */
 vip_status_t vip_database_set_progress(vip_database_t *db, const char *provider_id, const char *channel_id,
                                        double position_seconds, double duration_seconds, bool completed,
                                        vip_error_t *error);
-/* Implement the vip_database_get_progress helper. */
+/* Return progress from the database. */
 vip_status_t vip_database_get_progress(vip_database_t *db, const char *provider_id, const char *channel_id,
                                        vip_watch_progress_t *out, vip_error_t *error);
 /** Bulk-load progress aligned with the supplied channel list. */
@@ -111,11 +111,11 @@ vip_status_t vip_database_load_progress(vip_database_t *db, const char *provider
                                         const vip_channel_list_t *channels, vip_watch_progress_t *progress,
                                         size_t progress_len, vip_error_t *error);
 
-/* Implement the vip_database_set_series_progress helper. */
+/* Set series progress in the database. */
 vip_status_t vip_database_set_series_progress(vip_database_t *db, const char *provider_id,
                                               const char *series_id, const char *last_episode_id,
                                               int watched_count, int total_count, vip_error_t *error);
-/* Implement the vip_database_get_series_progress helper. */
+/* Return series progress from the database. */
 vip_status_t vip_database_get_series_progress(vip_database_t *db, const char *provider_id,
                                               const char *series_id, vip_series_progress_t *out,
                                               vip_error_t *error);
@@ -123,14 +123,14 @@ vip_status_t vip_database_get_series_progress(vip_database_t *db, const char *pr
 vip_status_t vip_database_load_series_progress(vip_database_t *db, const char *provider_id,
                                                const vip_channel_list_t *series, int *watched, int *total,
                                                size_t len, vip_error_t *error);
-/* Implement the vip_series_progress_clear helper. */
+/* Clear owned state from the requested state in the series progress. */
 void vip_series_progress_clear(vip_series_progress_t *progress);
 
 /* Lazy rich metadata cache. Passwords/stream URLs are not stored here. */
 vip_status_t vip_database_set_media_metadata(vip_database_t *db, const char *provider_id,
                                              const char *media_id, const vip_media_metadata_t *metadata,
                                              vip_error_t *error);
-/* Implement the vip_database_get_media_metadata helper. */
+/* Return media metadata from the database. */
 vip_status_t vip_database_get_media_metadata(vip_database_t *db, const char *provider_id,
                                              const char *media_id, vip_media_metadata_t *metadata_out,
                                              int64_t *updated_at_out, bool *found_out, vip_error_t *error);

@@ -26,7 +26,7 @@ typedef struct {
     char *path;
 } ready_state_t;
 
-/* Implement the scheduler_ready helper. */
+/* Handle the scheduler ready operation. */
 static void scheduler_ready(const vip_thumbnail_request_t *request, vip_status_t status, const char *path,
                             const vip_error_t *error, void *userdata) {
     (void)request;

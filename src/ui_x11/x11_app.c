@@ -297,12 +297,12 @@ struct app {
     int64_t test_exit_at_ms;
 };
 
-/* Implement the active_categories helper. */
+/* Handle the active categories operation. */
 static vip_category_list_t *active_categories(app_t *a) {
     return a->series_episode_mode ? &a->episode_categories : &a->catalogs[(int)a->content_kind].categories;
 }
 
-/* Implement the active_channels helper. */
+/* Handle the active channels operation. */
 static vip_channel_list_t *active_channels(app_t *a) {
     if (a->series_season_select)
         return &a->season_channels;
@@ -314,18 +314,18 @@ static vip_channel_list_t *active_channels(app_t *a) {
 #define ACTIVE_CATEGORIES(a) (*active_categories((a)))
 #define ACTIVE_CHANNELS(a) (*active_channels((a)))
 
-/* Implement the enter_player helper. */
+/* Handle the enter player operation. */
 static void enter_player(app_t *a, size_t channel_index);
 /* Set video visible. */
 static void set_video_visible(app_t *a, bool visible);
-/* Implement the layout_video_window helper. */
+/* Lay out video window. */
 static void layout_video_window(app_t *a);
-/* Implement the focus_player_input helper. */
+/* Handle the focus player input operation. */
 static void focus_player_input(app_t *a);
 /* Clear details view. */
 static void clear_details_view(app_t *a);
 
-/* Implement the monotonic_ms helper. */
+/* Return monotonic time in milliseconds for deadlines and animation timing. */
 static int64_t monotonic_ms(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
@@ -333,7 +333,7 @@ static int64_t monotonic_ms(void) {
     return (int64_t)ts.tv_sec * 1000LL + (int64_t)(ts.tv_nsec / 1000000L);
 }
 
-/* Implement the alloc_color helper. */
+/* Handle the alloc color operation. */
 static unsigned long alloc_color(app_t *a, const char *hex) {
     XColor exact = {0}, screen = {0};
     if (XAllocNamedColor(a->dpy, a->cmap, hex, &screen, &exact))
@@ -364,18 +364,18 @@ static Drawable draw_target(app_t *a) {
 static void set_fg(app_t *a, unsigned long color) {
     XSetForeground(a->dpy, a->gc, color);
 }
-/* Implement the fill_rect helper. */
+/* Fill rect. */
 static void fill_rect(app_t *a, int x, int y, unsigned w, unsigned h, unsigned long color) {
     set_fg(a, color);
     XFillRectangle(a->dpy, draw_target(a), a->gc, x, y, w, h);
 }
-/* Implement the stroke_rect helper. */
+/* Stroke rect. */
 static void stroke_rect(app_t *a, int x, int y, unsigned w, unsigned h, unsigned long color) {
     set_fg(a, color);
     XDrawRectangle(a->dpy, draw_target(a), a->gc, x, y, w, h);
 }
 
-/* Implement the fill_round_rect helper. */
+/* Fill round rect. */
 static void fill_round_rect(app_t *a, int x, int y, int w, int h, int r, unsigned long color) {
     if (w <= 0 || h <= 0)
         return;
@@ -401,7 +401,7 @@ static void fill_round_rect(app_t *a, int x, int y, int w, int h, int r, unsigne
              (unsigned)(2 * r), 270 * 64, 90 * 64);
 }
 
-/* Implement the stroke_round_rect helper. */
+/* Stroke round rect. */
 static void stroke_round_rect(app_t *a, int x, int y, int w, int h, int r, unsigned long color) {
     if (w <= 0 || h <= 0)
         return;
@@ -436,7 +436,7 @@ static void draw_surface(app_t *a, int x, int y, int w, int h, int r, bool focus
     stroke_round_rect(a, x, y, w, h, r, focused ? a->colors.accent : a->colors.border);
 }
 
-/* Implement the utf8_to_latin1 helper. */
+/* Handle the utf8 to latin1 operation. */
 static size_t utf8_to_latin1(char *dst, size_t cap, const char *src) {
     if (!dst || cap == 0u)
         return 0u;
@@ -483,7 +483,7 @@ static size_t utf8_to_latin1(char *dst, size_t cap, const char *src) {
     return out;
 }
 
-/* Implement the text_width helper. */
+/* Handle the text width operation. */
 static int text_width(app_t *a, const char *text) {
     if (!text)
         return 0;
@@ -512,7 +512,7 @@ static void draw_centered(app_t *a, int x, int y, int w, const char *text, unsig
     draw_text(a, x + (w - tw) / 2, y, text, color);
 }
 
-/* Implement the text_width_font helper. */
+/* Handle the text width font operation. */
 static int text_width_font(app_t *a, XFontStruct *font, const char *text) {
     if (!text)
         return 0;
@@ -542,7 +542,7 @@ static void draw_centered_font(app_t *a, XFontStruct *font, int x, int y, int w,
     draw_text_font(a, font, x + (w - tw) / 2, y, text, color);
 }
 
-/* Implement the bounded_text helper. */
+/* Handle the bounded text operation. */
 static void bounded_text(char *dst, size_t cap, const char *src, size_t max_bytes) {
     if (!dst || cap == 0)
         return;
@@ -564,19 +564,19 @@ static void bounded_text(char *dst, size_t cap, const char *src, size_t max_byte
     }
 }
 
-/* Implement the point_in helper. */
+/* Return whether the supplied point lies inside the rectangle. */
 static bool point_in(int px, int py, int x, int y, int w, int h) {
     return px >= x && px < x + w && py >= y && py < y + h;
 }
 
-/* Implement the mkdir_one helper. */
+/* Handle the mkdir one operation. */
 static int mkdir_one(const char *path) {
     if (mkdir(path, 0700) == 0 || errno == EEXIST)
         return 0;
     return -1;
 }
 
-/* Implement the mkdir_parents helper. */
+/* Handle the mkdir parents operation. */
 static int mkdir_parents(const char *path) {
     char tmp[1024];
     snprintf(tmp, sizeof(tmp), "%s", path);
@@ -630,7 +630,7 @@ static void init_paths(app_t *a) {
     }
 }
 
-/* Implement the pixel_from_rgb helper. */
+/* Handle the pixel from rgb operation. */
 static unsigned long pixel_from_rgb(app_t *a, uint8_t r, uint8_t g, uint8_t b) {
     unsigned long rm = a->visual->red_mask, gm = a->visual->green_mask, bm = a->visual->blue_mask;
     unsigned rs = 0, gs = 0, bs = 0;
@@ -651,7 +651,7 @@ typedef struct {
     struct jpeg_error_mgr pub;
     jmp_buf env;
 } jpeg_err_t;
-/* Implement the jpeg_fail helper. */
+/* Transfer control to the guarded JPEG error path after a libjpeg failure. */
 static void jpeg_fail(j_common_ptr cinfo) {
     jpeg_err_t *e = (jpeg_err_t *)cinfo->err;
     longjmp(e->env, 1);
@@ -719,7 +719,7 @@ static XImage *load_jpeg_ximage(app_t *a, const char *path) {
     return img;
 }
 
-/* Implement the image_slot_clear helper. */
+/* Clear owned state from the requested state in the image slot. */
 static void image_slot_clear(image_slot_t *slot) {
     if (!slot)
         return;
@@ -731,7 +731,7 @@ static void image_slot_clear(image_slot_t *slot) {
     memset(slot, 0, sizeof(*slot));
 }
 
-/* Implement the image_cache_slot_get helper. */
+/* Return the requested state from the image cache slot. */
 static image_slot_t *image_cache_slot_get(app_t *a, const char *path) {
     struct stat st;
     if (!path || stat(path, &st) != 0 || st.st_size <= 0)
@@ -763,7 +763,7 @@ static image_slot_t *image_cache_slot_get(app_t *a, const char *path) {
     return victim;
 }
 
-/* Implement the scale_ximage helper. */
+/* Scale ximage. */
 static XImage *scale_ximage(app_t *a, const XImage *src, int width, int height) {
     if (!src || width < 1 || height < 1)
         return NULL;
@@ -831,7 +831,7 @@ static bool draw_cached_image_contain(app_t *a, const char *path, int x, int y, 
     return true;
 }
 
-/* Implement the default_artwork_mode helper. */
+/* Handle the default artwork mode operation. */
 static artwork_mode_t default_artwork_mode(const app_t *a) {
     if (a->series_season_select)
         return ART_PORTRAIT;
@@ -842,7 +842,7 @@ static artwork_mode_t default_artwork_mode(const app_t *a) {
     return ART_LANDSCAPE;
 }
 
-/* Implement the detect_artwork_mode helper. */
+/* Handle the detect artwork mode operation. */
 static artwork_mode_t detect_artwork_mode(app_t *a) {
     int portrait = 0, landscape = 0, square = 0, sampled = 0;
     size_t limit = a->filtered_len < 24u ? a->filtered_len : 24u;
@@ -876,13 +876,13 @@ static artwork_mode_t detect_artwork_mode(app_t *a) {
     return ART_SQUARE;
 }
 
-/* Implement the details_panel_active helper. */
+/* Handle the details panel active operation. */
 static bool details_panel_active(const app_t *a) {
     return a && a->width >= 1180 && a->login_mode == LOGIN_XTREAM && !a->series_episode_mode &&
            (a->content_kind == CONTENT_VOD || a->content_kind == CONTENT_SERIES);
 }
 
-/* Implement the details_panel_geometry helper. */
+/* Handle the details panel geometry operation. */
 static void details_panel_geometry(const app_t *a, int *x, int *y, int *w, int *h) {
     int panel_w = DETAILS_PANEL_W;
     if (a->width < 1300)
@@ -950,7 +950,7 @@ static card_layout_t browse_layout(app_t *a) {
     return layout;
 }
 
-/* Implement the browse_card_at helper. */
+/* Handle the browse card at operation. */
 static bool browse_card_at(app_t *a, int x, int y, size_t *fidx_out) {
     if (!a || a->screen != SCREEN_BROWSE || a->filtered_len == 0u)
         return false;
@@ -982,7 +982,7 @@ static bool browse_card_at(app_t *a, int x, int y, size_t *fidx_out) {
     return true;
 }
 
-/* Implement the browse_control_at helper. */
+/* Handle the browse control at operation. */
 static int browse_control_at(app_t *a, int x, int y) {
     if (!a || a->screen != SCREEN_BROWSE)
         return HOVER_NONE;
@@ -1062,7 +1062,7 @@ static void update_browse_hover(app_t *a, int x, int y) {
     }
 }
 
-/* Implement the step_browse_animations helper. */
+/* Handle the step browse animations operation. */
 static bool step_browse_animations(app_t *a, int64_t now) {
     if (!a || a->screen != SCREEN_BROWSE)
         return false;
@@ -1110,7 +1110,7 @@ static bool step_browse_animations(app_t *a, int64_t now) {
     return active;
 }
 
-/* Implement the contains_ascii_case helper. */
+/* Handle the contains ascii case operation. */
 static bool contains_ascii_case(const char *haystack, const char *needle) {
     if (!needle || !needle[0])
         return true;
@@ -1127,12 +1127,12 @@ static bool contains_ascii_case(const char *haystack, const char *needle) {
     return false;
 }
 
-/* Implement the m3u_series_root helper. */
+/* Handle the m3u series root operation. */
 static bool m3u_series_root(const app_t *a) {
     return a && a->login_mode == LOGIN_M3U && a->content_kind == CONTENT_SERIES && !a->series_episode_mode;
 }
 
-/* Implement the folded_name_hash helper. */
+/* Return the name of hash in the folded. */
 static uint64_t folded_name_hash(const char *text) {
     uint64_t h = UINT64_C(14695981039346656037);
     const unsigned char *p = (const unsigned char *)(text ? text : "");
@@ -1146,7 +1146,7 @@ static uint64_t folded_name_hash(const char *text) {
     return h ? h : UINT64_C(1);
 }
 
-/* Implement the m3u_series_display_name helper. */
+/* Return the name of the requested state in the m3u series display. */
 static const char *m3u_series_display_name(const app_t *a, const vip_channel_t *ch, char *buffer,
                                            size_t cap) {
     if (m3u_series_root(a) && ch && vip_m3u_parse_episode_label(ch->name, buffer, cap, NULL, NULL))
@@ -1218,7 +1218,7 @@ static void rebuild_filter(app_t *a) {
     a->focused_filtered = 0;
 }
 
-/* Implement the recalc_category_counts helper. */
+/* Handle the recalc category counts operation. */
 static void recalc_category_counts(app_t *a) {
     free(a->category_counts);
     a->category_counts = NULL;
@@ -1240,7 +1240,7 @@ static void recalc_category_counts(app_t *a) {
     }
 }
 
-/* Implement the favorite_count helper. */
+/* Count the requested state in the favorite. */
 static size_t favorite_count(app_t *a) {
     size_t n = 0;
     if (!a->favorite_flags)
@@ -1290,7 +1290,7 @@ static void load_media_state(app_t *a) {
     }
 }
 
-/* Implement the toggle_favorite helper. */
+/* Toggle favorite. */
 static void toggle_favorite(app_t *a, size_t channel_index) {
     if (channel_index >= ACTIVE_CHANNELS(a).len || !a->favorite_flags)
         return;
@@ -1307,7 +1307,7 @@ static void toggle_favorite(app_t *a, size_t channel_index) {
         rebuild_filter(a);
 }
 
-/* Implement the content_label helper. */
+/* Handle the content label operation. */
 static const char *content_label(content_kind_t kind) {
     switch (kind) {
     case CONTENT_VOD:
@@ -1320,7 +1320,7 @@ static const char *content_label(content_kind_t kind) {
     }
 }
 
-/* Implement the content_plural helper. */
+/* Handle the content plural operation. */
 static const char *content_plural(app_t *a) {
     if (a->series_season_select)
         return "temporadas";
@@ -1337,7 +1337,7 @@ static const char *content_plural(app_t *a) {
     }
 }
 
-/* Implement the all_content_label helper. */
+/* Handle the all content label operation. */
 static const char *all_content_label(app_t *a) {
     if (a->series_season_select)
         return "Todas as temporadas";
@@ -1378,7 +1378,7 @@ static void switch_content(app_t *a, content_kind_t kind) {
     rebuild_filter(a);
 }
 
-/* Implement the return_from_episode_list helper. */
+/* List the requested state using the return from episode. */
 static void return_from_episode_list(app_t *a) {
     if (!a || !a->series_episode_mode)
         return;
@@ -1410,7 +1410,7 @@ static void return_from_episode_list(app_t *a) {
     rebuild_filter(a);
 }
 
-/* Implement the thumbnail_ready helper. */
+/* Handle the thumbnail ready operation. */
 static void thumbnail_ready(const vip_thumbnail_request_t *request, vip_status_t status, const char *path,
                             const vip_error_t *error, void *userdata) {
     app_t *a = userdata;
@@ -1434,7 +1434,7 @@ static void thumbnail_ready(const vip_thumbnail_request_t *request, vip_status_t
     atomic_store(&a->thumbs_dirty, true);
 }
 
-/* Implement the enqueue_thumbnail helper. */
+/* Handle the enqueue thumbnail operation. */
 static void enqueue_thumbnail(app_t *a, const vip_channel_t *ch, int64_t priority) {
     if (!a->thumbs || !ch || !ch->provider_id || !ch->id || !ch->stream_url)
         return;
@@ -1459,7 +1459,7 @@ static void enqueue_thumbnail(app_t *a, const vip_channel_t *ch, int64_t priorit
     (void)vip_thumbnail_scheduler_enqueue(a->thumbs, &req, &error);
 }
 
-/* Implement the thumbnail_worker_count helper. */
+/* Count the requested state in the thumbnail worker. */
 static size_t thumbnail_worker_count(void) {
     const char *override = getenv("VIPTV_THUMB_WORKERS");
     if (override && override[0]) {
@@ -1479,7 +1479,7 @@ static size_t thumbnail_worker_count(void) {
     return workers;
 }
 
-/* Implement the prefetch_thumbnail_list helper. */
+/* List the requested state using the thumbnail subsystem. */
 static size_t prefetch_thumbnail_list(app_t *a, vip_channel_list_t *channels, size_t *cursor, size_t budget,
                                       int64_t priority) {
     if (!a || !channels || !cursor || channels->len == 0u || budget == 0u)
@@ -1549,7 +1549,7 @@ static void prefetch_thumbnail_batch(app_t *a) {
     }
 }
 
-/* Implement the login_one_server helper. */
+/* Handle the login one server operation. */
 static vip_status_t login_one_server(const char *server, const char *username, const char *password,
                                      vip_credentials_t *credentials, vip_category_list_t *cats,
                                      vip_channel_list_t *channels, catalog_t *vod, catalog_t *series,
@@ -1602,7 +1602,7 @@ static vip_status_t login_one_server(const char *server, const char *username, c
     return st;
 }
 
-/* Implement the remap_catalog_provider_id helper. */
+/* Handle the remap catalog provider id operation. */
 static void remap_catalog_provider_id(vip_category_list_t *cats, vip_channel_list_t *channels,
                                       const char provider_id[17]) {
     if (!provider_id || !provider_id[0])
@@ -1919,7 +1919,7 @@ static void start_login(app_t *a) {
     a->login_thread_started = true;
 }
 
-/* Implement the series_worker helper. */
+/* Run the series background worker. */
 static void *series_worker(void *userdata) {
     series_job_t *job = userdata;
     app_t *a = job->app;
@@ -2096,7 +2096,7 @@ static void start_series_load(app_t *a, size_t channel_index) {
     a->series_thread_started = true;
 }
 
-/* Implement the metadata_has_content helper. */
+/* Return whether content for the metadata. */
 static bool metadata_has_content(const vip_media_metadata_t *metadata) {
     return metadata &&
            ((metadata->plot && metadata->plot[0]) || (metadata->cover_url && metadata->cover_url[0]) ||
@@ -2107,7 +2107,7 @@ static bool metadata_has_content(const vip_media_metadata_t *metadata) {
             (metadata->cast && metadata->cast[0]) || (metadata->director && metadata->director[0]));
 }
 
-/* Implement the details_job_free helper. */
+/* Release the requested state in the details job. */
 static void details_job_free(details_job_t *job) {
     if (!job)
         return;
@@ -2126,7 +2126,7 @@ static void details_job_free(details_job_t *job) {
     free(job);
 }
 
-/* Implement the details_worker helper. */
+/* Run the details background worker. */
 static void *details_worker(void *userdata) {
     details_job_t *job = userdata;
     app_t *a = job->app;
@@ -2274,7 +2274,7 @@ static void start_details_load(app_t *a, size_t channel_index) {
     a->details_thread_started = true;
 }
 
-/* Implement the maybe_start_details_load helper. */
+/* Start details load in the maybe. */
 static void maybe_start_details_load(app_t *a) {
     if (!details_panel_active(a) || a->screen != SCREEN_BROWSE || atomic_load(&a->details_running) ||
         a->details_thread_started || a->filtered_len == 0u)
@@ -2294,7 +2294,7 @@ static void maybe_start_details_load(app_t *a) {
         start_details_load(a, channel_index);
 }
 
-/* Implement the select_season helper. */
+/* Select season. */
 static void select_season(app_t *a, size_t season_channel_index) {
     if (!a || !a->series_season_select || season_channel_index >= a->season_channels.len)
         return;
@@ -2316,12 +2316,12 @@ static void select_season(app_t *a, size_t season_channel_index) {
     rebuild_filter(a);
 }
 
-/* Implement the same_text_case helper. */
+/* Handle the same text case operation. */
 static bool same_text_case(const char *a, const char *b) {
     return a && b && strcasecmp(a, b) == 0;
 }
 
-/* Implement the same_category helper. */
+/* Handle the same category operation. */
 static bool same_category(const char *a, const char *b) {
     if (!a || !b)
         return a == b;
@@ -2462,7 +2462,7 @@ static bool start_m3u_series_load(app_t *a, size_t channel_index) {
     return true;
 }
 
-/* Implement the activate_item helper. */
+/* Handle the activate item operation. */
 static void activate_item(app_t *a, size_t channel_index) {
     if (a->content_kind == CONTENT_SERIES) {
         if (a->series_season_select) {
@@ -2482,7 +2482,7 @@ static void activate_item(app_t *a, size_t channel_index) {
     enter_player(a, channel_index);
 }
 
-/* Implement the request_paste helper. */
+/* Handle the request paste operation. */
 static void request_paste(app_t *a, Atom selection) {
     if (a->input_focus == 0)
         return;
@@ -2490,7 +2490,7 @@ static void request_paste(app_t *a, Atom selection) {
     XConvertSelection(a->dpy, selection, a->utf8, a->paste_property, a->win, CurrentTime);
 }
 
-/* Implement the active_input helper. */
+/* Handle the active input operation. */
 static char *active_input(app_t *a, size_t *cap) {
     switch (a->input_focus) {
     case INPUT_SERVER:
@@ -2532,7 +2532,7 @@ static void append_input(app_t *a, const char *text, size_t n) {
         rebuild_filter(a);
 }
 
-/* Implement the backspace_input helper. */
+/* Handle the backspace input operation. */
 static void backspace_input(app_t *a) {
     size_t cap = 0;
     char *dst = active_input(a, &cap);
@@ -2550,7 +2550,7 @@ static void backspace_input(app_t *a) {
         rebuild_filter(a);
 }
 
-/* Implement the executable_in_path helper. */
+/* Handle the executable in path operation. */
 static bool executable_in_path(const char *name) {
     const char *path = getenv("PATH");
     if (!name || !name[0] || !path)
@@ -2619,7 +2619,7 @@ static bool keyring_store_password(const char *profile_id, const char *password)
     return wrote && WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
-/* Implement the keyring_lookup_password helper. */
+/* Handle the keyring lookup password operation. */
 static bool keyring_lookup_password(const char *profile_id, char *out, size_t cap) {
     if (!out || cap == 0u)
         return false;
@@ -2663,7 +2663,7 @@ static bool keyring_lookup_password(const char *profile_id, char *out, size_t ca
     return n > 0;
 }
 
-/* Implement the refresh_profiles helper. */
+/* Handle the refresh profiles operation. */
 static void refresh_profiles(app_t *a) {
     vip_profile_list_clear(&a->profiles);
     vip_profile_list_init(&a->profiles);
@@ -2728,7 +2728,7 @@ static void load_profile_into_form(app_t *a, size_t index) {
                                                               : "Perfil carregado; pressione Conectar");
 }
 
-/* Implement the current_item_has_progress helper. */
+/* Return whether progress for the current item. */
 static bool current_item_has_progress(app_t *a) {
     return a && !a->player_item_live && a->current_channel < ACTIVE_CHANNELS(a).len && a->db;
 }
@@ -2785,12 +2785,12 @@ static void save_current_progress(app_t *a, bool force) {
     }
 }
 
-/* Implement the player_hud_visible helper. */
+/* Handle the player hud visible operation. */
 static bool player_hud_visible(app_t *a) {
     return !a->fullscreen || a->timeline_dragging || monotonic_ms() < a->player_hud_until_ms;
 }
 
-/* Implement the show_player_hud helper. */
+/* Handle the show player hud operation. */
 static void show_player_hud(app_t *a) {
     a->player_hud_until_ms = monotonic_ms() + 3000;
     if (a->screen == SCREEN_PLAYER)
@@ -2822,7 +2822,7 @@ static void recover_player_focus_if_needed(app_t *a, const XFocusChangeEvent *fo
     }
 }
 
-/* Implement the format_clock helper. */
+/* Format clock. */
 static void format_clock(double seconds, char out[32]) {
     if (seconds < 0.0)
         seconds = 0.0;
@@ -2836,7 +2836,7 @@ static void format_clock(double seconds, char out[32]) {
         snprintf(out, 32, "%02ld:%02ld", m, sec);
 }
 
-/* Implement the timeline_geometry helper. */
+/* Handle the timeline geometry operation. */
 static void timeline_geometry(app_t *a, int *x, int *y, int *w, int *h) {
     int left = 230;
     int right = 170;
@@ -2858,7 +2858,7 @@ typedef struct {
 
 #define MWM_HINTS_DECORATIONS (1UL << 1)
 
-/* Implement the wm_reports_fullscreen helper. */
+/* Handle the wm reports fullscreen operation. */
 static bool wm_reports_fullscreen(app_t *a) {
     if (!a || !a->dpy || !a->win)
         return false;
@@ -2896,7 +2896,7 @@ static void set_window_decorations(app_t *a, bool enabled) {
     XChangeProperty(a->dpy, a->win, motif, motif, 32, PropModeReplace, (unsigned char *)&hints, 5);
 }
 
-/* Implement the remember_windowed_geometry helper. */
+/* Handle the remember windowed geometry operation. */
 static void remember_windowed_geometry(app_t *a) {
     if (!a || !a->dpy || !a->win || a->windowed_geometry_valid)
         return;
@@ -2940,7 +2940,7 @@ static void send_fullscreen_request(app_t *a, bool enable) {
     XFlush(a->dpy);
 }
 
-/* Implement the apply_borderless_fullscreen helper. */
+/* Handle the apply borderless fullscreen operation. */
 static void apply_borderless_fullscreen(app_t *a) {
     if (!a || !a->dpy || !a->win)
         return;
@@ -2989,7 +2989,7 @@ static void set_fullscreen(app_t *a, bool enable) {
     }
 }
 
-/* Implement the maybe_enforce_fullscreen helper. */
+/* Handle the maybe enforce fullscreen operation. */
 static void maybe_enforce_fullscreen(app_t *a) {
     if (!a || !a->fullscreen_requested || a->fullscreen || monotonic_ms() < a->fullscreen_retry_at_ms)
         return;
@@ -3057,7 +3057,7 @@ static void enter_player(app_t *a, size_t channel_index) {
     fprintf(stderr, "[player] %s%s\n", ch->name, resume > 0.0 ? " (retomado)" : "");
 }
 
-/* Implement the leave_player helper. */
+/* Handle the leave player operation. */
 static void leave_player(app_t *a) {
     save_current_progress(a, true);
     if (a->player)
@@ -3073,7 +3073,7 @@ static void leave_player(app_t *a) {
     rebuild_filter(a);
 }
 
-/* Implement the normalized_server_prefix helper. */
+/* Handle the normalized server prefix operation. */
 static size_t normalized_server_prefix(const char *server, char *out, size_t cap) {
     if (!server || !server[0] || !out || cap < 2u)
         return 0;
@@ -3111,7 +3111,7 @@ static char *alternate_stream_url(app_t *a, const char *url) {
     return out;
 }
 
-/* Implement the maybe_failover_player helper. */
+/* Handle the maybe failover player operation. */
 static void maybe_failover_player(app_t *a) {
     if (!a || a->screen != SCREEN_PLAYER || !a->player || a->player_alt_attempted)
         return;
@@ -3396,12 +3396,12 @@ static int draw_wrapped_text(app_t *a, int x, int y, int width, const char *text
     return y;
 }
 
-/* Implement the detail_art_id helper. */
+/* Handle the detail art id operation. */
 static void detail_art_id(char *out, size_t cap, const char *media_id) {
     snprintf(out, cap, "detail-art:%s", media_id ? media_id : "unknown");
 }
 
-/* Implement the enqueue_detail_artwork helper. */
+/* Handle the enqueue detail artwork operation. */
 static void enqueue_detail_artwork(app_t *a, const vip_channel_t *ch, const char *art_url, int64_t priority) {
     if (!a || !a->thumbs || !ch || !ch->provider_id || !ch->id || !ch->stream_url || !art_url || !art_url[0])
         return;
@@ -3567,19 +3567,19 @@ static void draw_toast(app_t *a) {
     draw_centered(a, x, y + 27, w, a->toast, a->colors.text);
 }
 
-/* Implement the browse_sidebar_category_y helper. */
+/* Handle the browse sidebar category y operation. */
 static int browse_sidebar_category_y(const app_t *a) {
     return TOPBAR_H + 12 + (a && a->series_episode_mode ? 48 : 0);
 }
 
-/* Implement the category_visible_rows helper. */
+/* Handle the category visible rows operation. */
 static int category_visible_rows(app_t *a) {
     int top = browse_sidebar_category_y(a);
     int n = (a->height - top - 8) / 40;
     return n > 1 ? n : 1;
 }
 
-/* Implement the browse_back_label helper. */
+/* Handle the browse back label operation. */
 static const char *browse_back_label(const app_t *a) {
     if (!a || !a->series_episode_mode)
         return "Voltar";
@@ -3904,7 +3904,7 @@ static void draw_browse(app_t *a) {
     draw_toast(a);
 }
 
-/* Implement the layout_video_window helper. */
+/* Lay out video window. */
 static void layout_video_window(app_t *a) {
     if (!a || !a->dpy || !a->video_win || a->width <= 0 || a->height <= 0)
         return;
@@ -4104,7 +4104,7 @@ static bool ensure_backbuffer(app_t *a) {
     return true;
 }
 
-/* Implement the redraw helper. */
+/* Handle the redraw operation. */
 static void redraw(app_t *a) {
     bool buffered = ensure_backbuffer(a);
     a->draw = buffered ? a->backbuffer : a->win;
@@ -4123,7 +4123,7 @@ static void redraw(app_t *a) {
     XFlush(a->dpy);
 }
 
-/* Implement the choose_category helper. */
+/* Handle the choose category operation. */
 static void choose_category(app_t *a, int index) {
     a->selected_category = index;
     rebuild_filter(a);
@@ -4366,7 +4366,7 @@ static void handle_wheel(app_t *a, int x, int y, int direction) {
     (void)y;
 }
 
-/* Implement the browse_columns helper. */
+/* Handle the browse columns operation. */
 static int browse_columns(app_t *a) {
     return browse_layout(a).cols;
 }
@@ -4396,7 +4396,7 @@ static void ensure_grid_focus_visible(app_t *a) {
     a->grid_scroll_animating = false;
 }
 
-/* Implement the move_grid_focus helper. */
+/* Handle the move grid focus operation. */
 static void move_grid_focus(app_t *a, int dx, int dy) {
     if (a->filtered_len == 0)
         return;
@@ -4822,7 +4822,7 @@ static bool init_x11(app_t *a, vip_error_t *error) {
     return true;
 }
 
-/* Implement the pulse_runtime_available helper. */
+/* Handle the pulse runtime available operation. */
 static bool pulse_runtime_available(void) {
     const char *server = getenv("PULSE_SERVER");
     if (server && server[0])
@@ -5009,7 +5009,7 @@ static void init_test_env(app_t *a) {
     }
 }
 
-/* Implement the vip_x11_app_run helper. */
+/* Run the requested state in the x11 app. */
 int vip_x11_app_run(void) {
     setlocale(LC_ALL, "");
     curl_global_init(CURL_GLOBAL_DEFAULT);

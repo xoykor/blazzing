@@ -16,13 +16,13 @@
 #include <time.h>
 #include <unistd.h>
 
-/* Implement the sleep_ms helper. */
+/* Sleep for the requested number of milliseconds, retrying after interruptions. */
 static void sleep_ms(long ms) {
     struct timespec ts = {.tv_sec = ms / 1000L, .tv_nsec = (ms % 1000L) * 1000000L};
     nanosleep(&ts, NULL);
 }
 
-/* Implement the file_contains helper. */
+/* Handle the file contains operation. */
 static bool file_contains(const char *path, const char *needle) {
     FILE *fp = fopen(path, "r");
     if (!fp)

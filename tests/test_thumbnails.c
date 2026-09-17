@@ -22,7 +22,7 @@ struct ready_state {
     int count;
 };
 
-/* Implement the fake_capture helper. */
+/* Capture the requested state in the fake. */
 static vip_status_t fake_capture(const vip_thumbnail_request_t *request, char **path_out, vip_error_t *error,
                                  void *userdata) {
     (void)request;
@@ -32,7 +32,7 @@ static vip_status_t fake_capture(const vip_thumbnail_request_t *request, char **
     return *path_out ? VIP_OK : VIP_ERR_NOMEM;
 }
 
-/* Implement the fake_ready helper. */
+/* Handle the fake ready operation. */
 static void fake_ready(const vip_thumbnail_request_t *request, vip_status_t status, const char *path,
                        const vip_error_t *error, void *userdata) {
     (void)request;

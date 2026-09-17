@@ -68,7 +68,7 @@ static vip_status_t copy_credentials(vip_credentials_t *dst, const vip_credentia
     return vip_credentials_init(dst, src->server, src->username, src->password, error);
 }
 
-/* Implement the vip_xtream_client_create helper. */
+/* Create the requested state in the xtream client. */
 vip_status_t vip_xtream_client_create(vip_xtream_client_t **out, const vip_credentials_t *credentials,
                                       vip_error_t *error) {
     if (!out || !credentials)
@@ -95,7 +95,7 @@ vip_status_t vip_xtream_client_create(vip_xtream_client_t **out, const vip_crede
     return VIP_OK;
 }
 
-/* Implement the vip_xtream_client_destroy helper. */
+/* Destroy the requested state in the xtream client. */
 void vip_xtream_client_destroy(vip_xtream_client_t *client) {
     if (!client)
         return;
@@ -105,12 +105,12 @@ void vip_xtream_client_destroy(vip_xtream_client_t *client) {
     free(client);
 }
 
-/* Implement the vip_xtream_provider_id helper. */
+/* Handle the xtream provider id operation. */
 const char *vip_xtream_provider_id(const vip_xtream_client_t *client) {
     return client ? client->credentials.provider_id : NULL;
 }
 
-/* Implement the escape helper. */
+/* Handle the escape operation. */
 static char *escape(CURL *curl, const char *text) {
     return curl_easy_escape(curl, text ? text : "", 0);
 }
@@ -149,7 +149,7 @@ static char *make_api_url(vip_xtream_client_t *client, const char *action, vip_e
     return url;
 }
 
-/* Implement the http_get helper. */
+/* Return the requested state from the http. */
 static vip_status_t http_get(vip_xtream_client_t *client, const char *url, char **body_out,
                              vip_error_t *error) {
     response_buf_t buf = {0};
@@ -196,7 +196,7 @@ static vip_status_t http_get(vip_xtream_client_t *client, const char *url, char 
     return VIP_OK;
 }
 
-/* Implement the json_truthy helper. */
+/* Handle the json truthy operation. */
 static bool json_truthy(json_object *value) {
     if (!value)
         return false;
@@ -212,7 +212,7 @@ static bool json_truthy(json_object *value) {
     return false;
 }
 
-/* Implement the vip_xtream_parse_auth_json helper. */
+/* Parse auth json using the Xtream provider. */
 vip_status_t vip_xtream_parse_auth_json(const char *json, vip_error_t *error) {
     json_object *root = json_tokener_parse(json);
     if (!root) {
@@ -240,7 +240,7 @@ vip_status_t vip_xtream_parse_auth_json(const char *json, vip_error_t *error) {
     return VIP_OK;
 }
 
-/* Implement the jstr helper. */
+/* Handle the jstr operation. */
 static const char *jstr(json_object *obj, const char *key) {
     json_object *v = NULL;
     if (!json_object_object_get_ex(obj, key, &v) || !v || json_object_get_type(v) == json_type_null)
@@ -248,7 +248,7 @@ static const char *jstr(json_object *obj, const char *key) {
     return json_object_get_string(v);
 }
 
-/* Implement the jstr_alias helper. */
+/* Handle the jstr alias operation. */
 static const char *jstr_alias(json_object *obj, const char *a, const char *b, const char *c) {
     const char *value = a ? jstr(obj, a) : "";
     if ((!value || !value[0]) && b)
@@ -258,7 +258,7 @@ static const char *jstr_alias(json_object *obj, const char *a, const char *b, co
     return value ? value : "";
 }
 
-/* Implement the first_string_or_array_item helper. */
+/* Handle the first string or array item operation. */
 static const char *first_string_or_array_item(json_object *obj, const char *key) {
     json_object *value = NULL;
     if (!obj || !json_object_object_get_ex(obj, key, &value) || !value ||
@@ -282,7 +282,7 @@ static bool metadata_assign(char **dst, const char *value) {
     return *dst != NULL;
 }
 
-/* Implement the metadata_from_info helper. */
+/* Handle the metadata from info operation. */
 static vip_status_t metadata_from_info(json_object *info, json_object *fallback, vip_media_metadata_t *out,
                                        vip_error_t *error) {
     if (!out) {
@@ -352,7 +352,7 @@ static vip_status_t metadata_from_info(json_object *info, json_object *fallback,
     return VIP_OK;
 }
 
-/* Implement the vip_xtream_parse_vod_info_json helper. */
+/* Parse vod info json using the Xtream provider. */
 vip_status_t vip_xtream_parse_vod_info_json(const char *json, vip_media_metadata_t *metadata_out,
                                             vip_error_t *error) {
     if (!json || !metadata_out) {
@@ -374,7 +374,7 @@ vip_status_t vip_xtream_parse_vod_info_json(const char *json, vip_media_metadata
     return st;
 }
 
-/* Implement the vip_xtream_parse_series_metadata_json helper. */
+/* Parse series metadata json using the Xtream provider. */
 vip_status_t vip_xtream_parse_series_metadata_json(const char *json, vip_media_metadata_t *metadata_out,
                                                    vip_error_t *error) {
     if (!json || !metadata_out) {
@@ -395,7 +395,7 @@ vip_status_t vip_xtream_parse_series_metadata_json(const char *json, vip_media_m
     return st;
 }
 
-/* Implement the vip_xtream_parse_categories_json helper. */
+/* Parse categories json using the Xtream provider. */
 vip_status_t vip_xtream_parse_categories_json(const char *json, const char *provider_id,
                                               vip_category_list_t *out, vip_error_t *error) {
     json_object *root = json_tokener_parse(json);
@@ -432,7 +432,7 @@ vip_status_t vip_xtream_parse_categories_json(const char *json, const char *prov
     return VIP_OK;
 }
 
-/* Implement the stream_id_string helper. */
+/* Handle the stream id string operation. */
 static char *stream_id_string(json_object *row) {
     json_object *id = NULL;
     if (!json_object_object_get_ex(row, "stream_id", &id) || !id)
@@ -476,7 +476,7 @@ static char *make_live_url(const vip_credentials_t *credentials, const char *str
     return url;
 }
 
-/* Implement the prefixed_id helper. */
+/* Handle the prefixed id operation. */
 static char *prefixed_id(const char *prefix, const char *id) {
     if (!prefix || !id || !id[0])
         return NULL;
@@ -562,7 +562,7 @@ static char *make_api_url_param(vip_xtream_client_t *client, const char *action,
     return url;
 }
 
-/* Implement the vip_xtream_parse_streams_json helper. */
+/* Parse streams json using the Xtream provider. */
 vip_status_t vip_xtream_parse_streams_json(const char *json, const vip_credentials_t *credentials,
                                            vip_channel_list_t *out, vip_error_t *error) {
     json_object *root = json_tokener_parse(json);
@@ -682,7 +682,7 @@ static vip_status_t parse_vod_streams_json(const char *json, const vip_credentia
     return VIP_OK;
 }
 
-/* Implement the series_id_string helper. */
+/* Handle the series id string operation. */
 static char *series_id_string(json_object *row) {
     json_object *id = NULL;
     if (!json_object_object_get_ex(row, "series_id", &id) || !id)
@@ -762,7 +762,7 @@ static vip_status_t parse_series_json(const char *json, const vip_credentials_t 
     return VIP_OK;
 }
 
-/* Implement the episode_image helper. */
+/* Handle the episode image operation. */
 static const char *episode_image(json_object *episode) {
     json_object *info = NULL;
     if (!json_object_object_get_ex(episode, "info", &info) || !info ||
@@ -906,7 +906,7 @@ fail:
     return error ? error->code : VIP_ERR_NOMEM;
 }
 
-/* Implement the vip_xtream_authenticate helper. */
+/* Authenticate the requested state using the Xtream provider. */
 vip_status_t vip_xtream_authenticate(vip_xtream_client_t *client, vip_error_t *error) {
     char *url = make_api_url(client, NULL, error);
     if (!url)
@@ -920,7 +920,7 @@ vip_status_t vip_xtream_authenticate(vip_xtream_client_t *client, vip_error_t *e
     return st;
 }
 
-/* Implement the vip_xtream_live_categories helper. */
+/* Handle the xtream live categories operation. */
 vip_status_t vip_xtream_live_categories(vip_xtream_client_t *client, vip_category_list_t *out,
                                         vip_error_t *error) {
     char *url = make_api_url(client, "get_live_categories", error);
@@ -935,7 +935,7 @@ vip_status_t vip_xtream_live_categories(vip_xtream_client_t *client, vip_categor
     return st;
 }
 
-/* Implement the vip_xtream_live_streams helper. */
+/* Handle the xtream live streams operation. */
 vip_status_t vip_xtream_live_streams(vip_xtream_client_t *client, vip_channel_list_t *out,
                                      vip_error_t *error) {
     char *url = make_api_url(client, "get_live_streams", error);
@@ -950,7 +950,7 @@ vip_status_t vip_xtream_live_streams(vip_xtream_client_t *client, vip_channel_li
     return st;
 }
 
-/* Implement the vip_xtream_vod_categories helper. */
+/* Handle the xtream vod categories operation. */
 vip_status_t vip_xtream_vod_categories(vip_xtream_client_t *client, vip_category_list_t *out,
                                        vip_error_t *error) {
     char *url = make_api_url(client, "get_vod_categories", error);
@@ -965,7 +965,7 @@ vip_status_t vip_xtream_vod_categories(vip_xtream_client_t *client, vip_category
     return st;
 }
 
-/* Implement the vip_xtream_vod_streams helper. */
+/* Handle the xtream vod streams operation. */
 vip_status_t vip_xtream_vod_streams(vip_xtream_client_t *client, vip_channel_list_t *out,
                                     vip_error_t *error) {
     char *url = make_api_url(client, "get_vod_streams", error);
@@ -980,7 +980,7 @@ vip_status_t vip_xtream_vod_streams(vip_xtream_client_t *client, vip_channel_lis
     return st;
 }
 
-/* Implement the vip_xtream_vod_info helper. */
+/* Handle the xtream vod info operation. */
 vip_status_t vip_xtream_vod_info(vip_xtream_client_t *client, const char *vod_id,
                                  vip_media_metadata_t *metadata_out, vip_error_t *error) {
     if (!client || !vod_id || !vod_id[0] || !metadata_out) {
@@ -1002,7 +1002,7 @@ vip_status_t vip_xtream_vod_info(vip_xtream_client_t *client, const char *vod_id
     return st;
 }
 
-/* Implement the vip_xtream_series_categories helper. */
+/* Handle the xtream series categories operation. */
 vip_status_t vip_xtream_series_categories(vip_xtream_client_t *client, vip_category_list_t *out,
                                           vip_error_t *error) {
     char *url = make_api_url(client, "get_series_categories", error);
@@ -1017,7 +1017,7 @@ vip_status_t vip_xtream_series_categories(vip_xtream_client_t *client, vip_categ
     return st;
 }
 
-/* Implement the vip_xtream_series helper. */
+/* Handle the xtream series operation. */
 vip_status_t vip_xtream_series(vip_xtream_client_t *client, vip_channel_list_t *out, vip_error_t *error) {
     char *url = make_api_url(client, "get_series", error);
     if (!url)
@@ -1031,7 +1031,7 @@ vip_status_t vip_xtream_series(vip_xtream_client_t *client, vip_channel_list_t *
     return st;
 }
 
-/* Implement the vip_xtream_series_metadata helper. */
+/* Handle the xtream series metadata operation. */
 vip_status_t vip_xtream_series_metadata(vip_xtream_client_t *client, const char *series_id,
                                         vip_media_metadata_t *metadata_out, vip_error_t *error) {
     if (!client || !series_id || !series_id[0] || !metadata_out) {
@@ -1053,7 +1053,7 @@ vip_status_t vip_xtream_series_metadata(vip_xtream_client_t *client, const char 
     return st;
 }
 
-/* Implement the vip_xtream_series_info helper. */
+/* Handle the xtream series info operation. */
 vip_status_t vip_xtream_series_info(vip_xtream_client_t *client, const char *series_id,
                                     vip_media_metadata_t *metadata_out, vip_category_list_t *seasons_out,
                                     vip_channel_list_t *episodes_out, vip_error_t *error) {
@@ -1077,7 +1077,7 @@ vip_status_t vip_xtream_series_info(vip_xtream_client_t *client, const char *ser
     return st;
 }
 
-/* Implement the vip_xtream_series_episodes helper. */
+/* Handle the xtream series episodes operation. */
 vip_status_t vip_xtream_series_episodes(vip_xtream_client_t *client, const char *series_id,
                                         vip_category_list_t *seasons_out, vip_channel_list_t *episodes_out,
                                         vip_error_t *error) {

@@ -19,7 +19,7 @@ typedef struct {
     char *alternate;
 } vip_server_resolution_t;
 
-/* Implement the vip_server_resolution_clear helper. */
+/* Clear owned state from the requested state in the server resolution. */
 void vip_server_resolution_clear(vip_server_resolution_t *resolution);
 
 /* Resolve StreamFire/Spark code 11 credentials into verified Xtream bases.
@@ -32,10 +32,10 @@ vip_status_t vip_streamfire_resolve_servers(const char *username, const char *pa
  * without performing network requests. */
 vip_status_t vip_streamfire_decode_payload(const char *payload, const char *identity, char **json_out,
                                            vip_error_t *error);
-/* Implement the vip_streamfire_collect_bases helper. */
+/* Collect bases using the server resolver. */
 vip_status_t vip_streamfire_collect_bases(const char *json, char ***bases_out, size_t *count_out,
                                           vip_error_t *error);
-/* Implement the vip_streamfire_free_bases helper. */
+/* Release bases in the server resolver. */
 void vip_streamfire_free_bases(char **bases, size_t count);
 
 #ifdef __cplusplus

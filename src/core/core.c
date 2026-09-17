@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Implement the vip_strdup helper. */
+/* Handle the strdup operation. */
 char *vip_strdup(const char *text) {
     if (!text)
         return NULL;
@@ -24,14 +24,14 @@ char *vip_strdup(const char *text) {
     return copy;
 }
 
-/* Implement the vip_strdup_nullable helper. */
+/* Handle the strdup nullable operation. */
 char *vip_strdup_nullable(const char *text) {
     if (!text || text[0] == '\0')
         return NULL;
     return vip_strdup(text);
 }
 
-/* Implement the vip_error_clear helper. */
+/* Clear owned state from the requested state in the error. */
 void vip_error_clear(vip_error_t *error) {
     if (!error)
         return;
@@ -39,7 +39,7 @@ void vip_error_clear(vip_error_t *error) {
     error->message[0] = '\0';
 }
 
-/* Implement the vip_error_set helper. */
+/* Set the requested state in the error. */
 void vip_error_set(vip_error_t *error, vip_status_t code, const char *fmt, ...) {
     if (!error)
         return;
@@ -61,7 +61,7 @@ void vip_error_set(vip_error_t *error, vip_status_t code, const char *fmt, ...) 
     va_end(ap);
 }
 
-/* Implement the fnv1a64_update helper. */
+/* Update an FNV-1a 64-bit hash with the supplied text. */
 static uint64_t fnv1a64_update(uint64_t h, const char *text) {
     for (const unsigned char *p = (const unsigned char *)text; p && *p; ++p) {
         h ^= *p;
@@ -115,7 +115,7 @@ static char *normalize_server(const char *server, vip_error_t *error) {
     return out;
 }
 
-/* Implement the vip_credentials_init helper. */
+/* Initialize the requested state in the credentials. */
 vip_status_t vip_credentials_init(vip_credentials_t *out, const char *server, const char *username,
                                   const char *password, vip_error_t *error) {
     if (!out || !username || !password) {
@@ -139,7 +139,7 @@ vip_status_t vip_credentials_init(vip_credentials_t *out, const char *server, co
     return VIP_OK;
 }
 
-/* Implement the vip_credentials_clear helper. */
+/* Clear owned state from the requested state in the credentials. */
 void vip_credentials_clear(vip_credentials_t *credentials) {
     if (!credentials)
         return;
@@ -155,13 +155,13 @@ void vip_credentials_clear(vip_credentials_t *credentials) {
     memset(credentials, 0, sizeof(*credentials));
 }
 
-/* Implement the vip_category_list_init helper. */
+/* List init using the category. */
 void vip_category_list_init(vip_category_list_t *list) {
     if (list)
         memset(list, 0, sizeof(*list));
 }
 
-/* Implement the category_clear helper. */
+/* Clear owned state from the requested state in the category. */
 static void category_clear(vip_category_t *category) {
     if (!category)
         return;
@@ -171,7 +171,7 @@ static void category_clear(vip_category_t *category) {
     memset(category, 0, sizeof(*category));
 }
 
-/* Implement the vip_category_list_clear helper. */
+/* List clear using the category. */
 void vip_category_list_clear(vip_category_list_t *list) {
     if (!list)
         return;
@@ -181,7 +181,7 @@ void vip_category_list_clear(vip_category_list_t *list) {
     memset(list, 0, sizeof(*list));
 }
 
-/* Implement the reserve_categories helper. */
+/* Handle the reserve categories operation. */
 static vip_status_t reserve_categories(vip_category_list_t *list, size_t need, vip_error_t *error) {
     if (need <= list->cap)
         return VIP_OK;
@@ -198,7 +198,7 @@ static vip_status_t reserve_categories(vip_category_list_t *list, size_t need, v
     return VIP_OK;
 }
 
-/* Implement the vip_category_list_push helper. */
+/* List push using the category. */
 vip_status_t vip_category_list_push(vip_category_list_t *list, const vip_category_t *category,
                                     vip_error_t *error) {
     if (!list || !category || !category->id || !category->name)
@@ -221,13 +221,13 @@ vip_status_t vip_category_list_push(vip_category_list_t *list, const vip_categor
     return VIP_OK;
 }
 
-/* Implement the vip_channel_list_init helper. */
+/* List init using the channel. */
 void vip_channel_list_init(vip_channel_list_t *list) {
     if (list)
         memset(list, 0, sizeof(*list));
 }
 
-/* Implement the channel_clear helper. */
+/* Clear owned state from the requested state in the channel. */
 static void channel_clear(vip_channel_t *channel) {
     if (!channel)
         return;
@@ -241,7 +241,7 @@ static void channel_clear(vip_channel_t *channel) {
     memset(channel, 0, sizeof(*channel));
 }
 
-/* Implement the vip_channel_list_clear helper. */
+/* List clear using the channel. */
 void vip_channel_list_clear(vip_channel_list_t *list) {
     if (!list)
         return;
@@ -251,7 +251,7 @@ void vip_channel_list_clear(vip_channel_list_t *list) {
     memset(list, 0, sizeof(*list));
 }
 
-/* Implement the reserve_channels helper. */
+/* Handle the reserve channels operation. */
 static vip_status_t reserve_channels(vip_channel_list_t *list, size_t need, vip_error_t *error) {
     if (need <= list->cap)
         return VIP_OK;
@@ -268,7 +268,7 @@ static vip_status_t reserve_channels(vip_channel_list_t *list, size_t need, vip_
     return VIP_OK;
 }
 
-/* Implement the vip_channel_list_push helper. */
+/* List push using the channel. */
 vip_status_t vip_channel_list_push(vip_channel_list_t *list, const vip_channel_t *channel,
                                    vip_error_t *error) {
     if (!list || !channel || !channel->id || !channel->name || !channel->stream_url)
@@ -295,13 +295,13 @@ vip_status_t vip_channel_list_push(vip_channel_list_t *list, const vip_channel_t
     return VIP_OK;
 }
 
-/* Implement the vip_media_metadata_init helper. */
+/* Initialize the requested state in the media metadata. */
 void vip_media_metadata_init(vip_media_metadata_t *metadata) {
     if (metadata)
         memset(metadata, 0, sizeof(*metadata));
 }
 
-/* Implement the vip_media_metadata_clear helper. */
+/* Clear owned state from the requested state in the media metadata. */
 void vip_media_metadata_clear(vip_media_metadata_t *metadata) {
     if (!metadata)
         return;
@@ -318,7 +318,7 @@ void vip_media_metadata_clear(vip_media_metadata_t *metadata) {
     memset(metadata, 0, sizeof(*metadata));
 }
 
-/* Implement the vip_media_metadata_copy helper. */
+/* Copy the requested state in the media metadata. */
 vip_status_t vip_media_metadata_copy(vip_media_metadata_t *dst, const vip_media_metadata_t *src,
                                      vip_error_t *error) {
     if (!dst || !src) {

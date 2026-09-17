@@ -20,7 +20,7 @@ typedef struct {
     bool overflow;
 } m3u_buf_t;
 
-/* Implement the fnv_update helper. */
+/* Update an FNV hash with the supplied text. */
 static uint64_t fnv_update(uint64_t h, const char *text) {
     for (const unsigned char *p = (const unsigned char *)text; p && *p; ++p) {
         h ^= *p;
@@ -29,17 +29,17 @@ static uint64_t fnv_update(uint64_t h, const char *text) {
     return h;
 }
 
-/* Implement the fnv_text helper. */
+/* Return a stable FNV hash for the supplied text. */
 static uint64_t fnv_text(const char *text) {
     return fnv_update(UINT64_C(14695981039346656037), text ? text : "");
 }
 
-/* Implement the stable_id helper. */
+/* Format a deterministic short identifier derived from text. */
 static void stable_id(char out[17], const char *text) {
     snprintf(out, 17u, "%016llx", (unsigned long long)fnv_text(text));
 }
 
-/* Implement the curl_write helper. */
+/* Append one libcurl response chunk to the bounded M3U download buffer. */
 static size_t curl_write(void *ptr, size_t size, size_t nmemb, void *userdata) {
     m3u_buf_t *buf = userdata;
     if (size != 0u && nmemb > SIZE_MAX / size) {
@@ -160,7 +160,7 @@ static char *trim(char *s) {
     return s;
 }
 
-/* Implement the attr_dup helper. */
+/* Handle the attr dup operation. */
 static char *attr_dup(const char *line, const char *key) {
     size_t kn = strlen(key);
     const char *p = line;
@@ -196,7 +196,7 @@ static char *attr_dup(const char *line, const char *key) {
     return NULL;
 }
 
-/* Implement the extinf_name helper. */
+/* Return the name of the requested state in the extinf. */
 static char *extinf_name(const char *line) {
     /* The title begins at the first comma outside a quoted attribute. Using
        strrchr() truncated ordinary titles such as "News, HD" to " HD". */
@@ -294,7 +294,7 @@ static char *resolve_url(const char *source, const char *stream) {
     return out;
 }
 
-/* Implement the vip_m3u_load helper. */
+/* Load the requested state using the M3U provider. */
 vip_status_t vip_m3u_load(const char *source, vip_category_list_t *categories_out,
                           vip_channel_list_t *channels_out, char provider_id_out[17], vip_error_t *error) {
     if (!source || !source[0] || !categories_out || !channels_out || !provider_id_out) {

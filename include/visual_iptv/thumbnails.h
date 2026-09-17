@@ -43,7 +43,7 @@ typedef void (*vip_thumbnail_ready_fn)(const vip_thumbnail_request_t *request, v
 vip_status_t vip_thumbnail_capture_context_init(vip_thumbnail_capture_context_t *context,
                                                 vip_thumbnail_decoder_t *decoder, const char *cache_dir,
                                                 int jpeg_quality, vip_error_t *error);
-/* Implement the vip_thumbnail_capture_context_clear helper. */
+/* Capture context clear in the thumbnail subsystem. */
 void vip_thumbnail_capture_context_clear(vip_thumbnail_capture_context_t *context);
 /** Download/decode artwork or capture a fallback frame, then cache it as JPEG. */
 vip_status_t vip_thumbnail_capture_with_decoder(const vip_thumbnail_request_t *request, char **path_out,
@@ -54,7 +54,7 @@ vip_status_t vip_thumbnail_scheduler_create(vip_thumbnail_scheduler_t **out, siz
                                             vip_thumbnail_capture_fn capture, void *capture_userdata,
                                             vip_thumbnail_ready_fn ready, void *ready_userdata,
                                             vip_error_t *error);
-/* Implement the vip_thumbnail_scheduler_destroy helper. */
+/* Destroy the requested state in the thumbnail scheduler. */
 void vip_thumbnail_scheduler_destroy(vip_thumbnail_scheduler_t *scheduler);
 /** Pause/resume workers without discarding queued requests. */
 void vip_thumbnail_scheduler_set_paused(vip_thumbnail_scheduler_t *scheduler, bool paused);

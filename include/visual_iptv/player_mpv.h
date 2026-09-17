@@ -56,7 +56,7 @@ typedef struct {
 /** Create the adapter; the mpv process is started lazily on first load. */
 vip_status_t vip_mpv_player_create(vip_mpv_player_t **out, const vip_mpv_player_config_t *config,
                                    vip_error_t *error);
-/* Implement the vip_mpv_player_destroy helper. */
+/* Destroy the requested state in the mpv player. */
 void vip_mpv_player_destroy(vip_mpv_player_t *player);
 
 /** Load media at the beginning into the persistent runtime. */
@@ -64,25 +64,25 @@ vip_status_t vip_mpv_player_load(vip_mpv_player_t *player, const char *url, vip_
 /** Load media and request an initial absolute seek after file load. */
 vip_status_t vip_mpv_player_load_at(vip_mpv_player_t *player, const char *url, double start_seconds,
                                     vip_error_t *error);
-/* Implement the vip_mpv_player_stop helper. */
+/* Stop the requested state in the mpv player. */
 void vip_mpv_player_stop(vip_mpv_player_t *player);
-/* Implement the vip_mpv_player_set_paused helper. */
+/* Set paused in the mpv player. */
 void vip_mpv_player_set_paused(vip_mpv_player_t *player, bool paused);
-/* Implement the vip_mpv_player_is_paused helper. */
+/* Return whether paused for the mpv player. */
 bool vip_mpv_player_is_paused(vip_mpv_player_t *player);
-/* Implement the vip_mpv_player_is_running helper. */
+/* Return whether running for the mpv player. */
 bool vip_mpv_player_is_running(vip_mpv_player_t *player);
-/* Implement the vip_mpv_player_state helper. */
+/* Handle the mpv player state operation. */
 vip_player_state_t vip_mpv_player_state(vip_mpv_player_t *player);
 /** Copy the current player state without exposing internal locks. */
 void vip_mpv_player_snapshot(vip_mpv_player_t *player, vip_mpv_player_snapshot_t *out);
-/* Implement the vip_mpv_player_seek helper. */
+/* Seek the requested state in the mpv player. */
 vip_status_t vip_mpv_player_seek(vip_mpv_player_t *player, double position_seconds, vip_error_t *error);
-/* Implement the vip_mpv_player_seek_relative helper. */
+/* Seek relative in the mpv player. */
 vip_status_t vip_mpv_player_seek_relative(vip_mpv_player_t *player, double delta_seconds, vip_error_t *error);
-/* Implement the vip_mpv_player_set_volume helper. */
+/* Set volume in the mpv player. */
 vip_status_t vip_mpv_player_set_volume(vip_mpv_player_t *player, double volume, vip_error_t *error);
-/* Implement the vip_mpv_player_state_name helper. */
+/* Return the name of the requested state in the mpv player state. */
 const char *vip_mpv_player_state_name(vip_player_state_t state);
 /** Return a sanitized diagnostic string; stream URLs are redacted. */
 const char *vip_mpv_player_last_error(vip_mpv_player_t *player);

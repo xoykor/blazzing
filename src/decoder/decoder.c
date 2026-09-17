@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Implement the vip_rgb_frame_clear helper. */
+/* Clear owned state from the requested state in the rgb frame. */
 void vip_rgb_frame_clear(vip_rgb_frame_t *frame) {
     if (!frame)
         return;
@@ -14,12 +14,12 @@ void vip_rgb_frame_clear(vip_rgb_frame_t *frame) {
     memset(frame, 0, sizeof(*frame));
 }
 
-/* Implement the vip_thumbnail_decoder_name helper. */
+/* Return the name of the requested state in the thumbnail decoder. */
 const char *vip_thumbnail_decoder_name(const vip_thumbnail_decoder_t *decoder) {
     return decoder && decoder->name ? decoder->name : "unknown";
 }
 
-/* Implement the vip_thumbnail_decoder_capture helper. */
+/* Capture the requested state in the thumbnail decoder. */
 vip_status_t vip_thumbnail_decoder_capture(vip_thumbnail_decoder_t *decoder, const char *source,
                                            vip_rgb_frame_t *frame_out, vip_error_t *error) {
     if (!decoder || !decoder->capture_impl || !source || !frame_out) {
@@ -30,7 +30,7 @@ vip_status_t vip_thumbnail_decoder_capture(vip_thumbnail_decoder_t *decoder, con
     return decoder->capture_impl(decoder->impl, source, frame_out, error);
 }
 
-/* Implement the vip_thumbnail_decoder_destroy helper. */
+/* Destroy the requested state in the thumbnail decoder. */
 void vip_thumbnail_decoder_destroy(vip_thumbnail_decoder_t *decoder) {
     if (!decoder)
         return;

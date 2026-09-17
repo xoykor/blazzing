@@ -13,17 +13,17 @@
 #include <stddef.h>
 #include <string.h>
 
-/* Implement the surface_of helper. */
+/* Handle the surface of operation. */
 static cairo_surface_t *surface_of(vip_ui_renderer_t *renderer) {
     return renderer ? (cairo_surface_t *)renderer->surface : NULL;
 }
 
-/* Implement the context_of helper. */
+/* Handle the context of operation. */
 static cairo_t *context_of(vip_ui_renderer_t *renderer) {
     return renderer ? (cairo_t *)renderer->context : NULL;
 }
 
-/* Implement the layout_of helper. */
+/* Lay out of. */
 static PangoLayout *layout_of(vip_ui_renderer_t *renderer) {
     return renderer ? (PangoLayout *)renderer->layout : NULL;
 }
@@ -45,7 +45,7 @@ static void set_rgb(cairo_t *cr, uint32_t rgb, double alpha) {
     cairo_set_source_rgba(cr, r, g, b, clamp_alpha(alpha));
 }
 
-/* Implement the rounded_path helper. */
+/* Handle the rounded path operation. */
 static void rounded_path(cairo_t *cr, double x, double y, double w, double h, double radius) {
     if (w <= 0.0 || h <= 0.0)
         return;
@@ -65,7 +65,7 @@ static void rounded_path(cairo_t *cr, double x, double y, double w, double h, do
     cairo_close_path(cr);
 }
 
-/* Implement the sync_external_draw helper. */
+/* Draw the requested state in the sync external. */
 static void sync_external_draw(vip_ui_renderer_t *renderer) {
     cairo_surface_t *surface = surface_of(renderer);
     if (surface)
@@ -86,7 +86,7 @@ static PangoFontDescription *set_layout_font(vip_ui_renderer_t *renderer, const 
     return desc;
 }
 
-/* Implement the vip_ui_renderer_begin helper. */
+/* Handle the ui renderer begin operation. */
 bool vip_ui_renderer_begin(vip_ui_renderer_t *renderer, Display *display, Drawable drawable, Visual *visual,
                            int width, int height) {
     if (!renderer || !display || !drawable || !visual || width <= 0 || height <= 0)
@@ -123,14 +123,14 @@ bool vip_ui_renderer_begin(vip_ui_renderer_t *renderer, Display *display, Drawab
     return true;
 }
 
-/* Implement the vip_ui_renderer_flush helper. */
+/* Handle the ui renderer flush operation. */
 void vip_ui_renderer_flush(vip_ui_renderer_t *renderer) {
     if (!renderer || !renderer->active)
         return;
     cairo_surface_flush(surface_of(renderer));
 }
 
-/* Implement the vip_ui_renderer_end helper. */
+/* Handle the ui renderer end operation. */
 void vip_ui_renderer_end(vip_ui_renderer_t *renderer) {
     if (!renderer)
         return;
@@ -143,7 +143,7 @@ void vip_ui_renderer_end(vip_ui_renderer_t *renderer) {
     memset(renderer, 0, sizeof(*renderer));
 }
 
-/* Implement the vip_ui_render_linear_gradient helper. */
+/* Render linear gradient in the UI. */
 void vip_ui_render_linear_gradient(vip_ui_renderer_t *renderer, int x, int y, int w, int h, uint32_t top_rgb,
                                    uint32_t bottom_rgb) {
     if (!renderer || !renderer->active || w <= 0 || h <= 0)
@@ -166,7 +166,7 @@ void vip_ui_render_linear_gradient(vip_ui_renderer_t *renderer, int x, int y, in
     cairo_surface_flush(surface_of(renderer));
 }
 
-/* Implement the vip_ui_render_round_rect helper. */
+/* Render round rect in the UI. */
 void vip_ui_render_round_rect(vip_ui_renderer_t *renderer, int x, int y, int w, int h, int radius,
                               uint32_t rgb, double alpha) {
     if (!renderer || !renderer->active || w <= 0 || h <= 0)
@@ -179,7 +179,7 @@ void vip_ui_render_round_rect(vip_ui_renderer_t *renderer, int x, int y, int w, 
     cairo_surface_flush(surface_of(renderer));
 }
 
-/* Implement the vip_ui_render_round_stroke helper. */
+/* Render round stroke in the UI. */
 void vip_ui_render_round_stroke(vip_ui_renderer_t *renderer, int x, int y, int w, int h, int radius,
                                 uint32_t rgb, double alpha, double line_width) {
     if (!renderer || !renderer->active || w <= 0 || h <= 0 || line_width <= 0.0)
@@ -193,7 +193,7 @@ void vip_ui_render_round_stroke(vip_ui_renderer_t *renderer, int x, int y, int w
     cairo_surface_flush(surface_of(renderer));
 }
 
-/* Implement the vip_ui_render_text helper. */
+/* Render text in the UI. */
 void vip_ui_render_text(vip_ui_renderer_t *renderer, int x, int y, int width, const char *text,
                         const char *font, uint32_t rgb, double alpha, bool centered) {
     if (!renderer || !renderer->active || !text || !text[0] || width <= 0)
@@ -215,7 +215,7 @@ void vip_ui_render_text(vip_ui_renderer_t *renderer, int x, int y, int width, co
     pango_font_description_free(desc);
 }
 
-/* Implement the vip_ui_render_text_width helper. */
+/* Render text width in the UI. */
 int vip_ui_render_text_width(vip_ui_renderer_t *renderer, const char *text, const char *font) {
     if (!renderer || !renderer->active || !text || !text[0])
         return 0;

@@ -154,25 +154,25 @@ vip_status_t vip_credentials_init(vip_credentials_t *out, const char *server, co
 /** Release credential strings and wipe the password buffer before freeing it. */
 void vip_credentials_clear(vip_credentials_t *credentials);
 
-/* Implement the vip_category_list_init helper. */
+/* List init using the category. */
 void vip_category_list_init(vip_category_list_t *list);
-/* Implement the vip_category_list_clear helper. */
+/* List clear using the category. */
 void vip_category_list_clear(vip_category_list_t *list);
 /** Deep-copy one category into the growable list. */
 vip_status_t vip_category_list_push(vip_category_list_t *list, const vip_category_t *category,
                                     vip_error_t *error);
 
-/* Implement the vip_channel_list_init helper. */
+/* List init using the channel. */
 void vip_channel_list_init(vip_channel_list_t *list);
-/* Implement the vip_channel_list_clear helper. */
+/* List clear using the channel. */
 void vip_channel_list_clear(vip_channel_list_t *list);
 /** Deep-copy one catalog item into the growable list. */
 vip_status_t vip_channel_list_push(vip_channel_list_t *list, const vip_channel_t *channel,
                                    vip_error_t *error);
 
-/* Implement the vip_media_metadata_init helper. */
+/* Initialize the requested state in the media metadata. */
 void vip_media_metadata_init(vip_media_metadata_t *metadata);
-/* Implement the vip_media_metadata_clear helper. */
+/* Clear owned state from the requested state in the media metadata. */
 void vip_media_metadata_clear(vip_media_metadata_t *metadata);
 /** Deep-copy optional metadata fields from src to dst. */
 vip_status_t vip_media_metadata_copy(vip_media_metadata_t *dst, const vip_media_metadata_t *src,

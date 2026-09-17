@@ -102,13 +102,13 @@ typedef struct {
     jmp_buf env;
 } pluto_jpeg_error_t;
 
-/* Implement the jpeg_fail helper. */
+/* Transfer control to the guarded JPEG error path after a libjpeg failure. */
 static void jpeg_fail(j_common_ptr cinfo) {
     pluto_jpeg_error_t *error = (pluto_jpeg_error_t *)cinfo->err;
     longjmp(error->env, 1);
 }
 
-/* Implement the alloc_color helper. */
+/* Handle the alloc color operation. */
 static unsigned long alloc_color(pluto_app_t *a, const char *name) {
     XColor exact = {0};
     XColor screen = {0};
@@ -131,7 +131,7 @@ static void init_colors(pluto_app_t *a) {
     a->danger = alloc_color(a, "#ff6b6b");
 }
 
-/* Implement the fill_rect helper. */
+/* Fill rect. */
 static void fill_rect(pluto_app_t *a, int x, int y, int w, int h, unsigned long color) {
     if (w <= 0 || h <= 0)
         return;
@@ -139,7 +139,7 @@ static void fill_rect(pluto_app_t *a, int x, int y, int w, int h, unsigned long 
     XFillRectangle(a->dpy, a->win, a->gc, x, y, (unsigned)w, (unsigned)h);
 }
 
-/* Implement the stroke_rect helper. */
+/* Stroke rect. */
 static void stroke_rect(pluto_app_t *a, int x, int y, int w, int h, unsigned long color) {
     if (w <= 0 || h <= 0)
         return;
@@ -147,7 +147,7 @@ static void stroke_rect(pluto_app_t *a, int x, int y, int w, int h, unsigned lon
     XDrawRectangle(a->dpy, a->win, a->gc, x, y, (unsigned)w, (unsigned)h);
 }
 
-/* Implement the text_width helper. */
+/* Handle the text width operation. */
 static int text_width(pluto_app_t *a, const char *text) {
     if (!text)
         return 0;
@@ -170,7 +170,7 @@ static void draw_center(pluto_app_t *a, int x, int y, int w, const char *text, u
     draw_text(a, x + (w - tw) / 2, y, text, color);
 }
 
-/* Implement the bounded_text helper. */
+/* Handle the bounded text operation. */
 static void bounded_text(char *dst, size_t cap, const char *src, size_t max_bytes) {
     if (!dst || cap == 0u)
         return;
@@ -192,19 +192,19 @@ static void bounded_text(char *dst, size_t cap, const char *src, size_t max_byte
     }
 }
 
-/* Implement the point_in helper. */
+/* Return whether the supplied point lies inside the rectangle. */
 static bool point_in(int px, int py, int x, int y, int w, int h) {
     return px >= x && px < x + w && py >= y && py < y + h;
 }
 
-/* Implement the mkdir_one helper. */
+/* Handle the mkdir one operation. */
 static int mkdir_one(const char *path) {
     if (mkdir(path, 0700) == 0 || errno == EEXIST)
         return 0;
     return -1;
 }
 
-/* Implement the mkdir_parents helper. */
+/* Handle the mkdir parents operation. */
 static int mkdir_parents(const char *path) {
     char tmp[1024];
     snprintf(tmp, sizeof(tmp), "%s", path);
@@ -237,7 +237,7 @@ static void init_cache_path(pluto_app_t *a) {
         fprintf(stderr, "[pluto/cache] não foi possível criar %s\n", a->cache_dir);
 }
 
-/* Implement the pixel_from_rgb helper. */
+/* Handle the pixel from rgb operation. */
 static unsigned long pixel_from_rgb(pluto_app_t *a, uint8_t r, uint8_t g, uint8_t b) {
     unsigned long rm = a->visual->red_mask;
     unsigned long gm = a->visual->green_mask;
@@ -322,7 +322,7 @@ static XImage *load_jpeg(pluto_app_t *a, const char *path) {
     return image;
 }
 
-/* Implement the scale_image helper. */
+/* Scale image. */
 static XImage *scale_image(pluto_app_t *a, const XImage *src, int width, int height) {
     if (!src || width <= 0 || height <= 0)
         return NULL;
@@ -362,7 +362,7 @@ static void clear_image_slot(pluto_image_slot_t *slot) {
     memset(slot, 0, sizeof(*slot));
 }
 
-/* Implement the image_slot_get helper. */
+/* Return the requested state from the image slot. */
 static pluto_image_slot_t *image_slot_get(pluto_app_t *a, const char *path) {
     struct stat st;
     if (!path || stat(path, &st) != 0 || st.st_size <= 0)
@@ -423,7 +423,7 @@ static bool draw_cached_image(pluto_app_t *a, const char *path, int x, int y, in
     return true;
 }
 
-/* Implement the thumbnail_ready helper. */
+/* Handle the thumbnail ready operation. */
 static void thumbnail_ready(const vip_thumbnail_request_t *request, vip_status_t status, const char *path,
                             const vip_error_t *error, void *userdata) {
     (void)request;
@@ -434,7 +434,7 @@ static void thumbnail_ready(const vip_thumbnail_request_t *request, vip_status_t
     atomic_store(&a->thumbs_dirty, true);
 }
 
-/* Implement the enqueue_thumbnail helper. */
+/* Handle the enqueue thumbnail operation. */
 static void enqueue_thumbnail(pluto_app_t *a, const vip_channel_t *channel, int64_t priority) {
     if (!a->thumbs || !channel || !channel->provider_id || !channel->id || !channel->stream_url)
         return;
@@ -457,20 +457,20 @@ static void enqueue_thumbnail(pluto_app_t *a, const vip_channel_t *channel, int6
     (void)vip_thumbnail_scheduler_enqueue(a->thumbs, &request, &error);
 }
 
-/* Implement the grid_columns helper. */
+/* Handle the grid columns operation. */
 static int grid_columns(const pluto_app_t *a) {
     int available = a->width - 60;
     int cols = (available + PLUTO_GAP) / (PLUTO_CARD_W + PLUTO_GAP);
     return cols > 0 ? cols : 1;
 }
 
-/* Implement the grid_rows helper. */
+/* Handle the grid rows operation. */
 static int grid_rows(const pluto_app_t *a) {
     int cols = grid_columns(a);
     return (int)((a->channels.len + (size_t)cols - 1u) / (size_t)cols);
 }
 
-/* Implement the grid_max_scroll helper. */
+/* Handle the grid max scroll operation. */
 static int grid_max_scroll(const pluto_app_t *a) {
     int content_height = grid_rows(a) * (PLUTO_CARD_H + PLUTO_GAP);
     int status_reserve = a->status[0] ? 42 : 8;
@@ -507,7 +507,7 @@ static void ensure_selected_visible(pluto_app_t *a) {
         a->scroll = max_scroll;
 }
 
-/* Implement the layout_video helper. */
+/* Lay out video. */
 static void layout_video(pluto_app_t *a) {
     if (!a->video_win)
         return;
@@ -743,7 +743,7 @@ static void draw_player(pluto_app_t *a) {
     }
 }
 
-/* Implement the redraw helper. */
+/* Handle the redraw operation. */
 static void redraw(pluto_app_t *a) {
     (void)vip_ui_renderer_begin(&a->renderer, a->dpy, a->win, a->visual, a->width, a->height);
     if (a->playing)
@@ -754,7 +754,7 @@ static void redraw(pluto_app_t *a) {
     XFlush(a->dpy);
 }
 
-/* Implement the move_selection helper. */
+/* Handle the move selection operation. */
 static void move_selection(pluto_app_t *a, int dx, int dy) {
     if (a->channels.len == 0u)
         return;
@@ -833,7 +833,7 @@ static void handle_key(pluto_app_t *a, XKeyEvent *event) {
         play_selected(a);
 }
 
-/* Implement the pulse_runtime_available helper. */
+/* Handle the pulse runtime available operation. */
 static bool pulse_runtime_available(void) {
     const char *server = getenv("PULSE_SERVER");
     if (server && server[0])
@@ -951,7 +951,7 @@ static void init_media_runtime(pluto_app_t *a) {
     }
 }
 
-/* Implement the cleanup helper. */
+/* Handle the cleanup operation. */
 static void cleanup(pluto_app_t *a) {
     if (a->player)
         vip_mpv_player_destroy(a->player);
@@ -977,7 +977,7 @@ static void cleanup(pluto_app_t *a) {
     }
 }
 
-/* Implement the vip_pluto_app_run helper. */
+/* Run the requested state in the pluto app. */
 int vip_pluto_app_run(void) {
     curl_global_init(CURL_GLOBAL_DEFAULT);
     pluto_app_t a;

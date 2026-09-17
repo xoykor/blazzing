@@ -15,7 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Implement the vip_x11_app_run helper. */
+/* Run the requested state in the x11 app. */
 int vip_x11_app_run(void);
 
 typedef enum { HUB_ACTION_NONE = 0, HUB_ACTION_IPTV, HUB_ACTION_PLUTO, HUB_ACTION_QUIT } hub_action_t;
@@ -44,7 +44,7 @@ typedef struct {
     unsigned long shadow;
 } hub_window_t;
 
-/* Implement the hub_color helper. */
+/* Resolve a named X11 color for the startup hub. */
 static unsigned long hub_color(hub_window_t *h, const char *name) {
     XColor exact = {0};
     XColor screen = {0};
@@ -53,7 +53,7 @@ static unsigned long hub_color(hub_window_t *h, const char *name) {
     return BlackPixel(h->dpy, h->screen);
 }
 
-/* Implement the hub_init_colors helper. */
+/* Initialize colors in the startup hub. */
 static void hub_init_colors(hub_window_t *h) {
     h->bg = hub_color(h, "#070A12");
     h->panel = hub_color(h, "#0E1420");
@@ -66,13 +66,13 @@ static void hub_init_colors(hub_window_t *h) {
     h->shadow = hub_color(h, "#030509");
 }
 
-/* Implement the hub_fill helper. */
+/* Fill the requested state in the startup hub. */
 static void hub_fill(hub_window_t *h, int x, int y, int w, int height, unsigned long color) {
     XSetForeground(h->dpy, h->gc, color);
     XFillRectangle(h->dpy, h->win, h->gc, x, y, (unsigned)w, (unsigned)height);
 }
 
-/* Implement the hub_round_fill helper. */
+/* Fill the requested state in the hub round. */
 static void hub_round_fill(hub_window_t *h, int x, int y, int w, int height, int r, unsigned long color) {
     if (w <= 0 || height <= 0)
         return;
@@ -91,7 +91,7 @@ static void hub_round_fill(hub_window_t *h, int x, int y, int w, int height, int
              270 * 64, 90 * 64);
 }
 
-/* Implement the hub_round_stroke helper. */
+/* Stroke the requested state in the hub round. */
 static void hub_round_stroke(hub_window_t *h, int x, int y, int w, int height, int r, unsigned long color) {
     XSetForeground(h->dpy, h->gc, color);
     XDrawLine(h->dpy, h->win, h->gc, x + r, y, x + w - r, y);
@@ -106,7 +106,7 @@ static void hub_round_stroke(hub_window_t *h, int x, int y, int w, int height, i
              270 * 64, 90 * 64);
 }
 
-/* Implement the hub_text_font helper. */
+/* Handle the hub text font operation. */
 static void hub_text_font(hub_window_t *h, XFontStruct *font, int x, int y, const char *text,
                           unsigned long color) {
     if (!text)
@@ -118,12 +118,12 @@ static void hub_text_font(hub_window_t *h, XFontStruct *font, int x, int y, cons
     XDrawString(h->dpy, h->win, h->gc, x, y, text, (int)strlen(text));
 }
 
-/* Implement the hub_text helper. */
+/* Handle the hub text operation. */
 static void hub_text(hub_window_t *h, int x, int y, const char *text, unsigned long color) {
     hub_text_font(h, h->font, x, y, text, color);
 }
 
-/* Implement the card_geometry helper. */
+/* Handle the card geometry operation. */
 static void card_geometry(const hub_window_t *h, int index, int *x, int *y, int *w, int *height) {
     const int gap = 24;
     int margin = h->width > 1000 ? 86 : 34;
@@ -190,7 +190,7 @@ static void draw_service_card(hub_window_t *h, int index, const char *monogram, 
     hub_text(h, x + 36, y + height - 31, mode, selected ? h->text : h->muted);
 }
 
-/* Implement the hub_draw helper. */
+/* Draw the requested state in the startup hub. */
 static void hub_draw(hub_window_t *h) {
     bool modern = vip_ui_renderer_begin(&h->renderer, h->dpy, h->win, DefaultVisual(h->dpy, h->screen),
                                         h->width, h->height);
@@ -243,12 +243,12 @@ static void hub_draw(hub_window_t *h) {
     XFlush(h->dpy);
 }
 
-/* Implement the point_in helper. */
+/* Return whether the supplied point lies inside the rectangle. */
 static bool point_in(int px, int py, int x, int y, int w, int height) {
     return px >= x && px < x + w && py >= y && py < y + height;
 }
 
-/* Implement the card_at helper. */
+/* Handle the card at operation. */
 static int card_at(const hub_window_t *h, int px, int py) {
     for (int i = 0; i < 2; ++i) {
         int x = 0, y = 0, w = 0, height = 0;
@@ -259,12 +259,12 @@ static int card_at(const hub_window_t *h, int px, int py) {
     return -1;
 }
 
-/* Implement the activate_selected helper. */
+/* Handle the activate selected operation. */
 static hub_action_t activate_selected(const hub_window_t *h) {
     return h->selected == 0 ? HUB_ACTION_IPTV : HUB_ACTION_PLUTO;
 }
 
-/* Implement the hub_window_run helper. */
+/* Run the requested state in the hub window. */
 static hub_action_t hub_window_run(void) {
     hub_window_t h;
     memset(&h, 0, sizeof(h));
@@ -377,7 +377,7 @@ static hub_action_t hub_window_run(void) {
     return action;
 }
 
-/* Implement the vip_hub_run helper. */
+/* Run the requested state in the startup hub. */
 int vip_hub_run(void) {
     for (;;) {
         hub_action_t action = hub_window_run();

@@ -12,9 +12,9 @@
 extern "C" {
 #endif
 
-/* Implement the vip_hub_run helper. */
+/* Run the requested state in the startup hub. */
 int vip_hub_run(void);
-/* Implement the vip_pluto_app_run helper. */
+/* Run the requested state in the pluto app. */
 int vip_pluto_app_run(void);
 
 #ifdef __cplusplus

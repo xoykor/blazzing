@@ -56,7 +56,7 @@ typedef struct {
     size_t cap;
 } base_list_t;
 
-/* Implement the resolver_write helper. */
+/* Append one resolver HTTP chunk to the bounded response buffer. */
 static size_t resolver_write(void *ptr, size_t size, size_t nmemb, void *userdata) {
     resolver_buf_t *buf = userdata;
     if (size != 0u && nmemb > SIZE_MAX / size)
@@ -85,7 +85,7 @@ static size_t resolver_write(void *ptr, size_t size, size_t nmemb, void *userdat
     return bytes;
 }
 
-/* Implement the crc32_identity helper. */
+/* Handle the crc32 identity operation. */
 static uint32_t crc32_identity(const unsigned char *data, size_t len) {
     uint32_t crc = UINT32_C(0xffffffff);
     for (size_t i = 0; i < len; ++i) {
@@ -98,7 +98,7 @@ static uint32_t crc32_identity(const unsigned char *data, size_t len) {
     return crc ^ UINT32_C(0xffffffff);
 }
 
-/* Implement the base64url_decode helper. */
+/* Decode the requested state in the base64url. */
 static char *base64url_decode(const char *encoded, size_t *len_out, vip_error_t *error) {
     size_t len = strlen(encoded);
     size_t padded = ((len + 3u) / 4u) * 4u;
@@ -136,7 +136,7 @@ static char *base64url_decode(const char *encoded, size_t *len_out, vip_error_t 
     return (char *)raw;
 }
 
-/* Implement the vip_streamfire_decode_payload helper. */
+/* Decode payload in the server resolver. */
 vip_status_t vip_streamfire_decode_payload(const char *payload, const char *identity, char **json_out,
                                            vip_error_t *error) {
     if (!payload || !identity || !json_out)
@@ -206,7 +206,7 @@ vip_status_t vip_streamfire_decode_payload(const char *payload, const char *iden
     return VIP_OK;
 }
 
-/* Implement the key_is_base helper. */
+/* Return whether base for the key. */
 static bool key_is_base(const char *key) {
     static const char *const keys[] = {"baseurl", "base_url", "dns",        "dns_list",
                                        "dnslist", "server",   "server_url", "url"};
@@ -242,7 +242,7 @@ static char *normalize_base(const char *input) {
     return out;
 }
 
-/* Implement the base_list_add helper. */
+/* List add using the base. */
 static vip_status_t base_list_add(base_list_t *list, const char *value, vip_error_t *error) {
     if (!value || !value[0] || list->len >= RESOLVER_MAX_BASES)
         return VIP_OK;
@@ -270,7 +270,7 @@ static vip_status_t base_list_add(base_list_t *list, const char *value, vip_erro
     return VIP_OK;
 }
 
-/* Implement the collect_value helper. */
+/* Collect value. */
 static vip_status_t collect_value(base_list_t *list, json_object *value, vip_error_t *error) {
     if (!value)
         return VIP_OK;
@@ -288,7 +288,7 @@ static vip_status_t collect_value(base_list_t *list, json_object *value, vip_err
     return VIP_OK;
 }
 
-/* Implement the walk_json helper. */
+/* Handle the walk json operation. */
 static vip_status_t walk_json(base_list_t *list, json_object *obj, vip_error_t *error) {
     if (!obj)
         return VIP_OK;
@@ -314,7 +314,7 @@ static vip_status_t walk_json(base_list_t *list, json_object *obj, vip_error_t *
     return VIP_OK;
 }
 
-/* Implement the vip_streamfire_collect_bases helper. */
+/* Collect bases using the server resolver. */
 vip_status_t vip_streamfire_collect_bases(const char *json, char ***bases_out, size_t *count_out,
                                           vip_error_t *error) {
     if (!json || !bases_out || !count_out)
@@ -339,7 +339,7 @@ vip_status_t vip_streamfire_collect_bases(const char *json, char ***bases_out, s
     return VIP_OK;
 }
 
-/* Implement the vip_streamfire_free_bases helper. */
+/* Release bases in the server resolver. */
 void vip_streamfire_free_bases(char **bases, size_t count) {
     if (!bases)
         return;
@@ -348,14 +348,14 @@ void vip_streamfire_free_bases(char **bases, size_t count) {
     free(bases);
 }
 
-/* Implement the mkdir_if_needed helper. */
+/* Handle the mkdir if needed operation. */
 static int mkdir_if_needed(const char *path) {
     if (mkdir(path, 0700) == 0 || errno == EEXIST)
         return 0;
     return -1;
 }
 
-/* Implement the identity_file_path helper. */
+/* Handle the identity file path operation. */
 static char *identity_file_path(void) {
     const char *config = getenv("XDG_CONFIG_HOME");
     const char *home = getenv("HOME");
@@ -391,7 +391,7 @@ static char *identity_file_path(void) {
     return path;
 }
 
-/* Implement the valid_identity_char helper. */
+/* Handle the valid identity char operation. */
 static bool valid_identity_char(unsigned char c) {
     return isalnum(c) || c == '-' || c == '_';
 }
@@ -438,7 +438,7 @@ static vip_status_t load_identity(char out[192], vip_error_t *error) {
     return VIP_OK;
 }
 
-/* Implement the resolver_headers helper. */
+/* Handle the resolver headers operation. */
 static struct curl_slist *resolver_headers(int profile) {
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
@@ -461,7 +461,7 @@ static struct curl_slist *resolver_headers(int profile) {
     return headers;
 }
 
-/* Implement the resolver_post helper. */
+/* Handle the resolver post operation. */
 static vip_status_t resolver_post(const char *api, int profile, const char *username, const char *password,
                                   const char *identity, char **body_out, long *http_out, vip_error_t *error) {
     *body_out = NULL;
@@ -539,7 +539,7 @@ static vip_status_t resolver_post(const char *api, int profile, const char *user
     return VIP_OK;
 }
 
-/* Implement the response_payload helper. */
+/* Handle the response payload operation. */
 static bool response_payload(const char *body, char **payload_out) {
     *payload_out = NULL;
     json_object *root = json_tokener_parse(body);
@@ -563,7 +563,7 @@ static bool response_payload(const char *body, char **payload_out) {
     return ok && *payload_out;
 }
 
-/* Implement the verify_xtream_base helper. */
+/* Handle the verify Xtream base operation. */
 static bool verify_xtream_base(const char *base, const char *username, const char *password) {
     CURL *curl = curl_easy_init();
     if (!curl)
@@ -611,7 +611,7 @@ static bool verify_xtream_base(const char *base, const char *username, const cha
     return ok;
 }
 
-/* Implement the vip_server_resolution_clear helper. */
+/* Clear owned state from the requested state in the server resolution. */
 void vip_server_resolution_clear(vip_server_resolution_t *resolution) {
     if (!resolution)
         return;
@@ -620,7 +620,7 @@ void vip_server_resolution_clear(vip_server_resolution_t *resolution) {
     memset(resolution, 0, sizeof(*resolution));
 }
 
-/* Implement the vip_streamfire_resolve_servers helper. */
+/* Resolve servers using the server resolver. */
 vip_status_t vip_streamfire_resolve_servers(const char *username, const char *password,
                                             vip_server_resolution_t *out, vip_error_t *error) {
     if (!username || !password || !out)

@@ -17,31 +17,31 @@ typedef struct vip_xtream_client vip_xtream_client_t;
 /** Create a client by deep-copying normalized credentials. */
 vip_status_t vip_xtream_client_create(vip_xtream_client_t **out, const vip_credentials_t *credentials,
                                       vip_error_t *error);
-/* Implement the vip_xtream_client_destroy helper. */
+/* Destroy the requested state in the xtream client. */
 void vip_xtream_client_destroy(vip_xtream_client_t *client);
-/* Implement the vip_xtream_provider_id helper. */
+/* Handle the xtream provider id operation. */
 const char *vip_xtream_provider_id(const vip_xtream_client_t *client);
 
-/* Implement the vip_xtream_authenticate helper. */
+/* Authenticate the requested state using the Xtream provider. */
 vip_status_t vip_xtream_authenticate(vip_xtream_client_t *client, vip_error_t *error);
-/* Implement the vip_xtream_live_categories helper. */
+/* Handle the xtream live categories operation. */
 vip_status_t vip_xtream_live_categories(vip_xtream_client_t *client, vip_category_list_t *out,
                                         vip_error_t *error);
-/* Implement the vip_xtream_live_streams helper. */
+/* Handle the xtream live streams operation. */
 vip_status_t vip_xtream_live_streams(vip_xtream_client_t *client, vip_channel_list_t *out,
                                      vip_error_t *error);
-/* Implement the vip_xtream_vod_categories helper. */
+/* Handle the xtream vod categories operation. */
 vip_status_t vip_xtream_vod_categories(vip_xtream_client_t *client, vip_category_list_t *out,
                                        vip_error_t *error);
-/* Implement the vip_xtream_vod_streams helper. */
+/* Handle the xtream vod streams operation. */
 vip_status_t vip_xtream_vod_streams(vip_xtream_client_t *client, vip_channel_list_t *out, vip_error_t *error);
 /** Fetch rich metadata for a single VOD title. */
 vip_status_t vip_xtream_vod_info(vip_xtream_client_t *client, const char *vod_id,
                                  vip_media_metadata_t *metadata_out, vip_error_t *error);
-/* Implement the vip_xtream_series_categories helper. */
+/* Handle the xtream series categories operation. */
 vip_status_t vip_xtream_series_categories(vip_xtream_client_t *client, vip_category_list_t *out,
                                           vip_error_t *error);
-/* Implement the vip_xtream_series helper. */
+/* Handle the xtream series operation. */
 vip_status_t vip_xtream_series(vip_xtream_client_t *client, vip_channel_list_t *out, vip_error_t *error);
 /** Fetch only the lightweight series metadata fields. */
 vip_status_t vip_xtream_series_metadata(vip_xtream_client_t *client, const char *series_id,
@@ -57,16 +57,16 @@ vip_status_t vip_xtream_series_episodes(vip_xtream_client_t *client, const char 
 
 /* Parsing functions are public so unit tests can validate provider payloads without network access. */
 vip_status_t vip_xtream_parse_auth_json(const char *json, vip_error_t *error);
-/* Implement the vip_xtream_parse_categories_json helper. */
+/* Parse categories json using the Xtream provider. */
 vip_status_t vip_xtream_parse_categories_json(const char *json, const char *provider_id,
                                               vip_category_list_t *out, vip_error_t *error);
-/* Implement the vip_xtream_parse_streams_json helper. */
+/* Parse streams json using the Xtream provider. */
 vip_status_t vip_xtream_parse_streams_json(const char *json, const vip_credentials_t *credentials,
                                            vip_channel_list_t *out, vip_error_t *error);
-/* Implement the vip_xtream_parse_vod_info_json helper. */
+/* Parse vod info json using the Xtream provider. */
 vip_status_t vip_xtream_parse_vod_info_json(const char *json, vip_media_metadata_t *metadata_out,
                                             vip_error_t *error);
-/* Implement the vip_xtream_parse_series_metadata_json helper. */
+/* Parse series metadata json using the Xtream provider. */
 vip_status_t vip_xtream_parse_series_metadata_json(const char *json, vip_media_metadata_t *metadata_out,
                                                    vip_error_t *error);
 

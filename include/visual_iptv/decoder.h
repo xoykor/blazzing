@@ -33,14 +33,14 @@ typedef struct {
     size_t output_height;
 } vip_ffmpeg_decoder_config_t;
 
-/* Implement the vip_rgb_frame_clear helper. */
+/* Clear owned state from the requested state in the rgb frame. */
 void vip_rgb_frame_clear(vip_rgb_frame_t *frame);
-/* Implement the vip_thumbnail_decoder_name helper. */
+/* Return the name of the requested state in the thumbnail decoder. */
 const char *vip_thumbnail_decoder_name(const vip_thumbnail_decoder_t *decoder);
 /** Capture one representative frame from source into frame_out. */
 vip_status_t vip_thumbnail_decoder_capture(vip_thumbnail_decoder_t *decoder, const char *source,
                                            vip_rgb_frame_t *frame_out, vip_error_t *error);
-/* Implement the vip_thumbnail_decoder_destroy helper. */
+/* Destroy the requested state in the thumbnail decoder. */
 void vip_thumbnail_decoder_destroy(vip_thumbnail_decoder_t *decoder);
 
 /** Construct the subprocess-based FFmpeg decoder backend. */

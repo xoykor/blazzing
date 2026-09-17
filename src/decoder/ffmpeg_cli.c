@@ -37,7 +37,7 @@ typedef struct {
     size_t height;
 } ffmpeg_impl_t;
 
-/* Implement the monotonic_ms helper. */
+/* Return monotonic time in milliseconds for deadlines and animation timing. */
 static int64_t monotonic_ms(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
@@ -63,7 +63,7 @@ static void terminate_child(pid_t pid) {
     (void)waitpid(pid, NULL, 0);
 }
 
-/* Implement the safe_mul3 helper. */
+/* Handle the safe mul3 operation. */
 static bool safe_mul3(size_t a, size_t b, size_t *out) {
     if (a == 0 || b == 0 || a > SIZE_MAX / b)
         return false;
@@ -191,7 +191,7 @@ static int spawn_ffmpeg(const ffmpeg_impl_t *impl, const char *source, int *stdo
 #pragma GCC diagnostic pop
 #endif
 
-/* Implement the ffmpeg_capture helper. */
+/* Capture the requested state in the ffmpeg. */
 static vip_status_t ffmpeg_capture(void *userdata, const char *source, vip_rgb_frame_t *frame_out,
                                    vip_error_t *error) {
     ffmpeg_impl_t *impl = userdata;
@@ -281,7 +281,7 @@ static vip_status_t ffmpeg_capture(void *userdata, const char *source, vip_rgb_f
     return VIP_OK;
 }
 
-/* Implement the ffmpeg_destroy helper. */
+/* Destroy the requested state in the ffmpeg. */
 static void ffmpeg_destroy(void *userdata) {
     ffmpeg_impl_t *impl = userdata;
     if (!impl)
@@ -290,7 +290,7 @@ static void ffmpeg_destroy(void *userdata) {
     free(impl);
 }
 
-/* Implement the vip_ffmpeg_decoder_create helper. */
+/* Create the requested state in the ffmpeg decoder. */
 vip_status_t vip_ffmpeg_decoder_create(vip_thumbnail_decoder_t **out,
                                        const vip_ffmpeg_decoder_config_t *config, vip_error_t *error) {
     if (!out) {

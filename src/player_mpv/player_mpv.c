@@ -78,13 +78,13 @@ struct vip_mpv_player {
 
 static atomic_uint_fast64_t g_socket_counter = 1;
 
-/* Implement the env_enabled helper. */
+/* Return whether the named environment flag is enabled. */
 static bool env_enabled(const char *name) {
     const char *value = getenv(name);
     return value && value[0] && strcmp(value, "0") != 0 && strcasecmp(value, "false") != 0;
 }
 
-/* Implement the debug_log helper. */
+/* Emit a formatted mpv diagnostic only when debug logging is enabled. */
 static void debug_log(vip_mpv_player_t *player, const char *fmt, ...) {
     if (!player || !player->debug || !fmt)
         return;
@@ -103,7 +103,7 @@ static void debug_log(vip_mpv_player_t *player, const char *fmt, ...) {
     fputc('\n', stderr);
 }
 
-/* Implement the monotonic_ms helper. */
+/* Return monotonic time in milliseconds for deadlines and animation timing. */
 static int64_t monotonic_ms(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
@@ -111,7 +111,7 @@ static int64_t monotonic_ms(void) {
     return (int64_t)ts.tv_sec * 1000LL + (int64_t)(ts.tv_nsec / 1000000L);
 }
 
-/* Implement the sleep_ms helper. */
+/* Sleep for the requested number of milliseconds, retrying after interruptions. */
 static void sleep_ms(long ms) {
     struct timespec ts = {.tv_sec = ms / 1000L, .tv_nsec = (ms % 1000L) * 1000000L};
     while (nanosleep(&ts, &ts) != 0 && errno == EINTR) {
@@ -138,7 +138,7 @@ static bool is_url_start(const char *s, size_t remaining, size_t *prefix_len) {
     return false;
 }
 
-/* Implement the url_delimiter helper. */
+/* Return whether a byte terminates a URL inside diagnostic text. */
 static bool url_delimiter(unsigned char c) {
     return isspace(c) || c == '\'' || c == '"' || c == '<' || c == '>' || c == ')' || c == ']';
 }
@@ -198,7 +198,7 @@ static void trim_text(char *text) {
         memmove(text, text + start, strlen(text + start) + 1u);
 }
 
-/* Implement the touch_state_locked helper. */
+/* Update the last-used state for state locked. */
 static void touch_state_locked(vip_mpv_player_t *player, vip_player_state_t state) {
     if (player->state != state) {
         player->state = state;
@@ -264,7 +264,7 @@ static int write_all_fd(int fd, const char *text, size_t len) {
     return 0;
 }
 
-/* Implement the player_write_line helper. */
+/* Write line in the player. */
 static int player_write_line(vip_mpv_player_t *player, const char *text) {
     if (!player || !text)
         return -1;
@@ -301,7 +301,7 @@ static int player_send_command(vip_mpv_player_t *player, json_object *command) {
     return rc;
 }
 
-/* Implement the command_array helper. */
+/* Handle the command array operation. */
 static json_object *command_array(const char *name) {
     json_object *array = json_object_new_array();
     if (!array)
@@ -414,7 +414,7 @@ static bool make_ipc_path(vip_mpv_player_t *player) {
     return written > 0 && (size_t)written < sizeof(player->ipc_path);
 }
 
-/* Implement the try_connect_ipc helper. */
+/* Handle the try connect ipc operation. */
 static int try_connect_ipc(const char *path) {
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0)
@@ -543,7 +543,7 @@ static int spawn_runtime(vip_mpv_player_t *player, int *log_read_fd) {
     return (int)pid;
 }
 
-/* Implement the drain_mpv_log helper. */
+/* Handle the drain mpv log operation. */
 static void drain_mpv_log(vip_mpv_player_t *player, int fd) {
     char tmp[768];
     if (fd < 0)
@@ -910,7 +910,7 @@ static void join_old_monitor(vip_mpv_player_t *player) {
     }
 }
 
-/* Implement the shutdown_runtime helper. */
+/* Handle the shutdown runtime operation. */
 static void shutdown_runtime(vip_mpv_player_t *player) {
     if (!player)
         return;
@@ -1009,7 +1009,7 @@ static vip_status_t ensure_runtime(vip_mpv_player_t *player, vip_error_t *error)
     return VIP_ERR_PLAYER;
 }
 
-/* Implement the vip_mpv_player_create helper. */
+/* Create the requested state in the mpv player. */
 vip_status_t vip_mpv_player_create(vip_mpv_player_t **out, const vip_mpv_player_config_t *config,
                                    vip_error_t *error) {
     if (!out || !config || config->window_id == 0u) {
@@ -1049,7 +1049,7 @@ vip_status_t vip_mpv_player_create(vip_mpv_player_t **out, const vip_mpv_player_
     return VIP_OK;
 }
 
-/* Implement the vip_mpv_player_stop helper. */
+/* Stop the requested state in the mpv player. */
 void vip_mpv_player_stop(vip_mpv_player_t *player) {
     if (!player)
         return;
@@ -1072,7 +1072,7 @@ void vip_mpv_player_stop(vip_mpv_player_t *player) {
         (void)send_stop(player);
 }
 
-/* Implement the vip_mpv_player_destroy helper. */
+/* Destroy the requested state in the mpv player. */
 void vip_mpv_player_destroy(vip_mpv_player_t *player) {
     if (!player)
         return;
@@ -1084,7 +1084,7 @@ void vip_mpv_player_destroy(vip_mpv_player_t *player) {
     free(player);
 }
 
-/* Implement the vip_mpv_player_load_at helper. */
+/* Load at using the mpv player. */
 vip_status_t vip_mpv_player_load_at(vip_mpv_player_t *player, const char *url, double start_seconds,
                                     vip_error_t *error) {
     if (!player || !url || !url[0]) {
@@ -1124,12 +1124,12 @@ vip_status_t vip_mpv_player_load_at(vip_mpv_player_t *player, const char *url, d
     return VIP_OK;
 }
 
-/* Implement the vip_mpv_player_load helper. */
+/* Load the requested state using the mpv player. */
 vip_status_t vip_mpv_player_load(vip_mpv_player_t *player, const char *url, vip_error_t *error) {
     return vip_mpv_player_load_at(player, url, 0.0, error);
 }
 
-/* Implement the vip_mpv_player_set_paused helper. */
+/* Set paused in the mpv player. */
 void vip_mpv_player_set_paused(vip_mpv_player_t *player, bool paused) {
     if (!player)
         return;
@@ -1143,7 +1143,7 @@ void vip_mpv_player_set_paused(vip_mpv_player_t *player, bool paused) {
         (void)send_set_pause(player, paused);
 }
 
-/* Implement the vip_mpv_player_is_paused helper. */
+/* Return whether paused for the mpv player. */
 bool vip_mpv_player_is_paused(vip_mpv_player_t *player) {
     if (!player)
         return false;
@@ -1153,7 +1153,7 @@ bool vip_mpv_player_is_paused(vip_mpv_player_t *player) {
     return value;
 }
 
-/* Implement the vip_mpv_player_is_running helper. */
+/* Return whether running for the mpv player. */
 bool vip_mpv_player_is_running(vip_mpv_player_t *player) {
     if (!player)
         return false;
@@ -1163,7 +1163,7 @@ bool vip_mpv_player_is_running(vip_mpv_player_t *player) {
     return value;
 }
 
-/* Implement the vip_mpv_player_state helper. */
+/* Handle the mpv player state operation. */
 vip_player_state_t vip_mpv_player_state(vip_mpv_player_t *player) {
     if (!player)
         return VIP_PLAYER_ERROR;
@@ -1173,7 +1173,7 @@ vip_player_state_t vip_mpv_player_state(vip_mpv_player_t *player) {
     return value;
 }
 
-/* Implement the vip_mpv_player_snapshot helper. */
+/* Handle the mpv player snapshot operation. */
 void vip_mpv_player_snapshot(vip_mpv_player_t *player, vip_mpv_player_snapshot_t *out) {
     if (!out)
         return;
@@ -1207,7 +1207,7 @@ void vip_mpv_player_snapshot(vip_mpv_player_t *player, vip_mpv_player_snapshot_t
     pthread_mutex_unlock(&player->mutex);
 }
 
-/* Implement the vip_mpv_player_seek helper. */
+/* Seek the requested state in the mpv player. */
 vip_status_t vip_mpv_player_seek(vip_mpv_player_t *player, double position_seconds, vip_error_t *error) {
     if (!player || position_seconds < 0.0) {
         vip_error_set(error, VIP_ERR_INVALID_ARGUMENT, "posição de seek inválida");
@@ -1225,7 +1225,7 @@ vip_status_t vip_mpv_player_seek(vip_mpv_player_t *player, double position_secon
     return VIP_OK;
 }
 
-/* Implement the vip_mpv_player_seek_relative helper. */
+/* Seek relative in the mpv player. */
 vip_status_t vip_mpv_player_seek_relative(vip_mpv_player_t *player, double delta_seconds,
                                           vip_error_t *error) {
     if (!player) {
@@ -1240,7 +1240,7 @@ vip_status_t vip_mpv_player_seek_relative(vip_mpv_player_t *player, double delta
     return VIP_OK;
 }
 
-/* Implement the vip_mpv_player_set_volume helper. */
+/* Set volume in the mpv player. */
 vip_status_t vip_mpv_player_set_volume(vip_mpv_player_t *player, double volume, vip_error_t *error) {
     if (!player) {
         vip_error_set(error, VIP_ERR_INVALID_ARGUMENT, "player inválido");
@@ -1262,7 +1262,7 @@ vip_status_t vip_mpv_player_set_volume(vip_mpv_player_t *player, double volume, 
     return VIP_OK;
 }
 
-/* Implement the vip_mpv_player_state_name helper. */
+/* Return the name of the requested state in the mpv player state. */
 const char *vip_mpv_player_state_name(vip_player_state_t state) {
     switch (state) {
     case VIP_PLAYER_IDLE:
@@ -1286,7 +1286,7 @@ const char *vip_mpv_player_state_name(vip_player_state_t state) {
     }
 }
 
-/* Implement the vip_mpv_player_last_error helper. */
+/* Handle the mpv player last error operation. */
 const char *vip_mpv_player_last_error(vip_mpv_player_t *player) {
     if (!player)
         return "player mpv ausente";
