@@ -1,0 +1,821 @@
+from pathlib import Path
+import re
+
+
+def read(path):
+    return Path(path).read_text()
+
+
+def write(path, text):
+    Path(path).write_text(text)
+
+
+def replace_once(text, old, new, label):
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected 1 exact match, found {count}")
+    return text.replace(old, new, 1)
+
+
+def regex_once(text, pattern, repl, label):
+    out, count = re.subn(pattern, repl, text, count=1, flags=re.S)
+    if count != 1:
+        raise SystemExit(f"{label}: expected 1 regex match, found {count}")
+    return out
+
+
+# ---- X11 UI/state/input/lifecycle ----
+p = "src/ui_x11/x11_app.c"
+s = read(p)
+s = regex_once(
+    s,
+    r'static void init_paths\(app_t \*a\) \{.*?\n\}\n\nstatic unsigned long pixel_from_rgb',
+    '''static void init_paths(app_t *a) {
+    const char *home = getenv("HOME");
+    if (!home || !home[0]) home = "/tmp";
+
+    char cache_fallback[1024];
+    char data_fallback[1024];
+    const char *cache_base = getenv("XDG_CACHE_HOME");
+    const char *data_base = getenv("XDG_DATA_HOME");
+    if (!cache_base || !cache_base[0]) {
+        snprintf(cache_fallback, sizeof(cache_fallback), "%s/.cache", home);
+        cache_base = cache_fallback;
+    }
+    if (!data_base || !data_base[0]) {
+        snprintf(data_fallback, sizeof(data_fallback), "%s/.local/share", home);
+        data_base = data_fallback;
+    }
+
+    snprintf(a->cache_dir, sizeof(a->cache_dir), "%s/visual-iptv-x11/thumbnails", cache_base);
+    char data_dir[1024];
+    snprintf(data_dir, sizeof(data_dir), "%s/visual-iptv-x11", data_base);
+    if (mkdir_parents(a->cache_dir) != 0)
+        fprintf(stderr, "[paths] não foi possível criar cache: %s\\n", a->cache_dir);
+    if (mkdir_parents(data_dir) != 0)
+        fprintf(stderr, "[paths] não foi possível criar dados: %s\\n", data_dir);
+    size_t dn = strlen(data_dir);
+    if (dn + sizeof("/catalog.db") <= sizeof(a->db_path)) {
+        memcpy(a->db_path, data_dir, dn);
+        memcpy(a->db_path + dn, "/catalog.db", sizeof("/catalog.db"));
+    } else {
+        snprintf(a->db_path, sizeof(a->db_path), "/tmp/visual-iptv-catalog.db");
+    }
+}
+
+static unsigned long pixel_from_rgb''',
+    "XDG paths",
+)
+
+s = replace_once(
+    s,
+    '    if (atomic_load(&a->login_running)) return;\n',
+    '    if (atomic_load(&a->login_running) || a->login_thread_started) return;\n',
+    "login thread gate",
+)
+s = replace_once(
+    s,
+    '        atomic_load(&a->series_running) || channel_index >= ACTIVE_CHANNELS(a).len) return;\n',
+    '        atomic_load(&a->series_running) || a->series_thread_started ||\n        channel_index >= ACTIVE_CHANNELS(a).len) return;\n',
+    "series thread gate",
+)
+s = replace_once(
+    s,
+    '    if (!a || atomic_load(&a->details_running) || a->login_mode != LOGIN_XTREAM ||\n',
+    '    if (!a || atomic_load(&a->details_running) || a->details_thread_started || a->login_mode != LOGIN_XTREAM ||\n',
+    "details thread gate",
+)
+s = replace_once(
+    s,
+    '    if (!details_panel_active(a) || a->screen != SCREEN_BROWSE || atomic_load(&a->details_running) ||\n',
+    '    if (!details_panel_active(a) || a->screen != SCREEN_BROWSE || atomic_load(&a->details_running) ||\n        a->details_thread_started ||\n',
+    "details launch gate",
+)
+
+s = replace_once(
+    s,
+    "    a->search[0] = '\\0';\n    free(a->favorite_flags);\n",
+    "    a->search[0] = '\\0';\n    a->input_focus = INPUT_SEARCH;\n    free(a->favorite_flags);\n",
+    "content search focus",
+)
+s = replace_once(
+    s,
+    "    a->search[0] = '\\0';\n    recalc_category_counts(a);\n",
+    "    a->search[0] = '\\0';\n    a->input_focus = INPUT_SEARCH;\n    recalc_category_counts(a);\n",
+    "episode search focus",
+)
+
+s = replace_once(
+    s,
+    '    if (status != VIP_OK) {\n',
+    '    if (status != VIP_OK && status != VIP_ERR_CANCELLED) {\n',
+    "suppress expected thumbnail cancellations",
+)
+
+s = replace_once(
+    s,
+    '    a->timeline_dragging = false;\n    load_media_state(a);\n    rebuild_filter(a);\n',
+    '    a->timeline_dragging = false;\n    rebuild_filter(a);\n',
+    "avoid expensive media-state reload on player exit",
+)
+
+s = regex_once(
+    s,
+    r'static void handle_key\(app_t \*a, XKeyEvent \*kev\) \{.*?\n\}\n\nstatic void handle_selection',
+    '''static void handle_key(app_t *a, XKeyEvent *kev) {
+    KeySym sym = NoSymbol;
+    char buf[64];
+    int n = XLookupString(kev, buf, sizeof(buf), &sym, NULL);
+    bool ctrl = (kev->state & ControlMask) != 0;
+    bool shift = (kev->state & ShiftMask) != 0;
+    bool printable = n > 0 && !ctrl && (unsigned char)buf[0] >= 0x20u;
+
+    if (sym == XK_F11) {
+        set_fullscreen(a, !a->fullscreen);
+        show_player_hud(a);
+        return;
+    }
+
+    if (a->screen == SCREEN_PLAYER) {
+        show_player_hud(a);
+        if (sym == XK_Escape || sym == XK_BackSpace) { leave_player(a); return; }
+        if (sym == XK_space && a->player) {
+            vip_mpv_player_set_paused(a->player, !vip_mpv_player_is_paused(a->player));
+            save_current_progress(a, true);
+            return;
+        }
+        if (sym == XK_Left) {
+            if (a->player_item_live) switch_relative_channel(a, -1);
+            else if (a->player) { vip_error_t e = {0}; (void)vip_mpv_player_seek_relative(a->player, -10.0, &e); }
+            return;
+        }
+        if (sym == XK_Right) {
+            if (a->player_item_live) switch_relative_channel(a, 1);
+            else if (a->player) { vip_error_t e = {0}; (void)vip_mpv_player_seek_relative(a->player, 10.0, &e); }
+            return;
+        }
+        if ((sym == XK_Up || sym == XK_Down) && a->player) {
+            vip_mpv_player_snapshot_t sn = {0};
+            vip_mpv_player_snapshot(a->player, &sn);
+            vip_error_t e = {0};
+            double v = sn.volume + (sym == XK_Up ? 5.0 : -5.0);
+            if (v < 0.0) v = 0.0;
+            if (v > 100.0) v = 100.0;
+            (void)vip_mpv_player_set_volume(a->player, v, &e);
+            return;
+        }
+        return;
+    }
+
+    if (a->screen == SCREEN_BROWSE) {
+        /* Printable keys belong to the search field. Navigation shortcuts use
+           modifiers so typing titles can never switch screens or mutate the
+           playlist/server field left behind by the login screen. */
+        if (ctrl && sym == XK_1) { switch_content(a, CONTENT_LIVE); return; }
+        if (ctrl && sym == XK_2) { switch_content(a, CONTENT_VOD); return; }
+        if (ctrl && sym == XK_3) { switch_content(a, CONTENT_SERIES); return; }
+        if (ctrl && (sym == XK_l || sym == XK_L)) {
+            if (a->thumbs) vip_thumbnail_scheduler_cancel_pending(a->thumbs);
+            refresh_profiles(a);
+            a->screen = SCREEN_LOGIN;
+            a->input_focus = INPUT_SERVER;
+            return;
+        }
+        if (ctrl && (sym == XK_f || sym == XK_F)) { a->input_focus = INPUT_SEARCH; return; }
+        if (ctrl && (sym == XK_d || sym == XK_D) && a->filtered_len > 0u) {
+            if (a->focused_filtered >= a->filtered_len) a->focused_filtered = a->filtered_len - 1u;
+            toggle_favorite(a, a->filtered[a->focused_filtered]);
+            return;
+        }
+        if (sym == XK_Left) { move_grid_focus(a, -1, 0); return; }
+        if (sym == XK_Right) { move_grid_focus(a, 1, 0); return; }
+        if (sym == XK_Up) { move_grid_focus(a, 0, -1); return; }
+        if (sym == XK_Down) { move_grid_focus(a, 0, 1); return; }
+        if ((sym == XK_Return || sym == XK_KP_Enter) && a->filtered_len > 0u) {
+            if (a->focused_filtered >= a->filtered_len) a->focused_filtered = a->filtered_len - 1u;
+            activate_item(a, a->filtered[a->focused_filtered]);
+            return;
+        }
+        if (sym == XK_Escape) {
+            if (a->series_episode_mode) { return_from_episode_list(a); return; }
+            if (a->search[0]) { a->search[0] = '\\0'; rebuild_filter(a); }
+            a->input_focus = INPUT_SEARCH;
+            return;
+        }
+        if (ctrl && (sym == XK_v || sym == XK_V)) {
+            a->input_focus = INPUT_SEARCH;
+            request_paste(a, a->clipboard);
+            return;
+        }
+        if (shift && sym == XK_Insert) {
+            a->input_focus = INPUT_SEARCH;
+            request_paste(a, XA_PRIMARY);
+            return;
+        }
+        if (sym == XK_Tab) { a->input_focus = INPUT_SEARCH; return; }
+        if (sym == XK_BackSpace) { a->input_focus = INPUT_SEARCH; backspace_input(a); return; }
+        if (printable) { a->input_focus = INPUT_SEARCH; append_input(a, buf, (size_t)n); return; }
+        return;
+    }
+
+    if (sym == XK_Escape) return;
+    if (ctrl && (sym == XK_v || sym == XK_V)) { request_paste(a, a->clipboard); return; }
+    if (shift && sym == XK_Insert) { request_paste(a, XA_PRIMARY); return; }
+    if (sym == XK_Tab) {
+        if (a->login_mode == LOGIN_M3U)
+            a->input_focus = a->input_focus == INPUT_PROFILE_NAME ? INPUT_SERVER : INPUT_PROFILE_NAME;
+        else
+            a->input_focus = a->input_focus == INPUT_PROFILE_NAME ? INPUT_SERVER :
+                             a->input_focus == INPUT_SERVER ? INPUT_SERVER_ALT :
+                             a->input_focus == INPUT_SERVER_ALT ? INPUT_USERNAME :
+                             a->input_focus == INPUT_USERNAME ? INPUT_PASSWORD : INPUT_PROFILE_NAME;
+        return;
+    }
+    if (sym == XK_Return || sym == XK_KP_Enter) { start_login(a); return; }
+    if (sym == XK_BackSpace) { backspace_input(a); return; }
+    if (printable) append_input(a, buf, (size_t)n);
+}
+
+static void handle_selection''',
+    "keyboard routing",
+)
+
+s = regex_once(
+    s,
+    r'static void handle_selection\(app_t \*a, XSelectionEvent \*sel\) \{.*?\n\}\n\n/\* Single-threaded X11 event dispatch',
+    '''static void handle_selection(app_t *a, XSelectionEvent *sel) {
+    int target = a->paste_target;
+    a->paste_target = 0;
+    if (sel->property == None) return;
+    Atom type;
+    int format;
+    unsigned long nitems, after;
+    unsigned char *data = NULL;
+    if (XGetWindowProperty(a->dpy, a->win, sel->property, 0, 8192, True, AnyPropertyType,
+                           &type, &format, &nitems, &after, &data) == Success && data) {
+        /* Selection conversion is asynchronous. Discard it if focus/screen
+           changed meanwhile instead of pasting into an unrelated field. */
+        if (format == 8 && target != 0 && target == a->input_focus)
+            append_input(a, (const char *)data, nitems);
+        XFree(data);
+    }
+}
+
+/* Single-threaded X11 event dispatch''',
+    "paste target routing",
+)
+write(p, s)
+
+
+# ---- mpv: use the supported X11 --wid embedding path ----
+p = "src/player_mpv/player_mpv.c"
+s = read(p)
+s = replace_once(
+    s,
+    '    debug_log(player, "runtime persistente renderer=%s hwdec=%s embed=native-x11-reparent parent=%lu",\n',
+    '    debug_log(player, "runtime persistente renderer=%s hwdec=%s embed=wid parent=%lu",\n',
+    "mpv debug embedding label",
+)
+s = replace_once(
+    s,
+    '        char ipc_arg[160];\n        char hwdec_arg[96];\n        char title_arg[96];\n',
+    '        char ipc_arg[160];\n        char hwdec_arg[96];\n        char title_arg[96];\n        char wid_arg[96];\n',
+    "mpv wid buffer",
+)
+s = replace_once(
+    s,
+    '        snprintf(title_arg, sizeof(title_arg), "--title=visual-iptv-mpv-%ld", (long)getpid());\n',
+    '        snprintf(title_arg, sizeof(title_arg), "--title=visual-iptv-mpv-%ld", (long)getpid());\n        snprintf(wid_arg, sizeof(wid_arg), "--wid=%lu", player->window_id);\n',
+    "mpv wid argument",
+)
+s = replace_once(
+    s,
+    '        argv[ai++] = "--no-border";\n        argv[ai++] = "--geometry=64x64+0+0";\n        argv[ai++] = title_arg;\n',
+    '        argv[ai++] = "--no-border";\n        argv[ai++] = wid_arg;\n        argv[ai++] = title_arg;\n',
+    "mpv replace bootstrap geometry with wid",
+)
+s = replace_once(
+    s,
+    '    Display *embed_dpy = XOpenDisplay(NULL);\n    if (!embed_dpy) debug_log(player, "DISPLAY X11 indisponível no monitor; janela nativa não poderá ser anexada");\n',
+    '    /* --wid embeds directly into video_win. Keep the legacy native-window\n       synchronizer dormant rather than racing the window manager/reparent path. */\n    Display *embed_dpy = NULL;\n',
+    "disable native reparent monitor",
+)
+write(p, s)
+
+p = "tests/test_player_mpv.c"
+s = read(p)
+s = replace_once(
+    s,
+    '    TEST_CHECK(!file_contains(args_path, "--wid="));\n',
+    '    TEST_CHECK(file_contains(args_path, "--wid=123"));\n    TEST_CHECK(!file_contains(args_path, "--geometry="));\n',
+    "player wid regression",
+)
+write(p, s)
+
+
+# ---- Thumbnail pipeline: persistent HTTP connection + retry backoff ----
+p = "src/thumbnails/thumbnails.c"
+s = read(p)
+s = replace_once(s, '#include <sys/stat.h>\n', '#include <sys/stat.h>\n#include <time.h>\n', "thumbnail time include")
+s = replace_once(
+    s,
+    '    size_t bytes = size * nmemb;\n    if (bytes > max_bytes || buf->len > max_bytes - bytes) {\n',
+    '    if (size != 0u && nmemb > SIZE_MAX / size) { buf->overflow = true; return 0u; }\n    size_t bytes = size * nmemb;\n    if (bytes > max_bytes || buf->len > max_bytes - bytes) {\n',
+    "thumbnail download overflow guard",
+)
+s = regex_once(
+    s,
+    r'static vip_status_t download_logo\(const char \*url, image_download_t \*buf, vip_error_t \*error\) \{.*?\n\}\n\nstatic vip_status_t read_local_logo',
+    '''static pthread_key_t logo_curl_key;
+static pthread_once_t logo_curl_key_once = PTHREAD_ONCE_INIT;
+
+static void logo_curl_destroy(void *ptr) {
+    if (ptr) curl_easy_cleanup((CURL *)ptr);
+}
+
+static void logo_curl_key_init(void) {
+    (void)pthread_key_create(&logo_curl_key, logo_curl_destroy);
+}
+
+static CURL *logo_curl_for_worker(void) {
+    if (pthread_once(&logo_curl_key_once, logo_curl_key_init) != 0) return NULL;
+    CURL *curl = pthread_getspecific(logo_curl_key);
+    if (curl) return curl;
+    curl = curl_easy_init();
+    if (!curl) return NULL;
+    if (pthread_setspecific(logo_curl_key, curl) != 0) {
+        curl_easy_cleanup(curl);
+        return NULL;
+    }
+    return curl;
+}
+
+static vip_status_t download_logo(const char *url, image_download_t *buf, vip_error_t *error) {
+    CURL *curl = logo_curl_for_worker();
+    if (!curl) {
+        vip_error_set(error, VIP_ERR_NETWORK, "falha ao inicializar download da capa");
+        return VIP_ERR_NETWORK;
+    }
+    /* curl_easy_reset keeps this worker's connection/DNS caches, avoiding a
+       fresh TCP/TLS handshake for every poster in a large catalog. */
+    curl_easy_reset(curl);
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 3500L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 10000L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Blazzing/1.2");
+    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
+#ifdef CURL_HTTP_VERSION_2TLS
+    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+#endif
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, image_download_write);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, buf);
+    CURLcode rc = curl_easy_perform(curl);
+    long http = 0;
+    (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http);
+    if (rc != CURLE_OK) {
+        vip_error_set(error, VIP_ERR_NETWORK, "download da capa: %s", curl_easy_strerror(rc));
+        return VIP_ERR_NETWORK;
+    }
+    if (buf->overflow) {
+        vip_error_set(error, VIP_ERR_NETWORK, "capa excede 12 MiB");
+        return VIP_ERR_NETWORK;
+    }
+    if (http >= 400) {
+        vip_error_set(error, VIP_ERR_NETWORK, "servidor da capa respondeu HTTP %ld", http);
+        return VIP_ERR_NETWORK;
+    }
+    if (buf->len == 0u) {
+        vip_error_set(error, VIP_ERR_NETWORK, "servidor retornou capa vazia");
+        return VIP_ERR_NETWORK;
+    }
+    return VIP_OK;
+}
+
+static vip_status_t read_local_logo''',
+    "persistent curl per thumbnail worker",
+)
+
+marker_helpers = '''
+#define THUMB_FAILURE_BACKOFF_SECONDS 30
+
+static char *failure_marker_path(const char *path) {
+    if (!path) return NULL;
+    size_t n = strlen(path) + 6u;
+    char *marker = malloc(n);
+    if (marker) snprintf(marker, n, "%s.fail", path);
+    return marker;
+}
+
+static bool failure_backoff_active(const char *path) {
+    char *marker = failure_marker_path(path);
+    if (!marker) return false;
+    struct stat st;
+    bool active = false;
+    if (stat(marker, &st) == 0) {
+        time_t now = time(NULL);
+        active = now != (time_t)-1 && st.st_mtime <= now &&
+                 now - st.st_mtime < THUMB_FAILURE_BACKOFF_SECONDS;
+        if (!active) (void)remove(marker);
+    }
+    free(marker);
+    return active;
+}
+
+static void failure_marker_set(const char *path) {
+    char *marker = failure_marker_path(path);
+    if (!marker) return;
+    FILE *fp = fopen(marker, "wb");
+    if (fp) fclose(fp);
+    free(marker);
+}
+
+static void failure_marker_clear(const char *path) {
+    char *marker = failure_marker_path(path);
+    if (marker) { (void)remove(marker); free(marker); }
+}
+
+'''
+s = replace_once(
+    s,
+    'vip_status_t vip_thumbnail_capture_context_init(vip_thumbnail_capture_context_t *context,\n',
+    marker_helpers + 'vip_status_t vip_thumbnail_capture_context_init(vip_thumbnail_capture_context_t *context,\n',
+    "thumbnail failure backoff helpers",
+)
+s = replace_once(
+    s,
+    '    struct stat stbuf;\n    if (stat(path, &stbuf) == 0) {\n        if (stbuf.st_size > 0 && cached_jpeg_valid(path)) {\n            *path_out = path;\n            vip_error_clear(error);\n            return VIP_OK;\n',
+    '    struct stat stbuf;\n    if (stat(path, &stbuf) == 0) {\n        if (stbuf.st_size > 0 && cached_jpeg_valid(path)) {\n            failure_marker_clear(path);\n            *path_out = path;\n            vip_error_clear(error);\n            return VIP_OK;\n',
+    "clear stale thumbnail failure marker",
+)
+s = replace_once(
+    s,
+    '        (void)remove(path);\n    }\n\n    vip_rgb_frame_t frame = {0};\n',
+    '        (void)remove(path);\n    }\n    if (failure_backoff_active(path)) {\n        vip_error_set(error, VIP_ERR_CANCELLED, "thumbnail em espera após falha recente");\n        free(path);\n        return VIP_ERR_CANCELLED;\n    }\n\n    vip_rgb_frame_t frame = {0};\n',
+    "thumbnail failure backoff check",
+)
+s = replace_once(
+    s,
+    '    if (st != VIP_OK) {\n        free(path);\n        return st;\n    }\n    *path_out = path;\n',
+    '    if (st != VIP_OK) {\n        failure_marker_set(path);\n        free(path);\n        return st;\n    }\n    failure_marker_clear(path);\n    *path_out = path;\n',
+    "thumbnail failure marker update",
+)
+write(p, s)
+
+
+# ---- Privacy/perf policy: remote no-artwork frame capture is opt-in ----
+p = "src/thumbnails/thumbnail_policy.c"
+s = read(p)
+s = replace_once(s, '#include <stdbool.h>\n', '#include <stdbool.h>\n#include <stdlib.h>\n#include <string.h>\n', "thumbnail policy libc includes")
+s = replace_once(
+    s,
+    '''static bool has_artwork(const vip_thumbnail_request_t *request) {
+    return request && request->logo_url && request->logo_url[0] != '\\0';
+}
+''',
+    '''static bool has_artwork(const vip_thumbnail_request_t *request) {
+    return request && request->logo_url && request->logo_url[0] != '\\0';
+}
+
+static bool remote_stream(const vip_thumbnail_request_t *request) {
+    const char *url = request ? request->stream_url : NULL;
+    return url && (!strncmp(url, "http://", 7u) || !strncmp(url, "https://", 8u));
+}
+
+static bool remote_capture_enabled(void) {
+    const char *value = getenv("VIPTV_ALLOW_REMOTE_THUMB_CAPTURE");
+    return value && value[0] && strcmp(value, "0") != 0;
+}
+''',
+    "remote thumbnail capture helpers",
+)
+s = replace_once(
+    s,
+    '''    if (!has_artwork(request) && request->priority < THUMB_INTERACTIVE_PRIORITY) {
+        vip_error_clear(error);
+        return VIP_OK;
+    }
+
+    return __real_vip_thumbnail_scheduler_enqueue(scheduler, request, error);
+''',
+    '''    if (!has_artwork(request) && request->priority < THUMB_INTERACTIVE_PRIORITY) {
+        vip_error_clear(error);
+        return VIP_OK;
+    }
+    /* Passing authenticated stream URLs to ffmpeg via argv exposes them to
+       local process inspection and slow stream opens can starve artwork jobs.
+       Keep remote frame capture disabled unless the user explicitly opts in. */
+    if (!has_artwork(request) && remote_stream(request) && !remote_capture_enabled()) {
+        vip_error_clear(error);
+        return VIP_OK;
+    }
+
+    return __real_vip_thumbnail_scheduler_enqueue(scheduler, request, error);
+''',
+    "remote thumbnail enqueue policy",
+)
+s = replace_once(
+    s,
+    '''    if (request->priority < THUMB_INTERACTIVE_PRIORITY) {
+        vip_error_set(error, VIP_ERR_CANCELLED, "captura de frame ignorada fora do viewport");
+        return VIP_ERR_CANCELLED;
+    }
+
+    /* FFmpeg stream opens can take seconds.''',
+    '''    if (request->priority < THUMB_INTERACTIVE_PRIORITY) {
+        vip_error_set(error, VIP_ERR_CANCELLED, "captura de frame ignorada fora do viewport");
+        return VIP_ERR_CANCELLED;
+    }
+    if (remote_stream(request) && !remote_capture_enabled()) {
+        vip_error_set(error, VIP_ERR_CANCELLED, "captura remota de frame desativada por privacidade");
+        return VIP_ERR_CANCELLED;
+    }
+
+    /* FFmpeg stream opens can take seconds.''',
+    "remote thumbnail capture policy",
+)
+write(p, s)
+
+p = "tests/test_thumbnail_policy.c"
+s = read(p)
+s = replace_once(s, '#include <stdlib.h>\n', '#include <stdlib.h>\n#include <unistd.h>\n', "policy test include")
+s = replace_once(
+    s,
+    '''    /* The same no-logo item is allowed once it is visible/interactive. */
+    no_art.priority = 600000;
+    TEST_STATUS(vip_thumbnail_scheduler_enqueue(scheduler, &no_art, &error), VIP_OK, &error);
+    TEST_CHECK(wait_for_count(&state, 1, 1000L) == 1);
+''',
+    '''    /* Remote no-logo capture stays disabled by default: stream URLs may
+       contain credentials and ffmpeg receives its source through argv. */
+    no_art.priority = 600000;
+    TEST_STATUS(vip_thumbnail_scheduler_enqueue(scheduler, &no_art, &error), VIP_OK, &error);
+    TEST_CHECK(wait_for_count(&state, 1, 100L) == 0);
+
+    /* Explicit opt-in restores interactive frame capture. */
+    TEST_CHECK(setenv("VIPTV_ALLOW_REMOTE_THUMB_CAPTURE", "1", 1) == 0);
+    TEST_STATUS(vip_thumbnail_scheduler_enqueue(scheduler, &no_art, &error), VIP_OK, &error);
+    TEST_CHECK(wait_for_count(&state, 1, 1000L) == 1);
+    unsetenv("VIPTV_ALLOW_REMOTE_THUMB_CAPTURE");
+''',
+    "policy test remote opt-in",
+)
+write(p, s)
+
+
+# ---- M3U robustness/performance ----
+p = "src/provider/m3u.c"
+s = read(p)
+s = replace_once(
+    s,
+    '    size_t bytes = size * nmemb;\n    if (bytes > VIP_M3U_MAX_BYTES || buf->len > VIP_M3U_MAX_BYTES - bytes) {\n',
+    '    if (size != 0u && nmemb > SIZE_MAX / size) { buf->overflow = true; return 0u; }\n    size_t bytes = size * nmemb;\n    if (bytes > VIP_M3U_MAX_BYTES || buf->len > VIP_M3U_MAX_BYTES - bytes) {\n',
+    "m3u response overflow guard",
+)
+s = replace_once(
+    s,
+    '    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 6000L);\n    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 20000L);\n    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Visual-IPTV/1.1");\n',
+    '    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 6000L);\n    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 60000L);\n    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);\n    curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);\n    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");\n    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Blazzing/1.2");\n#ifdef CURL_HTTP_VERSION_2TLS\n    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);\n#endif\n',
+    "m3u HTTP settings",
+)
+s = regex_once(
+    s,
+    r'static char \*extinf_name\(const char \*line\) \{.*?\n\}\n\nstatic int find_category',
+    '''static char *extinf_name(const char *line) {
+    /* The title begins at the first comma outside a quoted attribute. Using
+       strrchr() truncated ordinary titles such as "News, HD" to " HD". */
+    bool quoted = false;
+    const char *comma = NULL;
+    for (const char *p = line; p && *p; ++p) {
+        if (*p == '"') quoted = !quoted;
+        else if (*p == ',' && !quoted) { comma = p; break; }
+    }
+    const char *name = comma ? comma + 1 : "Canal";
+    while (*name && isspace((unsigned char)*name)) ++name;
+    return vip_strdup(*name ? name : "Canal");
+}
+
+static int find_category''',
+    "M3U title commas",
+)
+s = replace_once(
+    s,
+    '''    if (strncmp(source, "http://", 7u) == 0 || strncmp(source, "https://", 8u) == 0) {
+        const char *slash = strrchr(source, '/');
+        if (!slash) return vip_strdup(stream);
+        size_t base = (size_t)(slash - source + 1);
+        char *out = malloc(base + strlen(stream) + 1u);
+        if (!out) return NULL;
+        memcpy(out, source, base);
+        strcpy(out + base, stream);
+        return out;
+    }
+''',
+    '''    if (strncmp(source, "http://", 7u) == 0 || strncmp(source, "https://", 8u) == 0) {
+        if (stream[0] == '/') {
+            const char *authority = strstr(source, "://");
+            authority = authority ? authority + 3 : source;
+            const char *path = strchr(authority, '/');
+            size_t origin = path ? (size_t)(path - source) : strlen(source);
+            char *out = malloc(origin + strlen(stream) + 1u);
+            if (!out) return NULL;
+            memcpy(out, source, origin);
+            strcpy(out + origin, stream);
+            return out;
+        }
+        const char *slash = strrchr(source, '/');
+        if (!slash) return vip_strdup(stream);
+        size_t base = (size_t)(slash - source + 1);
+        char *out = malloc(base + strlen(stream) + 1u);
+        if (!out) return NULL;
+        memcpy(out, source, base);
+        strcpy(out + base, stream);
+        return out;
+    }
+''',
+    "root-relative M3U URL resolution",
+)
+write(p, s)
+
+p = "tests/test_m3u.c"
+s = read(p)
+s = replace_once(
+    s,
+    'group-title=\\"Notícias\\",Canal A\\n"\n',
+    'group-title=\\"Notícias\\",Canal A, HD\\n"\n',
+    "M3U comma fixture",
+)
+s = replace_once(
+    s,
+    '    TEST_CHECK(strcmp(channels.items[0].name, "Canal A") == 0);\n',
+    '    TEST_CHECK(strcmp(channels.items[0].name, "Canal A, HD") == 0);\n',
+    "M3U comma assertion",
+)
+write(p, s)
+
+
+# ---- Xtream: large/compressed catalogs and safer buffer growth ----
+p = "src/provider/xtream.c"
+s = read(p)
+s = replace_once(
+    s,
+    '#define VIP_HTTP_MAX_RESPONSE (32u * 1024u * 1024u)\n',
+    '#define VIP_HTTP_MAX_MIB 128u\n#define VIP_HTTP_MAX_RESPONSE ((size_t)VIP_HTTP_MAX_MIB * 1024u * 1024u)\n',
+    "Xtream response limit",
+)
+s = replace_once(
+    s,
+    '    size_t bytes = size * nmemb;\n    if (bytes > VIP_HTTP_MAX_RESPONSE || buf->len > VIP_HTTP_MAX_RESPONSE - bytes) {\n',
+    '    if (size != 0u && nmemb > SIZE_MAX / size) { buf->overflow = true; return 0u; }\n    size_t bytes = size * nmemb;\n    if (bytes > VIP_HTTP_MAX_RESPONSE || buf->len > VIP_HTTP_MAX_RESPONSE - bytes) {\n',
+    "Xtream overflow guard",
+)
+s = replace_once(
+    s,
+    '        size_t cap = buf->cap ? buf->cap : 4096;\n        while (cap < need) cap *= 2;\n',
+    '        size_t cap = buf->cap ? buf->cap : 4096u;\n        while (cap < need && cap <= VIP_HTTP_MAX_RESPONSE / 2u) cap *= 2u;\n        if (cap < need) cap = need;\n',
+    "Xtream bounded realloc growth",
+)
+s = replace_once(
+    s,
+    '    curl_easy_setopt(client->curl, CURLOPT_CONNECTTIMEOUT, 8L);\n    curl_easy_setopt(client->curl, CURLOPT_TIMEOUT, 20L);\n',
+    '    curl_easy_setopt(client->curl, CURLOPT_CONNECTTIMEOUT, 8L);\n    curl_easy_setopt(client->curl, CURLOPT_TIMEOUT, 45L);\n',
+    "Xtream timeout",
+)
+s = replace_once(
+    s,
+    '    curl_easy_setopt(client->curl, CURLOPT_USERAGENT, "visual-iptv-c/0.1");\n    curl_easy_setopt(client->curl, CURLOPT_NOSIGNAL, 1L);\n',
+    '    curl_easy_setopt(client->curl, CURLOPT_USERAGENT, "Blazzing/1.2");\n    curl_easy_setopt(client->curl, CURLOPT_NOSIGNAL, 1L);\n    curl_easy_setopt(client->curl, CURLOPT_TCP_KEEPALIVE, 1L);\n    curl_easy_setopt(client->curl, CURLOPT_ACCEPT_ENCODING, "");\n#ifdef CURL_HTTP_VERSION_2TLS\n    curl_easy_setopt(client->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);\n#endif\n',
+    "Xtream HTTP performance",
+)
+s = replace_once(
+    s,
+    '            vip_error_set(error, VIP_ERR_NETWORK, "resposta do provider excedeu o limite de 32 MiB");\n',
+    '            vip_error_set(error, VIP_ERR_NETWORK, "resposta do provider excedeu o limite de %u MiB", VIP_HTTP_MAX_MIB);\n',
+    "Xtream limit error",
+)
+write(p, s)
+
+
+# ---- Pluto response safety ----
+p = "src/provider/pluto.c"
+s = read(p)
+s = replace_once(
+    s,
+    '    const size_t bytes = size * nmemb;\n    if (bytes > PLUTO_MAX_RESPONSE || buf->len > PLUTO_MAX_RESPONSE - bytes) {\n',
+    '    if (size != 0u && nmemb > SIZE_MAX / size) { buf->overflow = true; return 0u; }\n    const size_t bytes = size * nmemb;\n    if (bytes > PLUTO_MAX_RESPONSE || buf->len > PLUTO_MAX_RESPONSE - bytes) {\n',
+    "Pluto overflow guard",
+)
+s = replace_once(
+    s,
+    '        size_t cap = buf->cap ? buf->cap : 4096u;\n        while (cap < need) cap *= 2u;\n',
+    '        size_t cap = buf->cap ? buf->cap : 4096u;\n        while (cap < need && cap <= PLUTO_MAX_RESPONSE / 2u) cap *= 2u;\n        if (cap < need) cap = need;\n',
+    "Pluto bounded realloc growth",
+)
+s = replace_once(
+    s,
+    '    curl_easy_setopt(client->curl, CURLOPT_NOSIGNAL, 1L);\n    curl_easy_setopt(client->curl, CURLOPT_USERAGENT,\n',
+    '    curl_easy_setopt(client->curl, CURLOPT_NOSIGNAL, 1L);\n    curl_easy_setopt(client->curl, CURLOPT_TCP_KEEPALIVE, 1L);\n    curl_easy_setopt(client->curl, CURLOPT_ACCEPT_ENCODING, "");\n#ifdef CURL_HTTP_VERSION_2TLS\n    curl_easy_setopt(client->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);\n#endif\n    curl_easy_setopt(client->curl, CURLOPT_USERAGENT,\n',
+    "Pluto HTTP performance",
+)
+write(p, s)
+
+
+# ---- Pluto app respects Flatpak/XDG writable cache ----
+p = "src/app/pluto_app.c"
+s = read(p)
+s = regex_once(
+    s,
+    r'static void init_cache_path\(pluto_app_t \*a\) \{.*?\n\}\n\nstatic unsigned long pixel_from_rgb',
+    '''static void init_cache_path(pluto_app_t *a) {
+    const char *home = getenv("HOME");
+    if (!home || !home[0]) home = "/tmp";
+    const char *base = getenv("XDG_CACHE_HOME");
+    char fallback[1024];
+    if (!base || !base[0]) {
+        snprintf(fallback, sizeof(fallback), "%s/.cache", home);
+        base = fallback;
+    }
+    snprintf(a->cache_dir, sizeof(a->cache_dir), "%s/visual-iptv-x11/thumbnails", base);
+    if (mkdir_parents(a->cache_dir) != 0)
+        fprintf(stderr, "[pluto/cache] não foi possível criar %s\\n", a->cache_dir);
+}
+
+static unsigned long pixel_from_rgb''',
+    "Pluto XDG cache",
+)
+write(p, s)
+
+
+# ---- External browser service launch: no false success/zombies ----
+p = "src/core/streaming_services.c"
+s = read(p)
+s = replace_once(s, '#include <sys/types.h>\n', '#include <sys/types.h>\n#include <sys/wait.h>\n', "streaming wait include")
+s = replace_once(
+    s,
+    '    vip_error_clear(error);\n    return VIP_OK;\n}\n',
+    '''    int status = 0;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno == EINTR) continue;
+        vip_error_set(error, VIP_ERR_IO, "falha ao aguardar xdg-open: %s", strerror(errno));
+        return VIP_ERR_IO;
+    }
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        vip_error_set(error, VIP_ERR_IO, "xdg-open não conseguiu abrir o navegador");
+        return VIP_ERR_IO;
+    }
+    vip_error_clear(error);
+    return VIP_OK;
+}
+''',
+    "xdg-open child reap",
+)
+write(p, s)
+
+p = "src/app/hub.c"
+s = read(p)
+s = replace_once(
+    s,
+    '    hub_text(h, 54, 154, "IPTV e Pluto rodam nativamente. Servicos com DRM abrem no ambiente web oficial.", h->muted);\n',
+    '    hub_text(h, 54, 154, "IPTV e Pluto rodam nativamente. DRM abre no navegador; login e sessão ficam no navegador.", h->muted);\n',
+    "hub DRM explanation",
+)
+s = replace_once(
+    s,
+    '        snprintf(h->status, sizeof(h->status), "%s aberto no navegador.", service ? service->name : "Servico");\n',
+    '        snprintf(h->status, sizeof(h->status), "%s aberto no navegador; a sessão não é capturada pelo Blazzing.", service ? service->name : "Servico");\n',
+    "hub external session status",
+)
+write(p, s)
+
+
+# ---- External credential resolver becomes explicit opt-in ----
+p = "src/ui_x11/x11_app.c"
+s = read(p)
+s = replace_once(
+    s,
+    '        if (st != VIP_OK && saw_http_404) {\n            fprintf(stderr, "[login] endpoint Xtream retornou 404; procurando servidor pela API do provider\\n");\n',
+    '''        const char *resolver_opt = getenv("VIPTV_ALLOW_EXTERNAL_RESOLVER");
+        bool allow_external_resolver = resolver_opt && resolver_opt[0] && strcmp(resolver_opt, "0") != 0;
+        if (st != VIP_OK && saw_http_404 && allow_external_resolver) {
+            fprintf(stderr, "[login] endpoint Xtream retornou 404; resolvedor externo autorizado pelo usuário\\n");
+''',
+    "resolver explicit opt-in",
+)
+s = replace_once(
+    s,
+    '            vip_server_resolution_clear(&resolution);\n        }\n        if (st == VIP_OK) snprintf(provider_id, sizeof(provider_id), "%s", credentials.provider_id);\n',
+    '''            vip_server_resolution_clear(&resolution);
+        } else if (st != VIP_OK && saw_http_404 && !allow_external_resolver) {
+            vip_error_set(&error, VIP_ERR_NETWORK,
+                          "servidor retornou HTTP 404; descoberta externa desativada por privacidade (VIPTV_ALLOW_EXTERNAL_RESOLVER=1 para autorizar)");
+        }
+        if (st == VIP_OK) snprintf(provider_id, sizeof(provider_id), "%s", credentials.provider_id);
+''',
+    "resolver privacy status",
+)
+write(p, s)
+
+print("Audit patch applied successfully")
