@@ -543,12 +543,13 @@ static void draw_grid(pluto_app_t *a) {
     int cols = grid_columns(a);
     int start_x = 30;
     int start_y = PLUTO_HEADER_H + 18;
+    int content_bottom = a->height - (a->status[0] ? 42 : 8);
     for (size_t i = 0u; i < a->channels.len; ++i) {
         int row = (int)(i / (size_t)cols);
         int col = (int)(i % (size_t)cols);
         int x = start_x + col * (PLUTO_CARD_W + PLUTO_GAP);
         int y = start_y + row * (PLUTO_CARD_H + PLUTO_GAP) - a->scroll;
-        if (y > a->height || y + PLUTO_CARD_H < PLUTO_HEADER_H) continue;
+        if (y + PLUTO_CARD_H > content_bottom || y + PLUTO_CARD_H < PLUTO_HEADER_H) continue;
         vip_channel_t *channel = &a->channels.items[i];
         bool selected = i == a->selected;
         if (a->renderer.active) {
