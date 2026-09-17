@@ -7,6 +7,7 @@ Correção do catálogo M3U e da navegação de séries:
 - episódios de séries M3U são condensados em um único card por série na tela principal de Séries;
 - ao abrir uma série M3U, o Blazzing agora mostra primeiro as temporadas e depois apenas os episódios da temporada escolhida;
 - a caixa de busca agora possui um estado de foco muito mais evidente, com fundo destacado, barra de acento e cursor;
+- o fullscreen do player agora acompanha o estado real do gerenciador de janelas, repete a solicitação EWMH no KDE/XWayland e usa fallback sem bordas ocupando a tela inteira quando necessário;
 - Prime Video, Max e Globoplay, que apenas abriam o navegador, foram removidos completamente junto com a API de sessão externa;
 - o hub inicial agora mantém somente IPTV/Listas e Pluto TV, ambos reproduzidos nativamente no Blazzing.
 
