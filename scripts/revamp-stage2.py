@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# One-shot validator trigger for the revamp-v1.3.0 stage 2 patch.
 from pathlib import Path
 
 path = Path('src/ui_x11/x11_app.c')
