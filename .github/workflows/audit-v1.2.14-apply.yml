@@ -20,7 +20,9 @@ jobs:
           ref: audit-v1.2.14
 
       - name: Apply audited fixes
-        run: python3 .github/scripts/apply_audit_v1_2_14.py
+        run: |
+          sed -i 's/re.subn(pattern, repl, text/re.subn(pattern, lambda _m: repl, text/' .github/scripts/apply_audit_v1_2_14.py
+          python3 .github/scripts/apply_audit_v1_2_14.py
 
       - name: Install build dependencies
         run: |
