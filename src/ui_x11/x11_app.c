@@ -2717,14 +2717,25 @@ static void draw_login(app_t *a) {
         }
         row_y += 60;
     }
-    if (a->profiles.len == 0u) draw_text(a, list_x, y+182, "Nenhuma lista salva ainda.", a->colors.muted);
+    if (a->profiles.len == 0u) {
+        if (a->renderer.active)
+            vip_ui_render_text(&a->renderer, list_x, y + 168, list_w, "Nenhuma lista salva ainda.",
+                               "Sans 9", 0x91A0B7u, 1.0, false);
+        else
+            draw_text(a, list_x, y+182, "Nenhuma lista salva ainda.", a->colors.muted);
+    }
 
     char status_copy[512];
     pthread_mutex_lock(&a->data_mutex);
     snprintf(status_copy, sizeof(status_copy), "%s", a->status);
     pthread_mutex_unlock(&a->data_mutex);
-    draw_text(a, form_x, y+h-42, status_copy,
-              (strstr(status_copy, "falha") || strstr(status_copy, "Erro")) ? a->colors.danger : a->colors.muted);
+    bool status_error = strstr(status_copy, "falha") || strstr(status_copy, "Erro");
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, form_x, y + h - 56, form_w, status_copy,
+                           "Sans 8", status_error ? 0xFF7185u : 0x91A0B7u, 1.0, false);
+    else
+        draw_text(a, form_x, y+h-42, status_copy,
+                  status_error ? a->colors.danger : a->colors.muted);
 }
 
 static int draw_wrapped_text(app_t *a, int x, int y, int width,

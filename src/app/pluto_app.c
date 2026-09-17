@@ -411,7 +411,9 @@ static int grid_rows(const pluto_app_t *a) {
 
 static int grid_max_scroll(const pluto_app_t *a) {
     int content_height = grid_rows(a) * (PLUTO_CARD_H + PLUTO_GAP);
-    int viewport = a->height - PLUTO_HEADER_H - 24;
+    int status_reserve = a->status[0] ? 42 : 8;
+    int viewport = a->height - PLUTO_HEADER_H - status_reserve;
+    if (viewport < PLUTO_CARD_H) viewport = PLUTO_CARD_H;
     int max_scroll = content_height - viewport;
     return max_scroll > 0 ? max_scroll : 0;
 }
@@ -425,7 +427,9 @@ static void ensure_selected_visible(pluto_app_t *a) {
     int cols = grid_columns(a);
     int row = (int)(a->selected / (size_t)cols);
     int row_top = row * (PLUTO_CARD_H + PLUTO_GAP);
-    int viewport = a->height - PLUTO_HEADER_H - 24;
+    int status_reserve = a->status[0] ? 42 : 8;
+    int viewport = a->height - PLUTO_HEADER_H - status_reserve;
+    if (viewport < PLUTO_CARD_H) viewport = PLUTO_CARD_H;
     if (row_top < a->scroll) a->scroll = row_top;
     if (row_top + PLUTO_CARD_H > a->scroll + viewport)
         a->scroll = row_top + PLUTO_CARD_H - viewport;
