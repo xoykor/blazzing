@@ -1,3 +1,16 @@
+## 1.3.0 — 2026-09-17
+
+Visual rendering and interaction overhaul:
+
+- introduces a shared Cairo/Pango rendering layer for antialiased rounded surfaces, gradients and proportional UTF-8 typography while retaining the native C17/X11 architecture;
+- makes IPTV catalog cards responsive to available width and modernizes search caret metrics, top tabs, sidebar navigation, loading states and card metadata;
+- adds reusable UI motion primitives for hover/focus transitions and smooth scrolling, with dedicated regression coverage;
+- redesigns the startup hub with correct UTF-8 rendering, modern service cards and pointer hover feedback;
+- finishes the IPTV login, saved-profile panel, metadata/details surface and embedded-player HUD using the same visual system;
+- modernizes Pluto TV header, channel grid, loading/status states and player controls, and prevents cards from being obscured by the status footer;
+- preserves existing keyboard/mouse navigation, providers, thumbnail scheduling and playback behavior while replacing legacy bitmap-font presentation paths;
+- validates the redesign through Release tests, ASan/UBSan, Flatpak builds and automated Xvfb screenshot QA at 1600×900.
+
 ## 1.2.16 — 2026-09-17
 
 M3U catalog routing and series-navigation fix:
