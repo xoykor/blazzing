@@ -1,0 +1,57 @@
+name: Apply audit follow-up
+
+on:
+  push:
+    branches:
+      - audit-v1.2.14
+    paths:
+      - .github/workflows/audit-v1.2.14-followup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit-v1.2.14
+
+      - name: Apply follow-up fixes
+        run: python3 .github/scripts/apply_audit_followup.py
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config cppcheck libx11-dev libcurl4-openssl-dev libjson-c-dev libsqlite3-dev libjpeg-dev libpng-dev libwebp-dev libssl-dev ffmpeg mpv
+
+      - name: Release tests
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+
+      - name: Sanitizer tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          cmake -S . -B build-san -DCMAKE_BUILD_TYPE=Debug -DVIPTV_SANITIZE=ON
+          cmake --build build-san --parallel 2
+          ctest --test-dir build-san --output-on-failure
+
+      - name: Cppcheck
+        run: |
+          cppcheck --enable=warning,performance,portability --std=c11 --inline-suppr --suppress=missingIncludeSystem --suppress=unusedFunction -Iinclude src tests 2>cppcheck.txt || true
+          cat cppcheck.txt
+          if grep -E '(^|: )(error|warning):' cppcheck.txt; then exit 1; fi
+
+      - name: Commit follow-up fixes
+        run: |
+          git config user.name "ChatGPT Codex Connector"
+          git config user.email "noreply@openai.com"
+          git add src include tests
+          git diff --cached --check
+          git commit -m "fix: finish catalog, persistence and path audit"
+          git push origin HEAD:audit-v1.2.14
