@@ -2595,12 +2595,23 @@ static void draw_login(app_t *a) {
     int h = 620;
     int x = (a->width - w) / 2, y = (a->height - h) / 2;
     if (y < 18) y = 18;
-    fill_round_rect(a, x + 8, y + 10, w, h, 24, a->colors.black);
-    fill_round_rect(a, x, y, w, h, 24, a->colors.panel);
-    stroke_round_rect(a, x, y, w, h, 24, a->colors.border);
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, x + 8, y + 10, w, h, 26, 0x000000u, 0.58);
+        vip_ui_render_round_rect(&a->renderer, x, y, w, h, 26, 0x0E1420u, 0.97);
+        vip_ui_render_round_stroke(&a->renderer, x, y, w, h, 26, 0x2B3950u, 1.0, 1.0);
+    } else {
+        fill_round_rect(a, x + 8, y + 10, w, h, 24, a->colors.black);
+        fill_round_rect(a, x, y, w, h, 24, a->colors.panel);
+        stroke_round_rect(a, x, y, w, h, 24, a->colors.border);
+    }
 
-    fill_round_rect(a, x + 30, y + 25, 42, 42, 13, a->colors.accent);
-    draw_centered_font(a, a->font_heading, x + 30, y + 53, 42, "B", a->colors.bg);
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, x + 30, y + 25, 42, 42, 13, 0x62A9FFu, 1.0);
+        vip_ui_render_text(&a->renderer, x + 30, y + 35, 42, "B", "Sans Bold 13", 0x050811u, 1.0, true);
+    } else {
+        fill_round_rect(a, x + 30, y + 25, 42, 42, 13, a->colors.accent);
+        draw_centered_font(a, a->font_heading, x + 30, y + 53, 42, "B", a->colors.bg);
+    }
     if (a->renderer.active) {
         vip_ui_render_text(&a->renderer, x + 86, y + 27, 360, "Blazzing", "Sans Bold 22", 0xF6F8FCu, 1.0, false);
         vip_ui_render_text(&a->renderer, x + 86, y + 55, 420, "Streaming, listas e biblioteca em um só lugar", "Sans 10", 0x91A0B7u, 1.0, false);
@@ -2616,10 +2627,21 @@ static void draw_login(app_t *a) {
     for (int i = 0; i < 2; ++i) {
         bool selected = (int)a->login_mode == i;
         int bx = form_x + i * (mode_w + 10);
-        fill_round_rect(a, bx, mode_y, mode_w, 42, 12, selected ? a->colors.accent2 : a->colors.panel2);
-        stroke_round_rect(a, bx, mode_y, mode_w, 42, 12, selected ? a->colors.accent : a->colors.border);
-        draw_centered(a, bx, mode_y + 27, mode_w, i == LOGIN_XTREAM ? "Xtream" : "M3U",
-                      selected ? a->colors.text : a->colors.muted);
+        if (a->renderer.active) {
+            vip_ui_render_round_rect(&a->renderer, bx, mode_y, mode_w, 42, 12,
+                                     selected ? 0x183E6Bu : 0x151E2Du, 1.0);
+            vip_ui_render_round_stroke(&a->renderer, bx, mode_y, mode_w, 42, 12,
+                                       selected ? 0x62A9FFu : 0x2B3950u, 1.0, selected ? 1.5 : 1.0);
+            vip_ui_render_text(&a->renderer, bx, mode_y + 12, mode_w,
+                               i == LOGIN_XTREAM ? "Xtream" : "M3U",
+                               selected ? "Sans Bold 10" : "Sans 10",
+                               selected ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+        } else {
+            fill_round_rect(a, bx, mode_y, mode_w, 42, 12, selected ? a->colors.accent2 : a->colors.panel2);
+            stroke_round_rect(a, bx, mode_y, mode_w, 42, 12, selected ? a->colors.accent : a->colors.border);
+            draw_centered(a, bx, mode_y + 27, mode_w, i == LOGIN_XTREAM ? "Xtream" : "M3U",
+                          selected ? a->colors.text : a->colors.muted);
+        }
     }
 
     draw_input(a, form_x, y+142, form_w, 44, a->profile_name, "Nome da lista (opcional)", INPUT_PROFILE_NAME, false);
@@ -2630,36 +2652,69 @@ static void draw_login(app_t *a) {
         draw_input(a, form_x, y+358, form_w, 44, a->password, "Senha", INPUT_PASSWORD, true);
     } else {
         draw_input(a, form_x, y+196, form_w, 44, a->server, "URL ou caminho de playlist .m3u/.m3u8", INPUT_SERVER, false);
-        draw_text(a, form_x, y+266, "M3U remoto (HTTP/HTTPS) ou arquivo local.", a->colors.muted);
-        draw_text(a, form_x, y+292, "A playlist é processada diretamente pelo Blazzing.", a->colors.muted);
+        if (a->renderer.active) {
+            vip_ui_render_text(&a->renderer, form_x, y + 252, form_w, "M3U remoto (HTTP/HTTPS) ou arquivo local.", "Sans 9", 0x91A0B7u, 1.0, false);
+            vip_ui_render_text(&a->renderer, form_x, y + 278, form_w, "A playlist é processada diretamente pelo Blazzing.", "Sans 9", 0x91A0B7u, 1.0, false);
+        } else {
+            draw_text(a, form_x, y+266, "M3U remoto (HTTP/HTTPS) ou arquivo local.", a->colors.muted);
+            draw_text(a, form_x, y+292, "A playlist é processada diretamente pelo Blazzing.", a->colors.muted);
+        }
     }
     bool ready = a->server[0] && !atomic_load(&a->login_running) &&
                  (a->login_mode == LOGIN_M3U || (a->username[0] && a->password[0]));
     int connect_y = y + 430;
-    fill_round_rect(a, form_x + 2, connect_y + 4, form_w, 50, 14, a->colors.black);
-    fill_round_rect(a, form_x, connect_y, form_w, 50, 14, ready ? a->colors.accent : a->colors.panel2);
-    stroke_round_rect(a, form_x, connect_y, form_w, 50, 14, ready ? a->colors.accent : a->colors.border);
-    draw_centered_font(a, a->font_heading, form_x, connect_y+32, form_w,
-                       atomic_load(&a->login_running) ? "Conectando..." : "Conectar",
-                       ready ? a->colors.bg : a->colors.muted);
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, form_x + 3, connect_y + 5, form_w, 50, 15, 0x000000u, 0.48);
+        vip_ui_render_round_rect(&a->renderer, form_x, connect_y, form_w, 50, 15,
+                                 ready ? 0x62A9FFu : 0x151E2Du, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, form_x, connect_y, form_w, 50, 15,
+                                   ready ? 0x8BC1FFu : 0x2B3950u, 1.0, 1.0);
+        vip_ui_render_text(&a->renderer, form_x, connect_y + 15, form_w,
+                           atomic_load(&a->login_running) ? "Conectando..." : "Conectar",
+                           "Sans Bold 11", ready ? 0x050811u : 0x91A0B7u, 1.0, true);
+    } else {
+        fill_round_rect(a, form_x + 2, connect_y + 4, form_w, 50, 14, a->colors.black);
+        fill_round_rect(a, form_x, connect_y, form_w, 50, 14, ready ? a->colors.accent : a->colors.panel2);
+        stroke_round_rect(a, form_x, connect_y, form_w, 50, 14, ready ? a->colors.accent : a->colors.border);
+        draw_centered_font(a, a->font_heading, form_x, connect_y+32, form_w,
+                           atomic_load(&a->login_running) ? "Conectando..." : "Conectar",
+                           ready ? a->colors.bg : a->colors.muted);
+    }
 
-    fill_round_rect(a, list_x - 14, y + 88, list_w + 28, 438, 18, a->colors.panel2);
-    stroke_round_rect(a, list_x - 14, y + 88, list_w + 28, 438, 18, a->colors.border);
-    draw_text_font(a, a->font_heading, list_x, y+116, "Suas listas", a->colors.text);
-    draw_text(a, list_x, y+137, "Acesso rápido aos perfis salvos", a->colors.muted);
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, list_x - 14, y + 88, list_w + 28, 438, 18, 0x111A28u, 0.98);
+        vip_ui_render_round_stroke(&a->renderer, list_x - 14, y + 88, list_w + 28, 438, 18, 0x2B3950u, 1.0, 1.0);
+        vip_ui_render_text(&a->renderer, list_x, y + 102, list_w, "Suas listas", "Sans Bold 12", 0xF6F8FCu, 1.0, false);
+        vip_ui_render_text(&a->renderer, list_x, y + 126, list_w, "Acesso rápido aos perfis salvos", "Sans 9", 0x91A0B7u, 1.0, false);
+    } else {
+        fill_round_rect(a, list_x - 14, y + 88, list_w + 28, 438, 18, a->colors.panel2);
+        stroke_round_rect(a, list_x - 14, y + 88, list_w + 28, 438, 18, a->colors.border);
+        draw_text_font(a, a->font_heading, list_x, y+116, "Suas listas", a->colors.text);
+        draw_text(a, list_x, y+137, "Acesso rápido aos perfis salvos", a->colors.muted);
+    }
     int row_y = y + 154;
     int visible = 6;
     for (int r = 0; r < visible; ++r) {
         int idx = a->profile_scroll + r;
         if (idx < 0 || (size_t)idx >= a->profiles.len) break;
         vip_profile_t *p = &a->profiles.items[idx];
-        draw_surface(a, list_x, row_y, list_w, 52, 12, false);
+        if (a->renderer.active) {
+            vip_ui_render_round_rect(&a->renderer, list_x, row_y, list_w, 52, 12, 0x151E2Du, 1.0);
+            vip_ui_render_round_stroke(&a->renderer, list_x, row_y, list_w, 52, 12, 0x2B3950u, 1.0, 1.0);
+        } else {
+            draw_surface(a, list_x, row_y, list_w, 52, 12, false);
+        }
         char label[220];
         snprintf(label, sizeof(label), "%s  ·  %s", p->name ? p->name : "Lista", p->type == VIP_PROFILE_M3U ? "M3U" : "Xtream");
         bounded_text(label, sizeof(label), label, 44);
-        draw_text(a, list_x+13, row_y+22, label, a->colors.text);
         char sub[220]; bounded_text(sub, sizeof(sub), p->server ? p->server : "", 46);
-        draw_text_font(a, a->font_small, list_x+13, row_y+42, sub, a->colors.muted);
+        if (a->renderer.active) {
+            vip_ui_render_text(&a->renderer, list_x + 13, row_y + 8, list_w - 26, label, "Sans SemiBold 9", 0xF6F8FCu, 1.0, false);
+            vip_ui_render_text(&a->renderer, list_x + 13, row_y + 29, list_w - 26, sub, "Sans 8", 0x91A0B7u, 1.0, false);
+        } else {
+            draw_text(a, list_x+13, row_y+22, label, a->colors.text);
+            draw_text_font(a, a->font_small, list_x+13, row_y+42, sub, a->colors.muted);
+        }
         row_y += 60;
     }
     if (a->profiles.len == 0u) draw_text(a, list_x, y+182, "Nenhuma lista salva ainda.", a->colors.muted);
@@ -2770,16 +2825,29 @@ static void draw_details_panel(app_t *a) {
     snprintf(director, sizeof(director), "%s", a->details_metadata.director ? a->details_metadata.director : "");
     pthread_mutex_unlock(&a->data_mutex);
 
-    char title[256]; bounded_text(title, sizeof(title), ch->name, 44);
-    draw_text_font(a, a->font_heading, px + 16, py + 31, title, a->colors.text);
+    char title[256]; bounded_text(title, sizeof(title), ch->name, 72);
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, px + 16, py + 13, pw - 132, title, "Sans Bold 12", 0xF6F8FCu, 1.0, false);
+    else
+        draw_text_font(a, a->font_heading, px + 16, py + 31, title, a->colors.text);
     bool favorite = a->favorite_flags && a->favorite_flags[chidx];
     int fav_w = 92, fav_h = 32, fav_x = px + pw - fav_w - 14, fav_y = py + 10;
-    fill_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12,
-                    favorite ? a->colors.accent2 : a->colors.panel2);
-    stroke_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12,
-                      favorite ? a->colors.accent : a->colors.border);
-    draw_centered(a, fav_x, fav_y + 21, fav_w, favorite ? "SALVO" : "FAVORITAR",
-                  favorite ? a->colors.text : a->colors.muted);
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, fav_x, fav_y, fav_w, fav_h, 12,
+                                 favorite ? 0x183E6Bu : 0x151E2Du, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, fav_x, fav_y, fav_w, fav_h, 12,
+                                   favorite ? 0x62A9FFu : 0x2B3950u, 1.0, 1.0);
+        vip_ui_render_text(&a->renderer, fav_x, fav_y + 9, fav_w, favorite ? "SALVO" : "FAVORITAR",
+                           favorite ? "Sans Bold 8" : "Sans 8",
+                           favorite ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+    } else {
+        fill_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12,
+                        favorite ? a->colors.accent2 : a->colors.panel2);
+        stroke_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12,
+                          favorite ? a->colors.accent : a->colors.border);
+        draw_centered(a, fav_x, fav_y + 21, fav_w, favorite ? "SALVO" : "FAVORITAR",
+                      favorite ? a->colors.text : a->colors.muted);
+    }
 
     bool current = ch->id && strcmp(loaded_id, ch->id) == 0;
     int art_x = px + 16, art_y = py + 50, art_w = pw - 32, art_h = 170;
