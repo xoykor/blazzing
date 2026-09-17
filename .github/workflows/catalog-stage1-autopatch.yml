@@ -4,7 +4,7 @@ on:
   push:
     branches: [uiux-v1.2.15-stage1-work]
     paths:
-      - scripts/catalog_stage1_patch.py
+      - scripts/catalog_stage1_patch_v2.py
       - .github/workflows/catalog-stage1-autopatch.yml
 
 permissions:
@@ -20,7 +20,7 @@ jobs:
           fetch-depth: 0
 
       - name: Apply series season navigation patch
-        run: python3 scripts/catalog_stage1_patch.py
+        run: python3 scripts/catalog_stage1_patch_v2.py
 
       - name: Install build dependencies
         run: |
