@@ -24,6 +24,7 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include <curl/curl.h>
+#include <qrencode.h>
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -63,6 +64,9 @@
 #define INPUT_PASSWORD 4
 #define INPUT_SEARCH 5
 #define INPUT_PROFILE_NAME 6
+#define INPUT_PHONE 7
+#define INPUT_CONNECT 8
+#define INPUT_MODE 9
 #define HOVER_NONE 0
 #define HOVER_TAB_BASE 10
 #define HOVER_SEARCH 20
@@ -226,6 +230,7 @@ struct app {
     char pairing_pending_url[512];
     char pairing_pending_name[128];
     char pairing_page_url[256];
+    QRcode *pairing_qr;
 
     pthread_t login_thread;
     bool login_thread_started;
@@ -1940,6 +1945,20 @@ static void pairing_submission_cb(const char *profile_name,
     atomic_store(&a->pairing_submission, true);
 }
 
+static void stop_phone_pairing(app_t *a) {
+    if (!a)
+        return;
+    if (a->pairing_server) {
+        vip_pairing_server_stop(a->pairing_server);
+        a->pairing_server = NULL;
+    }
+    if (a->pairing_qr) {
+        QRcode_free(a->pairing_qr);
+        a->pairing_qr = NULL;
+    }
+    a->pairing_page_url[0] = '\0';
+}
+
 static void start_phone_pairing(app_t *a) {
     if (!a || a->login_mode != LOGIN_M3U)
         return;
@@ -1957,8 +1976,75 @@ static void start_phone_pairing(app_t *a) {
     }
 
     vip_pairing_server_url(a->pairing_server, a->pairing_page_url, sizeof(a->pairing_page_url));
-    snprintf(a->status, sizeof(a->status), "Abra no celular: %s", a->pairing_page_url);
+    a->pairing_qr = QRcode_encodeString8bit(a->pairing_page_url, 0, QR_ECLEVEL_M);
+    snprintf(a->status, sizeof(a->status), "Escaneie o QR ou abra: %s", a->pairing_page_url);
     fprintf(stderr, "[pairing] aguardando playlist em %s\n", a->pairing_page_url);
+}
+
+static void login_move_focus(app_t *a, int direction) {
+    static const int xtream_order[] = {
+        INPUT_MODE, INPUT_PROFILE_NAME, INPUT_SERVER, INPUT_SERVER_ALT,
+        INPUT_USERNAME, INPUT_PASSWORD, INPUT_CONNECT
+    };
+    static const int m3u_order[] = {
+        INPUT_MODE, INPUT_PROFILE_NAME, INPUT_SERVER, INPUT_PHONE, INPUT_CONNECT
+    };
+    const int *order = a->login_mode == LOGIN_M3U ? m3u_order : xtream_order;
+    size_t len = a->login_mode == LOGIN_M3U ? sizeof(m3u_order) / sizeof(m3u_order[0])
+                                             : sizeof(xtream_order) / sizeof(xtream_order[0]);
+    size_t current = 0u;
+    for (size_t i = 0; i < len; ++i) {
+        if (order[i] == a->input_focus) {
+            current = i;
+            break;
+        }
+    }
+    long next = (long)current + (direction < 0 ? -1L : 1L);
+    if (next < 0)
+        next = (long)len - 1L;
+    if ((size_t)next >= len)
+        next = 0L;
+    a->input_focus = order[(size_t)next];
+}
+
+static void login_select_mode(app_t *a, login_mode_t mode) {
+    if (!a)
+        return;
+    if (mode != LOGIN_M3U && a->pairing_server)
+        stop_phone_pairing(a);
+    a->login_mode = mode;
+    a->input_focus = INPUT_MODE;
+}
+
+static void draw_pairing_qr(app_t *a, int x, int y, int size) {
+    if (!a || !a->pairing_qr || size <= 0)
+        return;
+    const int quiet = 4;
+    int modules = a->pairing_qr->width + quiet * 2;
+    int cell = size / modules;
+    if (cell < 1)
+        cell = 1;
+    int actual = modules * cell;
+    int ox = x + (size - actual) / 2;
+    int oy = y + (size - actual) / 2;
+
+    if (a->renderer.active)
+        vip_ui_render_round_rect(&a->renderer, ox, oy, actual, actual, 8, 0xFFFFFFu, 1.0);
+    else
+        fill_rect(a, ox, oy, (unsigned)actual, (unsigned)actual, WhitePixel(a->dpy, a->screen_num));
+
+    for (int row = 0; row < a->pairing_qr->width; ++row) {
+        for (int col = 0; col < a->pairing_qr->width; ++col) {
+            if ((a->pairing_qr->data[row * a->pairing_qr->width + col] & 1u) == 0u)
+                continue;
+            int rx = ox + (col + quiet) * cell;
+            int ry = oy + (row + quiet) * cell;
+            if (a->renderer.active)
+                vip_ui_render_round_rect(&a->renderer, rx, ry, cell, cell, 0, 0x000000u, 1.0);
+            else
+                fill_rect(a, rx, ry, (unsigned)cell, (unsigned)cell, BlackPixel(a->dpy, a->screen_num));
+        }
+    }
 }
 
 /* Run the series background worker. */
@@ -3264,18 +3350,23 @@ static void draw_login(app_t *a) {
     int mode_w = (form_w - 10) / 2;
     for (int i = 0; i < 2; ++i) {
         bool selected = (int)a->login_mode == i;
+        bool mode_focused = a->input_focus == INPUT_MODE;
         int bx = form_x + i * (mode_w + 10);
         if (a->renderer.active) {
             vip_ui_render_round_rect(&a->renderer, bx, mode_y, mode_w, 42, 12,
                                      selected ? 0x183E6Bu : 0x151E2Du, 1.0);
             vip_ui_render_round_stroke(&a->renderer, bx, mode_y, mode_w, 42, 12,
-                                       selected ? 0x62A9FFu : 0x2B3950u, 1.0, selected ? 1.5 : 1.0);
+                                       mode_focused && selected ? 0xB7D9FFu
+                                                                : (selected ? 0x62A9FFu : 0x2B3950u),
+                                       1.0, mode_focused && selected ? 2.5 : (selected ? 1.5 : 1.0));
             vip_ui_render_text(&a->renderer, bx, mode_y + 12, mode_w, i == LOGIN_XTREAM ? "Xtream" : "M3U",
                                selected ? "Sans Bold 10" : "Sans 10", selected ? 0xF6F8FCu : 0x91A0B7u, 1.0,
                                true);
         } else {
             fill_round_rect(a, bx, mode_y, mode_w, 42, 12, selected ? a->colors.accent2 : a->colors.panel2);
-            stroke_round_rect(a, bx, mode_y, mode_w, 42, 12, selected ? a->colors.accent : a->colors.border);
+            stroke_round_rect(a, bx, mode_y, mode_w, 42, 12,
+                              mode_focused && selected ? a->colors.text
+                                                       : (selected ? a->colors.accent : a->colors.border));
             draw_centered(a, bx, mode_y + 27, mode_w, i == LOGIN_XTREAM ? "Xtream" : "M3U",
                           selected ? a->colors.text : a->colors.muted);
         }
@@ -3307,11 +3398,14 @@ static void draw_login(app_t *a) {
 
         int phone_y = y + 314;
         bool waiting_phone = a->pairing_server != NULL;
+        bool phone_focused = a->input_focus == INPUT_PHONE;
         if (a->renderer.active) {
             vip_ui_render_round_rect(&a->renderer, form_x, phone_y, form_w, 46, 12,
                                      waiting_phone ? 0x183E6Bu : 0x151E2Du, 1.0);
             vip_ui_render_round_stroke(&a->renderer, form_x, phone_y, form_w, 46, 12,
-                                       waiting_phone ? 0x62A9FFu : 0x2B3950u, 1.0, 1.0);
+                                       phone_focused ? 0xB7D9FFu
+                                                     : (waiting_phone ? 0x62A9FFu : 0x2B3950u),
+                                       1.0, phone_focused ? 2.5 : 1.0);
             vip_ui_render_text(&a->renderer, form_x, phone_y + 13, form_w,
                                waiting_phone ? "Aguardando celular..." : "Adicionar pelo celular",
                                waiting_phone ? "Sans Bold 10" : "Sans 10",
@@ -3323,7 +3417,8 @@ static void draw_login(app_t *a) {
             fill_round_rect(a, form_x, phone_y, form_w, 46, 12,
                             waiting_phone ? a->colors.accent2 : a->colors.panel2);
             stroke_round_rect(a, form_x, phone_y, form_w, 46, 12,
-                              waiting_phone ? a->colors.accent : a->colors.border);
+                              phone_focused ? a->colors.text
+                                            : (waiting_phone ? a->colors.accent : a->colors.border));
             draw_centered(a, form_x, phone_y + 29, form_w,
                           waiting_phone ? "Aguardando celular..." : "Adicionar pelo celular",
                           waiting_phone ? a->colors.text : a->colors.muted);
@@ -3334,41 +3429,68 @@ static void draw_login(app_t *a) {
     bool ready = a->server[0] && !atomic_load(&a->login_running) &&
                  (a->login_mode == LOGIN_M3U || (a->username[0] && a->password[0]));
     int connect_y = y + 430;
+    bool connect_focused = a->input_focus == INPUT_CONNECT;
     if (a->renderer.active) {
         vip_ui_render_round_rect(&a->renderer, form_x + 3, connect_y + 5, form_w, 50, 15, 0x000000u, 0.48);
         vip_ui_render_round_rect(&a->renderer, form_x, connect_y, form_w, 50, 15,
                                  ready ? 0x62A9FFu : 0x151E2Du, 1.0);
         vip_ui_render_round_stroke(&a->renderer, form_x, connect_y, form_w, 50, 15,
-                                   ready ? 0x8BC1FFu : 0x2B3950u, 1.0, 1.0);
+                                   connect_focused ? 0xB7D9FFu
+                                                   : (ready ? 0x8BC1FFu : 0x2B3950u),
+                                   1.0, connect_focused ? 2.5 : 1.0);
         vip_ui_render_text(&a->renderer, form_x, connect_y + 15, form_w,
                            atomic_load(&a->login_running) ? "Conectando..." : "Conectar", "Sans Bold 11",
                            ready ? 0x050811u : 0x91A0B7u, 1.0, true);
     } else {
         fill_round_rect(a, form_x + 2, connect_y + 4, form_w, 50, 14, a->colors.black);
         fill_round_rect(a, form_x, connect_y, form_w, 50, 14, ready ? a->colors.accent : a->colors.panel2);
-        stroke_round_rect(a, form_x, connect_y, form_w, 50, 14, ready ? a->colors.accent : a->colors.border);
+        stroke_round_rect(a, form_x, connect_y, form_w, 50, 14,
+                          connect_focused ? a->colors.text
+                                          : (ready ? a->colors.accent : a->colors.border));
         draw_centered_font(a, a->font_heading, form_x, connect_y + 32, form_w,
                            atomic_load(&a->login_running) ? "Conectando..." : "Conectar",
                            ready ? a->colors.bg : a->colors.muted);
     }
 
+    const char *side_title = a->pairing_server ? "Adicionar pelo celular" : "Suas listas";
+    const char *side_subtitle = a->pairing_server ? "Escaneie o QR Code com o celular"
+                                                  : "Acesso rápido aos perfis salvos";
     if (a->renderer.active) {
         vip_ui_render_round_rect(&a->renderer, list_x - 14, y + 88, list_w + 28, 438, 18, 0x111A28u, 0.98);
         vip_ui_render_round_stroke(&a->renderer, list_x - 14, y + 88, list_w + 28, 438, 18, 0x2B3950u, 1.0,
                                    1.0);
-        vip_ui_render_text(&a->renderer, list_x, y + 102, list_w, "Suas listas", "Sans Bold 12", 0xF6F8FCu,
+        vip_ui_render_text(&a->renderer, list_x, y + 102, list_w, side_title, "Sans Bold 12", 0xF6F8FCu,
                            1.0, false);
-        vip_ui_render_text(&a->renderer, list_x, y + 126, list_w, "Acesso rápido aos perfis salvos", "Sans 9",
+        vip_ui_render_text(&a->renderer, list_x, y + 126, list_w, side_subtitle, "Sans 9",
                            0x91A0B7u, 1.0, false);
     } else {
         fill_round_rect(a, list_x - 14, y + 88, list_w + 28, 438, 18, a->colors.panel2);
         stroke_round_rect(a, list_x - 14, y + 88, list_w + 28, 438, 18, a->colors.border);
-        draw_text_font(a, a->font_heading, list_x, y + 116, "Suas listas", a->colors.text);
-        draw_text(a, list_x, y + 137, "Acesso rápido aos perfis salvos", a->colors.muted);
+        draw_text_font(a, a->font_heading, list_x, y + 116, side_title, a->colors.text);
+        draw_text(a, list_x, y + 137, side_subtitle, a->colors.muted);
+    }
+
+    if (a->pairing_server) {
+        int qr_size = list_w < 290 ? list_w - 20 : 270;
+        if (qr_size < 120)
+            qr_size = 120;
+        int qr_x = list_x + (list_w - qr_size) / 2;
+        int qr_y = y + 158;
+        draw_pairing_qr(a, qr_x, qr_y, qr_size);
+        if (a->renderer.active) {
+            vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 12, list_w, a->pairing_page_url,
+                               "Sans 8", 0x91A0B7u, 1.0, true);
+            vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 38, list_w,
+                               "Esc cancela o pareamento", "Sans 8", 0x91A0B7u, 1.0, true);
+        } else {
+            draw_centered(a, list_x, qr_y + qr_size + 28, list_w, a->pairing_page_url, a->colors.muted);
+            draw_centered(a, list_x, qr_y + qr_size + 50, list_w, "Esc cancela o pareamento",
+                          a->colors.muted);
+        }
     }
     int row_y = y + 154;
     int visible = 6;
-    for (int r = 0; r < visible; ++r) {
+    for (int r = 0; !a->pairing_server && r < visible; ++r) {
         int idx = a->profile_scroll + r;
         if (idx < 0 || (size_t)idx >= a->profiles.len)
             break;
@@ -3396,7 +3518,7 @@ static void draw_login(app_t *a) {
         }
         row_y += 60;
     }
-    if (a->profiles.len == 0u) {
+    if (!a->pairing_server && a->profiles.len == 0u) {
         if (a->renderer.active)
             vip_ui_render_text(&a->renderer, list_x, y + 168, list_w, "Nenhuma lista salva ainda.", "Sans 9",
                                0x91A0B7u, 1.0, false);
@@ -4305,13 +4427,11 @@ static void handle_click(app_t *a, int x, int y) {
             list_w = w - (list_x - px) - 34;
         int mode_w = (form_w - 10) / 2;
         if (point_in(x, y, form_x, py + 88, mode_w, 42)) {
-            a->login_mode = LOGIN_XTREAM;
-            a->input_focus = INPUT_SERVER;
+            login_select_mode(a, LOGIN_XTREAM);
             return;
         }
         if (point_in(x, y, form_x + mode_w + 10, py + 88, mode_w, 42)) {
-            a->login_mode = LOGIN_M3U;
-            a->input_focus = INPUT_SERVER;
+            login_select_mode(a, LOGIN_M3U);
             return;
         }
         if (point_in(x, y, form_x, py + 142, form_w, 44))
@@ -4324,10 +4444,13 @@ static void handle_click(app_t *a, int x, int y) {
             a->input_focus = INPUT_USERNAME;
         else if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 358, form_w, 44))
             a->input_focus = INPUT_PASSWORD;
-        else if (a->login_mode == LOGIN_M3U && point_in(x, y, form_x, py + 314, form_w, 46))
+        else if (a->login_mode == LOGIN_M3U && point_in(x, y, form_x, py + 314, form_w, 46)) {
+            a->input_focus = INPUT_PHONE;
             start_phone_pairing(a);
-        else if (point_in(x, y, form_x, py + 430, form_w, 50))
+        } else if (point_in(x, y, form_x, py + 430, form_w, 50)) {
+            a->input_focus = INPUT_CONNECT;
             start_login(a);
+        }
         else {
             int row_y = py + 132;
             for (int r = 0; r < 7; ++r) {
@@ -4659,7 +4782,26 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
     }
 
     if (a->login_mode == LOGIN_M3U && sym == XK_F2) {
+        a->input_focus = INPUT_PHONE;
         start_phone_pairing(a);
+        return;
+    }
+    if (a->pairing_server && sym == XK_Escape) {
+        stop_phone_pairing(a);
+        snprintf(a->status, sizeof(a->status), "Pareamento cancelado");
+        a->input_focus = INPUT_PHONE;
+        return;
+    }
+    if (sym == XK_Up) {
+        login_move_focus(a, -1);
+        return;
+    }
+    if (sym == XK_Down) {
+        login_move_focus(a, 1);
+        return;
+    }
+    if (a->input_focus == INPUT_MODE && (sym == XK_Left || sym == XK_Right)) {
+        login_select_mode(a, a->login_mode == LOGIN_XTREAM ? LOGIN_M3U : LOGIN_XTREAM);
         return;
     }
     if (sym == XK_Escape)
@@ -4673,18 +4815,16 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
         return;
     }
     if (sym == XK_Tab) {
-        if (a->login_mode == LOGIN_M3U)
-            a->input_focus = a->input_focus == INPUT_PROFILE_NAME ? INPUT_SERVER : INPUT_PROFILE_NAME;
-        else
-            a->input_focus = a->input_focus == INPUT_PROFILE_NAME ? INPUT_SERVER
-                             : a->input_focus == INPUT_SERVER     ? INPUT_SERVER_ALT
-                             : a->input_focus == INPUT_SERVER_ALT ? INPUT_USERNAME
-                             : a->input_focus == INPUT_USERNAME   ? INPUT_PASSWORD
-                                                                  : INPUT_PROFILE_NAME;
+        login_move_focus(a, shift ? -1 : 1);
         return;
     }
     if (sym == XK_Return || sym == XK_KP_Enter) {
-        start_login(a);
+        if (a->input_focus == INPUT_PHONE && a->login_mode == LOGIN_M3U)
+            start_phone_pairing(a);
+        else if (a->input_focus == INPUT_MODE)
+            return;
+        else
+            start_login(a);
         return;
     }
     if (sym == XK_BackSpace) {
@@ -4977,10 +5117,7 @@ static void destroy_app(app_t *a) {
     vip_category_list_clear(&a->episode_categories);
     vip_channel_list_clear(&a->episode_channels);
     vip_channel_list_clear(&a->season_channels);
-    if (a->pairing_server) {
-        vip_pairing_server_stop(a->pairing_server);
-        a->pairing_server = NULL;
-    }
+    stop_phone_pairing(a);
     pthread_mutex_destroy(&a->data_mutex);
     if (a->dpy) {
         if (a->font_title)
@@ -5018,11 +5155,7 @@ static void handle_async(app_t *a) {
         a->pairing_pending_name[0] = '\0';
         pthread_mutex_unlock(&a->data_mutex);
 
-        if (a->pairing_server) {
-            vip_pairing_server_stop(a->pairing_server);
-            a->pairing_server = NULL;
-        }
-        a->pairing_page_url[0] = '\0';
+        stop_phone_pairing(a);
         a->login_mode = LOGIN_M3U;
         snprintf(a->server, sizeof(a->server), "%s", url);
         snprintf(a->profile_name, sizeof(a->profile_name), "%s", name);
@@ -5138,7 +5271,7 @@ int vip_x11_app_run(void) {
     a.content_kind = CONTENT_LIVE;
     a.login_mode = LOGIN_XTREAM;
     a.screen = SCREEN_LOGIN;
-    a.input_focus = INPUT_SERVER;
+    a.input_focus = INPUT_MODE;
     a.selected_category = -1;
     snprintf(a.status, sizeof(a.status), "Cole as credenciais Xtream e conecte");
     vip_error_t error = {0};
