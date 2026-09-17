@@ -3254,44 +3254,91 @@ static void draw_player(app_t *a) {
     bool hud = player_hud_visible(a);
 
     if (!a->fullscreen) {
-        fill_rect(a, 0, 0, (unsigned)a->width, PLAYER_HEADER_H, a->colors.panel);
-        fill_round_rect(a, 12, 10, 132, 44, 13, a->colors.panel2);
-        stroke_round_rect(a, 12, 10, 132, 44, 13, a->colors.border);
-        draw_text(a, 28, 39, "< Voltar", a->colors.text);
-        if (a->current_channel < ACTIVE_CHANNELS(a).len)
-            draw_text_font(a, a->font_heading, 168, 39, ACTIVE_CHANNELS(a).items[a->current_channel].name, a->colors.text);
+        if (a->renderer.active) {
+            vip_ui_render_round_rect(&a->renderer, 0, 0, a->width, PLAYER_HEADER_H, 0, 0x0E1420u, 0.97);
+            vip_ui_render_round_rect(&a->renderer, 12, 10, 132, 44, 13, 0x151E2Du, 1.0);
+            vip_ui_render_round_stroke(&a->renderer, 12, 10, 132, 44, 13, 0x2B3950u, 1.0, 1.0);
+            vip_ui_render_text(&a->renderer, 28, 24, 104, "<  Voltar", "Sans SemiBold 10", 0xF6F8FCu, 1.0, false);
+            if (a->current_channel < ACTIVE_CHANNELS(a).len)
+                vip_ui_render_text(&a->renderer, 168, 22, a->width - 190, ACTIVE_CHANNELS(a).items[a->current_channel].name,
+                                   "Sans Bold 12", 0xF6F8FCu, 1.0, false);
+        } else {
+            fill_rect(a, 0, 0, (unsigned)a->width, PLAYER_HEADER_H, a->colors.panel);
+            fill_round_rect(a, 12, 10, 132, 44, 13, a->colors.panel2);
+            stroke_round_rect(a, 12, 10, 132, 44, 13, a->colors.border);
+            draw_text(a, 28, 39, "< Voltar", a->colors.text);
+            if (a->current_channel < ACTIVE_CHANNELS(a).len)
+                draw_text_font(a, a->font_heading, 168, 39, ACTIVE_CHANNELS(a).items[a->current_channel].name, a->colors.text);
+        }
     }
 
     if (hud) {
         int y = a->height - PLAYER_CONTROLS_H;
-        fill_rect(a, 0, y, (unsigned)a->width, PLAYER_CONTROLS_H, a->colors.panel);
-        fill_rect(a, 0, y, (unsigned)a->width, 1, a->colors.border);
-        fill_round_rect(a, 16, y+18, 52, 46, 14, a->colors.panel2);
-        stroke_round_rect(a, 16, y+18, 52, 46, 14, a->colors.border);
-        draw_centered_font(a, a->font_heading, 16, y+48, 52, snap.paused ? ">" : "||", a->colors.text);
-        fill_round_rect(a, 76, y+18, 82, 46, 14, a->colors.panel2);
-        stroke_round_rect(a, 76, y+18, 82, 46, 14, a->colors.border);
-        draw_centered(a, 76, y+47, 82, "Voltar", a->colors.text);
+        if (a->renderer.active) {
+            vip_ui_render_round_rect(&a->renderer, 10, y + 7, a->width - 20, PLAYER_CONTROLS_H - 12, 18, 0x0E1420u, 0.96);
+            vip_ui_render_round_stroke(&a->renderer, 10, y + 7, a->width - 20, PLAYER_CONTROLS_H - 12, 18, 0x2B3950u, 0.95, 1.0);
+            vip_ui_render_round_rect(&a->renderer, 16, y+18, 52, 46, 14, 0x151E2Du, 1.0);
+            vip_ui_render_round_stroke(&a->renderer, 16, y+18, 52, 46, 14, 0x36506Fu, 1.0, 1.0);
+            vip_ui_render_text(&a->renderer, 16, y + 31, 52, snap.paused ? ">" : "||", "Sans Bold 12", 0xF6F8FCu, 1.0, true);
+            vip_ui_render_round_rect(&a->renderer, 76, y+18, 82, 46, 14, 0x151E2Du, 1.0);
+            vip_ui_render_round_stroke(&a->renderer, 76, y+18, 82, 46, 14, 0x36506Fu, 1.0, 1.0);
+            vip_ui_render_text(&a->renderer, 76, y + 32, 82, "Voltar", "Sans SemiBold 9", 0xF6F8FCu, 1.0, true);
+        } else {
+            fill_rect(a, 0, y, (unsigned)a->width, PLAYER_CONTROLS_H, a->colors.panel);
+            fill_rect(a, 0, y, (unsigned)a->width, 1, a->colors.border);
+            fill_round_rect(a, 16, y+18, 52, 46, 14, a->colors.panel2);
+            stroke_round_rect(a, 16, y+18, 52, 46, 14, a->colors.border);
+            draw_centered_font(a, a->font_heading, 16, y+48, 52, snap.paused ? ">" : "||", a->colors.text);
+            fill_round_rect(a, 76, y+18, 82, 46, 14, a->colors.panel2);
+            stroke_round_rect(a, 76, y+18, 82, 46, 14, a->colors.border);
+            draw_centered(a, 76, y+47, 82, "Voltar", a->colors.text);
+        }
         if (a->player_item_live) {
-            fill_round_rect(a, 176, y+22, 76, 30, 12, a->colors.danger);
-            draw_centered(a, 176, y+43, 76, "AO VIVO", a->colors.text);
-            draw_text(a, 270, y+44, "<- -> troca canal", a->colors.muted);
+            if (a->renderer.active) {
+                vip_ui_render_round_rect(&a->renderer, 176, y+22, 76, 30, 12, 0xFF7185u, 0.96);
+                vip_ui_render_text(&a->renderer, 176, y + 30, 76, "AO VIVO", "Sans Bold 8", 0xF6F8FCu, 1.0, true);
+                vip_ui_render_text(&a->renderer, 270, y + 31, 220, "<-  ->  troca canal", "Sans 9", 0x91A0B7u, 1.0, false);
+            } else {
+                fill_round_rect(a, 176, y+22, 76, 30, 12, a->colors.danger);
+                draw_centered(a, 176, y+43, 76, "AO VIVO", a->colors.text);
+                draw_text(a, 270, y+44, "<- -> troca canal", a->colors.muted);
+            }
         } else {
             int tx,ty,tw,th; timeline_geometry(a,&tx,&ty,&tw,&th);
-            fill_round_rect(a, tx, ty, tw, th, th/2, a->colors.panel2);
+            if (a->renderer.active)
+                vip_ui_render_round_rect(&a->renderer, tx, ty, tw, th, th/2, 0x26354Au, 1.0);
+            else
+                fill_round_rect(a, tx, ty, tw, th, th/2, a->colors.panel2);
             double ratio = snap.duration_seconds > 0.0 ? snap.position_seconds / snap.duration_seconds : 0.0;
             if (ratio < 0.0) ratio = 0.0;
             if (ratio > 1.0) ratio = 1.0;
             int fill = (int)((double)tw * ratio);
-            if (fill > 0) fill_round_rect(a, tx, ty, fill, th, th/2, a->colors.accent);
+            if (fill > 0) {
+                if (a->renderer.active)
+                    vip_ui_render_round_rect(&a->renderer, tx, ty, fill, th, th/2, 0x62A9FFu, 1.0);
+                else
+                    fill_round_rect(a, tx, ty, fill, th, th/2, a->colors.accent);
+            }
             char pos[32], dur[32]; format_clock(snap.position_seconds,pos); format_clock(snap.duration_seconds,dur);
-            draw_text(a, 166, y+45, pos, a->colors.text);
-            draw_text(a, a->width-150, y+45, dur, a->colors.text);
-            draw_text_font(a, a->font_small, tx, y+70, "Clique/arraste para buscar  ·  <- -> 10s", a->colors.muted);
+            if (a->renderer.active) {
+                vip_ui_render_text(&a->renderer, 166, y + 31, 60, pos, "Sans SemiBold 9", 0xF6F8FCu, 1.0, false);
+                vip_ui_render_text(&a->renderer, a->width - 150, y + 31, 132, dur, "Sans SemiBold 9", 0xF6F8FCu, 1.0, false);
+                vip_ui_render_text(&a->renderer, tx, y + 57, tw, "Clique/arraste para buscar  ·  <- -> 10s", "Sans 8", 0x91A0B7u, 1.0, false);
+            } else {
+                draw_text(a, 166, y+45, pos, a->colors.text);
+                draw_text(a, a->width-150, y+45, dur, a->colors.text);
+                draw_text_font(a, a->font_small, tx, y+70, "Clique/arraste para buscar  ·  <- -> 10s", a->colors.muted);
+            }
         }
-        int sw = text_width(a, state_text);
-        draw_text_font(a, a->font_small, a->width - sw - 18, y+72, state_text,
-                       player_state == VIP_PLAYER_ERROR ? a->colors.danger : a->colors.muted);
+        if (a->renderer.active) {
+            int sw = vip_ui_render_text_width(&a->renderer, state_text, "Sans 8");
+            vip_ui_render_text(&a->renderer, a->width - sw - 18, y + 58, sw + 2, state_text, "Sans 8",
+                               player_state == VIP_PLAYER_ERROR ? 0xFF7185u : 0x91A0B7u, 1.0, false);
+        } else {
+            int sw = text_width(a, state_text);
+            draw_text_font(a, a->font_small, a->width - sw - 18, y+72, state_text,
+                           player_state == VIP_PLAYER_ERROR ? a->colors.danger : a->colors.muted);
+        }
     }
 
     if (player_state == VIP_PLAYER_ERROR) {
