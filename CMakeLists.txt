@@ -162,6 +162,11 @@ if(BUILD_TESTING)
     target_include_directories(test_ui_motion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     vip_warnings(test_ui_motion)
     add_test(NAME ui_motion COMMAND test_ui_motion)
+
+    add_executable(test_pairing_server tests/test_pairing_server.c)
+    target_link_libraries(test_pairing_server PRIVATE vip_pairing Threads::Threads)
+    vip_warnings(test_pairing_server)
+    add_test(NAME pairing_server COMMAND test_pairing_server)
 endif()
 
 install(TARGETS visual-iptv RUNTIME DESTINATION bin)
