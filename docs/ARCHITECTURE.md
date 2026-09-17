@@ -2,151 +2,155 @@
 
 [Português (Brasil)](ARCHITECTURE.pt-BR.md)
 
-## Goal
+## Scope
 
-Blazzing is a C17/X11 application divided into small domain modules and an integration layer in `src/ui_x11/x11_app.c`. The UI does not implement the Xtream protocol, SQL, video decoding, or JSON IPC directly; it coordinates the corresponding APIs.
+Blazzing is a C17 desktop application with a native X11 interface. On a Wayland desktop it runs through XWayland; there is no native Wayland rendering backend.
 
-## Internal dependencies
+The feature set is frozen at v1.3.0. This document describes the architecture that is maintained for bug, security and compatibility fixes.
+
+## Module graph
 
 ```mermaid
 graph TD
-    APP[visual-iptv] --> UI[vip_ui_x11]
+    APP[visual-iptv] --> HUB[hub / Pluto app]
+    APP --> UI[vip_ui_x11]
     UI --> CORE[vip_core]
     UI --> PROVIDER[vip_provider]
     UI --> DB[vip_database]
-    UI --> DECODER[vip_decoder]
     UI --> THUMBS[vip_thumbnails]
     UI --> PLAYER[vip_player_mpv]
+    UI --> RENDER[Cairo / Pango renderer]
     PROVIDER --> CORE
     DB --> CORE
-    DECODER --> CORE
     THUMBS --> CORE
-    THUMBS --> DECODER
+    THUMBS --> DECODER[vip_decoder / FFmpeg]
     PLAYER --> CORE
 ```
 
 ### `vip_core`
 
-Shared types, errors, ownership rules, dynamic lists, and credential normalization. `provider_id` identifies an account (`server + username`) so favorites and playback progress from different accounts on the same host do not collide.
+Owns shared status/error types, credentials, common catalog models and dynamic-list ownership rules. A `provider_id` identifies an account rather than only a host so favorites, progress and cached data from different accounts do not collide.
 
 ### `vip_provider`
 
-`src/provider/xtream.c` wraps libcurl/json-c and converts Xtream responses into `vip_category_list_t`, `vip_channel_list_t`, and `vip_media_metadata_t`.
+Contains three source families:
 
-`src/provider/m3u.c` loads a local file or an HTTP(S) playlist, parses `#EXTINF`, groups, and logos, and resolves relative URLs against the playlist origin.
+- **Xtream Codes**: authentication, live/VOD/series catalogs, media metadata and series episodes;
+- **M3U/M3U8**: local or HTTP(S) playlist loading, `#EXTINF` parsing, relative-URL resolution, content classification and inferred series/season grouping;
+- **Pluto TV**: bootstrap/session data, channel catalog and stream URL construction.
+
+The provider layer converts external payloads into the shared core models before the UI sees them.
 
 ### `vip_database`
 
-SQLite stores the cached catalog, non-secret profiles, favorites, thumbnail metadata, per-item progress, aggregated series progress, and rich metadata. Initialization is idempotent and performs migrations compatible with existing databases.
+SQLite stores non-secret profiles, cached catalog data, favorites, thumbnail metadata, playback progress, aggregated series progress and rich media metadata. Initialization and migrations are designed to be idempotent.
 
 ### `vip_decoder`
 
-A small interface for capturing one RGB frame. The current backend launches FFmpeg directly with argv, without invoking a shell. The child process writes RGB data through a pipe, has a timeout, and rejects low-value frames.
+Provides a small RGB-frame capture interface. The current implementation launches FFmpeg directly with argv rather than through a shell, reads raw RGB from a pipe, enforces timeouts and rejects low-value candidate frames.
 
 ### `vip_thumbnails`
 
-Concurrent scheduler backed by a priority heap. A map keyed by `provider_id + item_id` deduplicates jobs; generations invalidate old heap nodes when a job is reprioritized or cancelled. The current UI uses four workers.
+Uses a bounded concurrent scheduler and priority queue. Jobs are deduplicated by provider/item identity and can be reprioritized or invalidated without allowing stale work to overwrite newer state.
 
-JPEG/PNG/WebP artwork is downloaded and decoded directly. FFmpeg frame capture is a fallback. The final result is stored as JPEG in the cache.
-
-### `vip_player_mpv`
-
-Keeps a single mpv process alive with `--idle=yes`. Commands and media are sent through JSON IPC over a Unix socket. A monitor tracks events/properties and publishes a thread-safe snapshot to the UI.
+Provider artwork is decoded directly as JPEG, PNG or WebP. FFmpeg stream-frame capture is a fallback. Successful output is cached on disk as JPEG.
 
 ### `vip_ui_x11`
 
-Responsible for Xlib, screens, input, the catalog grid, details panel, login/series/metadata jobs, Secret Service integration, player integration, and periodic playback-progress persistence.
+Owns the main IPTV window, X11 events, input, catalog layout, search, categories, login/profile screens, metadata/details, series navigation and the player HUD.
+
+Cairo/Pango is used for antialiased surfaces and UTF-8 proportional typography. Xlib still owns windows, events and the backing surfaces.
+
+### `vip_player_mpv`
+
+Keeps one mpv process alive with `--idle=yes`. The XID of the application's `video_win` is passed to mpv through `--wid`; mpv therefore renders directly into that X11 child window.
+
+Media URLs are **not** placed in mpv's argv. After the private Unix JSON IPC socket is connected, playback uses the `loadfile` command. A monitor thread consumes mpv events and observed properties and publishes a thread-safe snapshot.
 
 ## Login and catalog flow
 
 ```mermaid
 sequenceDiagram
     participant UI as X11 UI
-    participant W as login worker
+    participant W as worker
     participant P as provider
     participant DB as SQLite
-    UI->>W: start login
-    W->>P: authenticate / load categories and items
-    P-->>W: common models
-    W->>DB: update cache and profile
-    W-->>UI: signal completion
-    UI->>DB: favorites/progress
-    UI->>UI: rebuild filter and grid
+
+    UI->>W: start login/catalog load
+    W->>P: authenticate / parse source
+    P-->>W: common catalog models
+    W->>DB: update cache and profile state
+    W-->>UI: publish completion
+    UI->>DB: favorites / progress / metadata
+    UI->>UI: rebuild filtered responsive grid
 ```
 
-Network operations do not block the X11 event loop.
+Network access and heavy image work stay outside the X11 event loop.
 
-## Player and X11 composition
+## Series model
 
-mpv is responsible for rendering. Blazzing does not copy video frames.
+Xtream series already arrive as series-level entries. Opening one loads its season/episode information and presents a season-first view.
+
+M3U playlists may expose each episode as an independent entry. The M3U catalog layer recognizes supported episode naming patterns, groups entries by inferred series, creates a series card and then exposes seasons and episodes below it.
+
+## Video composition
 
 ```text
-main window (a->win)
-├── video_win                 InputOutput: visual container
-│   └── native mpv window     created by mpv and reparented
-└── player_input_win          InputOnly: mouse/HUD over video area
+main X11 window (a->win)
+├── video_win          InputOutput child passed to mpv with --wid
+└── player_input_win   InputOnly overlay for Blazzing mouse/HUD input
 ```
 
-Flow:
+Blazzing does not decode or copy normal playback frames into the UI. mpv owns the video pipeline and renders into `video_win`.
 
-1. `vip_mpv_player_create()` stores the XID of `video_win`.
-2. On the first `loadfile`, the backend starts mpv without `--wid`.
-3. The monitor connects to the JSON IPC socket.
-4. The backend searches the X11 tree for a window whose `_NET_WM_PID` matches the mpv PID.
-5. The discovered window is reparented into `video_win`.
-6. The monitor keeps size and position synchronized.
-7. `player_input_win`, an X11 `InputOnly` window, stays above the video area so mouse movement and clicks reach the UI without covering mpv pixels.
-8. The UI restores focus only when focus enters the application's internal player subtree; real application switches are left to the window manager.
+The input overlay lets Blazzing receive pointer interaction over the video area without becoming the video renderer.
 
 ## JSON IPC
 
-The mpv command line does not contain the media URL. The URL is sent after IPC connection through the `loadfile` command.
+The mpv backend uses a private Unix-domain socket. Writes are serialized with a dedicated mutex so commands from different threads cannot interleave.
 
-The backend observes properties including:
+The monitor tracks state including:
 
-- `pause`;
-- `time-pos`;
-- `duration`;
-- `percent-pos`;
-- `paused-for-cache`;
-- `seekable`;
-- `volume`;
-- cache duration;
-- codec, width, and height;
-- VO and hwdec.
+- pause/playback state;
+- position and duration;
+- seekability and buffering;
+- volume;
+- video codec and dimensions;
+- active VO and hardware-decoding state;
+- end-file/error events.
 
-All socket writes pass through a mutex so JSON objects produced by different threads cannot interleave.
+Diagnostic text is sanitized before retained URL-shaped data can reach the in-memory recent log.
 
 ## Concurrency
 
-Current threads:
+The important long-lived execution contexts are:
 
-- main X11 thread;
+- the main X11/UI thread;
 - login/catalog worker;
-- seasons/episodes worker;
+- season/episode worker;
 - metadata worker;
-- 4 thumbnail-scheduler workers;
-- mpv monitor.
+- thumbnail workers;
+- mpv monitor thread.
 
-Important rules:
+Rules:
 
-- Xlib and drawing belong to the main thread.
-- Workers publish results through mutex/atomic-protected state.
-- The mpv backend protects its snapshot with a mutex and serializes IPC writes separately.
-- The thumbnail scheduler may be paused during playback to reduce CPU/network competition.
+- X11 drawing and normal UI state transitions belong to the main thread;
+- background jobs publish results through mutex/atomic-protected state;
+- mpv snapshot state and IPC writes use separate synchronization;
+- thumbnail work is bounded and may be reduced while playback is active.
 
-## Data and IDs
+## Persistence and identifiers
 
-The same `vip_channel_t` model represents live TV, VOD, series, and episodes. The historical name avoids duplicating structures and simplifies favorites, cache, and progress handling.
+The same `vip_channel_t` model represents live channels, movies, series cards and episodes. Persistent keys combine provider/account identity with item IDs so independent sources remain isolated.
 
-Relevant persistent keys combine `provider_id` with the item ID. This keeps accounts and providers isolated even when their internal IDs overlap.
+VOD and episodes store position, duration, completion state and timestamps. Series keep aggregate progress such as latest episode and watched count.
 
-## Playback progress
+## Security and privacy boundaries
 
-VOD items and episodes store position, duration, completion status, and timestamp. The UI writes periodically and forces persistence on important events. An item may be marked complete after natural EOF, approximately 95% playback, or when sufficiently close to the end.
+- Xtream passwords are not persisted in SQLite.
+- Secret Service is used through `secret-tool` when available.
+- mpv receives media URLs over JSON IPC rather than process arguments.
+- retained mpv diagnostics redact URL-shaped spans.
+- FFmpeg is executed directly without a command shell.
 
-Series also maintain an aggregated record with the most recent episode and watched count.
-
-## Failover
-
-Xtream profiles may include an alternate host. When the primary host fails, the UI rebuilds an equivalent URL by replacing only the normalized server prefix while preserving the Xtream path of the current item.
+See [Data and privacy](DATA_AND_PRIVACY.md).
