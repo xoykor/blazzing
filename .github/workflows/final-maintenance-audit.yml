@@ -9,6 +9,9 @@ on:
       - 'include/**'
       - 'tests/**'
       - 'CMakeLists.txt'
+      - 'README*.md'
+      - 'docs/**'
+      - 'flatpak/**'
   workflow_dispatch:
 
 permissions:
@@ -21,9 +24,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies and analyzers
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y             build-essential cmake ninja-build pkg-config             libx11-dev libcurl4-openssl-dev libjson-c-dev libsqlite3-dev             libjpeg-dev libpng-dev libwebp-dev libssl-dev libcairo2-dev libpango1.0-dev             ffmpeg mpv cppcheck clang clang-tools universal-ctags python3
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake ninja-build pkg-config libx11-dev libcurl4-openssl-dev libjson-c-dev libsqlite3-dev libjpeg-dev libpng-dev libwebp-dev libssl-dev libcairo2-dev libpango1.0-dev ffmpeg mpv cppcheck clang clang-tools universal-ctags python3
 
       - name: Normal build and tests
         run: |
@@ -39,387 +40,43 @@ jobs:
 
       - name: Stress repeat stateful and threaded tests
         run: |
-          ctest --test-dir build             -R '^(provider|m3u|database|thumbnails|thumbnail_policy|player_mpv)        continue-on-error: true
-        run: |
-          mkdir -p audit
-          cppcheck             --enable=warning,performance,portability             --std=c11             --force             --inline-suppr             --suppress=missingIncludeSystem             -Iinclude             src include tests             2> audit/cppcheck.txt
-          cat audit/cppcheck.txt
-
-      - name: GCC static analyzer
-        continue-on-error: true
-        run: |
-          cmake -S . -B build-gcc-analyzer -G Ninja             -DCMAKE_BUILD_TYPE=Debug             -DCMAKE_C_FLAGS="-fanalyzer -Wall -Wextra -Wpedantic"
-          cmake --build build-gcc-analyzer 2>&1 | tee audit/gcc-analyzer.txt
-
-      - name: Clang static analyzer
-        continue-on-error: true
-        run: |
-          cmake -S . -B build-clang -G Ninja             -DCMAKE_BUILD_TYPE=Debug             -DCMAKE_C_COMPILER=clang
-          scan-build --status-bugs --keep-going             -o audit/scan-build             cmake --build build-clang 2>&1 | tee audit/clang-analyzer.txt
-
-      - name: Comment coverage report
-        run: |
-          python3 - <<'PY' | tee audit/comment-coverage.txt
-          from pathlib import Path
-          import re
-
-          files = sorted(list(Path("src").rglob("*.c")) + list(Path("include").rglob("*.h")))
-          total_code = total_comment = total_functions = documented_functions = 0
-
-          fn_re = re.compile(
-              r"^\s*(?:static\s+)?(?:const\s+)?(?:unsigned\s+|signed\s+)?"
-              r"(?:void|bool|char|int|long|size_t|double|float|vip_[A-Za-z0-9_]+(?:\s*\*)?|"
-              r"[A-Za-z_][A-Za-z0-9_]*\s*\*)\s+"
-              r"[A-Za-z_][A-Za-z0-9_]*\s*\([^;]*\)\s*\{"
-          )
-
-          print("file\tcode_lines\tcomment_lines\tcomment_pct\tfunctions\tdocumented_functions")
-          for path in files:
-              lines = path.read_text(errors="replace").splitlines()
-              code = 0
-              comments = 0
-              in_block = False
-              functions = 0
-              documented = 0
-
-              for i, line in enumerate(lines):
-                  stripped = line.strip()
-                  if in_block:
-                      comments += 1
-                      if "*/" in stripped:
-                          in_block = False
-                      continue
-                  if stripped.startswith("/*"):
-                      comments += 1
-                      if "*/" not in stripped:
-                          in_block = True
-                      continue
-                  if stripped.startswith("//"):
-                      comments += 1
-                      continue
-                  if stripped:
-                      code += 1
-
-                  if fn_re.match(line):
-                      functions += 1
-                      j = i - 1
-                      while j >= 0 and not lines[j].strip():
-                          j -= 1
-                      if j >= 0:
-                          prev = lines[j].strip()
-                          if prev.startswith("//") or prev.endswith("*/") or prev.startswith("/*"):
-                              documented += 1
-
-              total_code += code
-              total_comment += comments
-              total_functions += functions
-              documented_functions += documented
-              pct = (comments / max(1, code + comments)) * 100
-              print(f"{path}\t{code}\t{comments}\t{pct:.1f}%\t{functions}\t{documented}")
-
-          print()
-          print(f"TOTAL code_lines={total_code}")
-          print(f"TOTAL comment_lines={total_comment}")
-          print(f"TOTAL functions={total_functions}")
-          print(f"TOTAL documented_functions={documented_functions}")
-          PY
-
-      - name: Documentation and comment quality audit
-        run: |
-          {
-            echo "== stale architecture wording =="
-            grep -RInE 'does not use .--wid|não usa .--wid|current player architecture is native X11 reparenting|created by mpv and reparented|criada pelo mpv e reparentada|_NET_WM_PID.*mpv PID|_NET_WM_PID.*PID do mpv' README*.md docs flatpak include src || true
-            echo
-            echo "== leftover tautological generated comments =="
-            grep -RInE '/\\* Implement the .* helper\\. \\*/' include src tests || true
-            echo
-            echo "== awkward boolean comments =="
-            grep -RInE '/\\* Return whether [a-z0-9_ ]+\\. \\*/' include src tests || true
-          } | tee audit/documentation-quality.txt
-
-          if grep -RInE 'does not use .--wid|não usa .--wid|current player architecture is native X11 reparenting|created by mpv and reparented|criada pelo mpv e reparentada|_NET_WM_PID.*mpv PID|_NET_WM_PID.*PID do mpv' README*.md docs flatpak include src; then
-            echo "Stale reparenting documentation remains."
-            exit 1
-          fi
-
-          if grep -RInE '/\\* Implement the .* helper\\. \\*/' include src tests; then
-            echo "Tautological generated comments remain."
-            exit 1
-          fi
-
-      - name: Function comment coverage with ctags
-        run: |
-          python3 - <<'PY' | tee audit/function-comment-coverage.txt
-          from pathlib import Path
-          import json
-          import subprocess
-
-          files = sorted(
-              list(Path("src").rglob("*.c"))
-              + list(Path("src").rglob("*.h"))
-              + list(Path("include").rglob("*.h"))
-              + list(Path("tests").rglob("*.c"))
-              + list(Path("tests").rglob("*.h"))
-          )
-          proc = subprocess.run(
-              ["ctags", "--output-format=json", "--fields=+nK", "--kinds-C=fp", "-o", "-"]
-              + [str(p) for p in files],
-              check=True, text=True, capture_output=True
-          )
-
-          tags = []
-          for line in proc.stdout.splitlines():
-              item = json.loads(line)
-              if item.get("_type") == "tag" and item.get("kind") in ("function", "prototype"):
-                  tags.append((Path(item["path"]), int(item["line"]), item["name"]))
-
-          documented = 0
-          missing = []
-          for path, line_no, name in tags:
-              lines = path.read_text(errors="replace").splitlines()
-              i = line_no - 2
-              while i >= 0 and not lines[i].strip():
-                  i -= 1
-              ok = False
-              if i >= 0:
-                  prev = lines[i].strip()
-                  ok = prev.startswith("//") or prev.endswith("*/") or prev.startswith("/*") or prev.startswith("*")
-              if ok:
-                  documented += 1
-              else:
-                  missing.append(f"{path}:{line_no}: {name}")
-
-          print(f"functions_and_prototypes={len(tags)}")
-          print(f"documented={documented}")
-          print(f"coverage={(100.0 * documented / len(tags)) if tags else 100.0:.1f}%")
-          if missing:
-              print("missing:")
-              print("\n".join(missing))
-
-          if missing:
-              raise SystemExit(1)
-          PY
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: final-maintenance-audit
-          path: audit/
-          if-no-files-found: error
-             --repeat until-fail:25             --output-on-failure
-
-          ctest --test-dir build-san             -R '^(database|thumbnails|thumbnail_policy|player_mpv)        continue-on-error: true
-        run: |
-          mkdir -p audit
-          cppcheck             --enable=warning,performance,portability             --std=c11             --force             --inline-suppr             --suppress=missingIncludeSystem             -Iinclude             src include tests             2> audit/cppcheck.txt
-          cat audit/cppcheck.txt
-
-      - name: GCC static analyzer
-        continue-on-error: true
-        run: |
-          cmake -S . -B build-gcc-analyzer -G Ninja             -DCMAKE_BUILD_TYPE=Debug             -DCMAKE_C_FLAGS="-fanalyzer -Wall -Wextra -Wpedantic"
-          cmake --build build-gcc-analyzer 2>&1 | tee audit/gcc-analyzer.txt
-
-      - name: Clang static analyzer
-        continue-on-error: true
-        run: |
-          cmake -S . -B build-clang -G Ninja             -DCMAKE_BUILD_TYPE=Debug             -DCMAKE_C_COMPILER=clang
-          scan-build --status-bugs --keep-going             -o audit/scan-build             cmake --build build-clang 2>&1 | tee audit/clang-analyzer.txt
-
-      - name: Comment coverage report
-        run: |
-          python3 - <<'PY' | tee audit/comment-coverage.txt
-          from pathlib import Path
-          import re
-
-          files = sorted(list(Path("src").rglob("*.c")) + list(Path("include").rglob("*.h")))
-          total_code = total_comment = total_functions = documented_functions = 0
-
-          fn_re = re.compile(
-              r"^\s*(?:static\s+)?(?:const\s+)?(?:unsigned\s+|signed\s+)?"
-              r"(?:void|bool|char|int|long|size_t|double|float|vip_[A-Za-z0-9_]+(?:\s*\*)?|"
-              r"[A-Za-z_][A-Za-z0-9_]*\s*\*)\s+"
-              r"[A-Za-z_][A-Za-z0-9_]*\s*\([^;]*\)\s*\{"
-          )
-
-          print("file\tcode_lines\tcomment_lines\tcomment_pct\tfunctions\tdocumented_functions")
-          for path in files:
-              lines = path.read_text(errors="replace").splitlines()
-              code = 0
-              comments = 0
-              in_block = False
-              functions = 0
-              documented = 0
-
-              for i, line in enumerate(lines):
-                  stripped = line.strip()
-                  if in_block:
-                      comments += 1
-                      if "*/" in stripped:
-                          in_block = False
-                      continue
-                  if stripped.startswith("/*"):
-                      comments += 1
-                      if "*/" not in stripped:
-                          in_block = True
-                      continue
-                  if stripped.startswith("//"):
-                      comments += 1
-                      continue
-                  if stripped:
-                      code += 1
-
-                  if fn_re.match(line):
-                      functions += 1
-                      j = i - 1
-                      while j >= 0 and not lines[j].strip():
-                          j -= 1
-                      if j >= 0:
-                          prev = lines[j].strip()
-                          if prev.startswith("//") or prev.endswith("*/") or prev.startswith("/*"):
-                              documented += 1
-
-              total_code += code
-              total_comment += comments
-              total_functions += functions
-              documented_functions += documented
-              pct = (comments / max(1, code + comments)) * 100
-              print(f"{path}\t{code}\t{comments}\t{pct:.1f}%\t{functions}\t{documented}")
-
-          print()
-          print(f"TOTAL code_lines={total_code}")
-          print(f"TOTAL comment_lines={total_comment}")
-          print(f"TOTAL functions={total_functions}")
-          print(f"TOTAL documented_functions={documented_functions}")
-          PY
-
-      - name: Documentation and comment quality audit
-        run: |
-          {
-            echo "== stale architecture wording =="
-            grep -RInE 'does not use .--wid|não usa .--wid|current player architecture is native X11 reparenting|created by mpv and reparented|criada pelo mpv e reparentada|_NET_WM_PID.*mpv PID|_NET_WM_PID.*PID do mpv' README*.md docs flatpak include src || true
-            echo
-            echo "== leftover tautological generated comments =="
-            grep -RInE '/\\* Implement the .* helper\\. \\*/' include src tests || true
-            echo
-            echo "== awkward boolean comments =="
-            grep -RInE '/\\* Return whether [a-z0-9_ ]+\\. \\*/' include src tests || true
-          } | tee audit/documentation-quality.txt
-
-          if grep -RInE 'does not use .--wid|não usa .--wid|current player architecture is native X11 reparenting|created by mpv and reparented|criada pelo mpv e reparentada|_NET_WM_PID.*mpv PID|_NET_WM_PID.*PID do mpv' README*.md docs flatpak include src; then
-            echo "Stale reparenting documentation remains."
-            exit 1
-          fi
-
-          if grep -RInE '/\\* Implement the .* helper\\. \\*/' include src tests; then
-            echo "Tautological generated comments remain."
-            exit 1
-          fi
-
-      - name: Function comment coverage with ctags
-        run: |
-          python3 - <<'PY' | tee audit/function-comment-coverage.txt
-          from pathlib import Path
-          import json
-          import subprocess
-
-          files = sorted(
-              list(Path("src").rglob("*.c"))
-              + list(Path("src").rglob("*.h"))
-              + list(Path("include").rglob("*.h"))
-              + list(Path("tests").rglob("*.c"))
-              + list(Path("tests").rglob("*.h"))
-          )
-          proc = subprocess.run(
-              ["ctags", "--output-format=json", "--fields=+nK", "--kinds-C=fp", "-o", "-"]
-              + [str(p) for p in files],
-              check=True, text=True, capture_output=True
-          )
-
-          tags = []
-          for line in proc.stdout.splitlines():
-              item = json.loads(line)
-              if item.get("_type") == "tag" and item.get("kind") in ("function", "prototype"):
-                  tags.append((Path(item["path"]), int(item["line"]), item["name"]))
-
-          documented = 0
-          missing = []
-          for path, line_no, name in tags:
-              lines = path.read_text(errors="replace").splitlines()
-              i = line_no - 2
-              while i >= 0 and not lines[i].strip():
-                  i -= 1
-              ok = False
-              if i >= 0:
-                  prev = lines[i].strip()
-                  ok = prev.startswith("//") or prev.endswith("*/") or prev.startswith("/*") or prev.startswith("*")
-              if ok:
-                  documented += 1
-              else:
-                  missing.append(f"{path}:{line_no}: {name}")
-
-          print(f"functions_and_prototypes={len(tags)}")
-          print(f"documented={documented}")
-          print(f"coverage={(100.0 * documented / len(tags)) if tags else 100.0:.1f}%")
-          if missing:
-              print("missing:")
-              print("\n".join(missing))
-
-          if missing:
-              raise SystemExit(1)
-          PY
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: final-maintenance-audit
-          path: audit/
-          if-no-files-found: error
-             --repeat until-fail:10             --output-on-failure
+          ctest --test-dir build -R '^(provider|m3u|database|thumbnails|thumbnail_policy|player_mpv)$' --repeat until-fail:25 --output-on-failure
+          ctest --test-dir build-san -R '^(database|thumbnails|thumbnail_policy|player_mpv)$' --repeat until-fail:10 --output-on-failure
 
       - name: Cppcheck
-        continue-on-error: true
         run: |
           mkdir -p audit
-          cppcheck             --enable=warning,performance,portability             --std=c11             --force             --inline-suppr             --suppress=missingIncludeSystem             -Iinclude             src include tests             2> audit/cppcheck.txt
+          cppcheck --enable=warning,performance,portability --std=c11 --force --inline-suppr --suppress=missingIncludeSystem --error-exitcode=1 -Iinclude src include tests 2> audit/cppcheck.txt
           cat audit/cppcheck.txt
 
       - name: GCC static analyzer
-        continue-on-error: true
         run: |
-          cmake -S . -B build-gcc-analyzer -G Ninja             -DCMAKE_BUILD_TYPE=Debug             -DCMAKE_C_FLAGS="-fanalyzer -Wall -Wextra -Wpedantic"
+          cmake -S . -B build-gcc-analyzer -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAGS="-fanalyzer -Wall -Wextra -Wpedantic"
           cmake --build build-gcc-analyzer 2>&1 | tee audit/gcc-analyzer.txt
+          if grep -E 'warning:.*(analyzer|discarded-qualifiers|misleading-indentation)' audit/gcc-analyzer.txt; then
+            echo "GCC analyzer warning remains."
+            exit 1
+          fi
 
       - name: Clang static analyzer
-        continue-on-error: true
         run: |
-          cmake -S . -B build-clang -G Ninja             -DCMAKE_BUILD_TYPE=Debug             -DCMAKE_C_COMPILER=clang
-          scan-build --status-bugs --keep-going             -o audit/scan-build             cmake --build build-clang 2>&1 | tee audit/clang-analyzer.txt
+          cmake -S . -B build-clang -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=clang
+          scan-build --status-bugs --keep-going -o audit/scan-build cmake --build build-clang 2>&1 | tee audit/clang-analyzer.txt
 
-      - name: Comment coverage report
+      - name: Source comment line report
         run: |
           python3 - <<'PY' | tee audit/comment-coverage.txt
           from pathlib import Path
-          import re
 
           files = sorted(list(Path("src").rglob("*.c")) + list(Path("include").rglob("*.h")))
-          total_code = total_comment = total_functions = documented_functions = 0
+          total_code = total_comment = 0
 
-          fn_re = re.compile(
-              r"^\s*(?:static\s+)?(?:const\s+)?(?:unsigned\s+|signed\s+)?"
-              r"(?:void|bool|char|int|long|size_t|double|float|vip_[A-Za-z0-9_]+(?:\s*\*)?|"
-              r"[A-Za-z_][A-Za-z0-9_]*\s*\*)\s+"
-              r"[A-Za-z_][A-Za-z0-9_]*\s*\([^;]*\)\s*\{"
-          )
-
-          print("file\tcode_lines\tcomment_lines\tcomment_pct\tfunctions\tdocumented_functions")
+          print("file\tcode_lines\tcomment_lines\tcomment_pct")
           for path in files:
               lines = path.read_text(errors="replace").splitlines()
-              code = 0
-              comments = 0
+              code = comments = 0
               in_block = False
-              functions = 0
-              documented = 0
-
-              for i, line in enumerate(lines):
+              for line in lines:
                   stripped = line.strip()
                   if in_block:
                       comments += 1
@@ -436,55 +93,35 @@ jobs:
                       continue
                   if stripped:
                       code += 1
-
-                  if fn_re.match(line):
-                      functions += 1
-                      j = i - 1
-                      while j >= 0 and not lines[j].strip():
-                          j -= 1
-                      if j >= 0:
-                          prev = lines[j].strip()
-                          if prev.startswith("//") or prev.endswith("*/") or prev.startswith("/*"):
-                              documented += 1
-
               total_code += code
               total_comment += comments
-              total_functions += functions
-              documented_functions += documented
-              pct = (comments / max(1, code + comments)) * 100
-              print(f"{path}\t{code}\t{comments}\t{pct:.1f}%\t{functions}\t{documented}")
+              pct = comments / max(1, code + comments) * 100.0
+              print(f"{path}\t{code}\t{comments}\t{pct:.1f}%")
 
-          print()
           print(f"TOTAL code_lines={total_code}")
           print(f"TOTAL comment_lines={total_comment}")
-          print(f"TOTAL functions={total_functions}")
-          print(f"TOTAL documented_functions={documented_functions}")
           PY
 
-      - name: Documentation and comment quality audit
+      - name: Documentation and generated-comment quality
         run: |
           {
             echo "== stale architecture wording =="
             grep -RInE 'does not use .--wid|não usa .--wid|current player architecture is native X11 reparenting|created by mpv and reparented|criada pelo mpv e reparentada|_NET_WM_PID.*mpv PID|_NET_WM_PID.*PID do mpv' README*.md docs flatpak include src || true
             echo
             echo "== leftover tautological generated comments =="
-            grep -RInE '/\\* Implement the .* helper\\. \\*/' include src tests || true
-            echo
-            echo "== awkward boolean comments =="
-            grep -RInE '/\\* Return whether [a-z0-9_ ]+\\. \\*/' include src tests || true
+            grep -RInE '/\* Implement the .* helper\. \*/' include src tests || true
           } | tee audit/documentation-quality.txt
 
           if grep -RInE 'does not use .--wid|não usa .--wid|current player architecture is native X11 reparenting|created by mpv and reparented|criada pelo mpv e reparentada|_NET_WM_PID.*mpv PID|_NET_WM_PID.*PID do mpv' README*.md docs flatpak include src; then
-            echo "Stale reparenting documentation remains."
+            echo "Stale architecture wording remains."
             exit 1
           fi
-
-          if grep -RInE '/\\* Implement the .* helper\\. \\*/' include src tests; then
+          if grep -RInE '/\* Implement the .* helper\. \*/' include src tests; then
             echo "Tautological generated comments remain."
             exit 1
           fi
 
-      - name: Function comment coverage with ctags
+      - name: Function and prototype comment coverage
         run: |
           python3 - <<'PY' | tee audit/function-comment-coverage.txt
           from pathlib import Path
@@ -503,7 +140,6 @@ jobs:
               + [str(p) for p in files],
               check=True, text=True, capture_output=True
           )
-
           tags = []
           for line in proc.stdout.splitlines():
               item = json.loads(line)
@@ -532,8 +168,6 @@ jobs:
           if missing:
               print("missing:")
               print("\n".join(missing))
-
-          if missing:
               raise SystemExit(1)
           PY
 
