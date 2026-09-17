@@ -1,0 +1,45 @@
+name: Revamp visual capture
+
+on:
+  push:
+    branches: [revamp-v1.3.0]
+    paths:
+      - .github/workflows/revamp-visual-capture.yml
+
+permissions:
+  contents: read
+
+jobs:
+  capture-login:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build pkg-config \
+            libx11-dev libcurl4-openssl-dev libjson-c-dev libsqlite3-dev \
+            libjpeg-dev libpng-dev libwebp-dev libssl-dev libcairo2-dev libpango1.0-dev \
+            ffmpeg mpv xvfb xauth imagemagick
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+      - name: Capture login UI
+        run: |
+          mkdir -p visual-artifacts
+          xvfb-run -a -s '-screen 0 1600x900x24' bash -lc '
+            ./build/visual-iptv >visual-artifacts/ui.log 2>&1 &
+            pid=$!
+            sleep 3
+            import -window root visual-artifacts/login.png
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+          '
+          file visual-artifacts/login.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: revamp-login-capture
+          path: visual-artifacts/
+          if-no-files-found: error
