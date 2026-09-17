@@ -171,6 +171,15 @@ struct app {
     screen_t screen;
     bool quit;
     bool fullscreen;
+    bool fullscreen_requested;
+    bool fullscreen_fallback;
+    int fullscreen_attempts;
+    int64_t fullscreen_retry_at_ms;
+    bool windowed_geometry_valid;
+    int windowed_x;
+    int windowed_y;
+    int windowed_w;
+    int windowed_h;
     bool mouse_down;
 
     login_mode_t login_mode;
@@ -2105,16 +2114,148 @@ static void timeline_geometry(app_t *a, int *x, int *y, int *w, int *h) {
     *h = 14;
 }
 
-static void set_fullscreen(app_t *a, bool enable) {
+typedef struct {
+    unsigned long flags;
+    unsigned long functions;
+    unsigned long decorations;
+    long input_mode;
+    unsigned long status;
+} motif_wm_hints_t;
+
+#define MWM_HINTS_DECORATIONS (1UL << 1)
+
+static bool wm_reports_fullscreen(app_t *a) {
+    if (!a || !a->dpy || !a->win) return false;
     Atom wm_state = XInternAtom(a->dpy, "_NET_WM_STATE", False);
     Atom fs = XInternAtom(a->dpy, "_NET_WM_STATE_FULLSCREEN", False);
-    XEvent e; memset(&e, 0, sizeof(e));
-    e.xclient.type = ClientMessage; e.xclient.window = a->win; e.xclient.message_type = wm_state;
-    e.xclient.format = 32; e.xclient.data.l[0] = enable ? 1 : 0; e.xclient.data.l[1] = (long)fs;
-    XSendEvent(a->dpy, DefaultRootWindow(a->dpy), False, SubstructureRedirectMask | SubstructureNotifyMask, &e);
-    XFlush(a->dpy);
-    a->fullscreen = enable;
+    Atom actual_type = None;
+    int actual_format = 0;
+    unsigned long nitems = 0, bytes_after = 0;
+    unsigned char *data = NULL;
+    bool found = false;
+    if (XGetWindowProperty(a->dpy, a->win, wm_state, 0, 64, False, XA_ATOM,
+                           &actual_type, &actual_format, &nitems, &bytes_after,
+                           &data) == Success && data && actual_format == 32) {
+        Atom *atoms = (Atom *)data;
+        for (unsigned long i = 0; i < nitems; ++i) {
+            if (atoms[i] == fs) { found = true; break; }
+        }
+    }
+    if (data) XFree(data);
+    return found;
 }
+
+static void set_window_decorations(app_t *a, bool enabled) {
+    if (!a || !a->dpy || !a->win) return;
+    Atom motif = XInternAtom(a->dpy, "_MOTIF_WM_HINTS", False);
+    motif_wm_hints_t hints = {0};
+    hints.flags = MWM_HINTS_DECORATIONS;
+    hints.decorations = enabled ? 1UL : 0UL;
+    XChangeProperty(a->dpy, a->win, motif, motif, 32, PropModeReplace,
+                    (unsigned char *)&hints, 5);
+}
+
+static void remember_windowed_geometry(app_t *a) {
+    if (!a || !a->dpy || !a->win || a->windowed_geometry_valid) return;
+    XWindowAttributes wa;
+    if (!XGetWindowAttributes(a->dpy, a->win, &wa)) return;
+    Window child = None;
+    int root_x = 0, root_y = 0;
+    if (!XTranslateCoordinates(a->dpy, a->win, RootWindow(a->dpy, a->screen_num),
+                               0, 0, &root_x, &root_y, &child)) {
+        root_x = wa.x;
+        root_y = wa.y;
+    }
+    a->windowed_x = root_x;
+    a->windowed_y = root_y;
+    a->windowed_w = wa.width;
+    a->windowed_h = wa.height;
+    a->windowed_geometry_valid = wa.width > 0 && wa.height > 0;
+}
+
+static void send_fullscreen_request(app_t *a, bool enable) {
+    if (!a || !a->dpy || !a->win) return;
+    Atom wm_state = XInternAtom(a->dpy, "_NET_WM_STATE", False);
+    Atom fs = XInternAtom(a->dpy, "_NET_WM_STATE_FULLSCREEN", False);
+    XEvent e;
+    memset(&e, 0, sizeof(e));
+    e.xclient.type = ClientMessage;
+    e.xclient.window = a->win;
+    e.xclient.message_type = wm_state;
+    e.xclient.format = 32;
+    e.xclient.data.l[0] = enable ? 1 : 0; /* _NET_WM_STATE_ADD / REMOVE */
+    e.xclient.data.l[1] = (long)fs;
+    e.xclient.data.l[2] = 0;
+    e.xclient.data.l[3] = 1; /* normal application, per EWMH source indication */
+    e.xclient.data.l[4] = 0;
+    XSendEvent(a->dpy, RootWindow(a->dpy, a->screen_num), False,
+               SubstructureRedirectMask | SubstructureNotifyMask, &e);
+    XRaiseWindow(a->dpy, a->win);
+    XFlush(a->dpy);
+}
+
+static void apply_borderless_fullscreen(app_t *a) {
+    if (!a || !a->dpy || !a->win) return;
+    set_window_decorations(a, false);
+    int sw = DisplayWidth(a->dpy, a->screen_num);
+    int sh = DisplayHeight(a->dpy, a->screen_num);
+    if (sw < 1) sw = a->width;
+    if (sh < 1) sh = a->height;
+    XMoveResizeWindow(a->dpy, a->win, 0, 0, (unsigned)sw, (unsigned)sh);
+    XRaiseWindow(a->dpy, a->win);
+    XSync(a->dpy, False);
+    a->fullscreen_fallback = true;
+    a->fullscreen = true;
+    layout_video_window(a);
+}
+
+static void set_fullscreen(app_t *a, bool enable) {
+    if (!a || !a->dpy || !a->win) return;
+    a->fullscreen_requested = enable;
+    a->fullscreen_attempts = 0;
+    a->fullscreen_retry_at_ms = 0;
+    if (enable) {
+        remember_windowed_geometry(a);
+        a->fullscreen_fallback = false;
+        send_fullscreen_request(a, true);
+        ++a->fullscreen_attempts;
+        XSync(a->dpy, False);
+        a->fullscreen = wm_reports_fullscreen(a);
+        a->fullscreen_retry_at_ms = monotonic_ms() + 140;
+    } else {
+        send_fullscreen_request(a, false);
+        a->fullscreen_fallback = false;
+        a->fullscreen = false;
+        set_window_decorations(a, true);
+        XSync(a->dpy, False);
+        if (a->windowed_geometry_valid) {
+            XMoveResizeWindow(a->dpy, a->win,
+                              a->windowed_x, a->windowed_y,
+                              (unsigned)a->windowed_w, (unsigned)a->windowed_h);
+        }
+        XFlush(a->dpy);
+        a->windowed_geometry_valid = false;
+    }
+}
+
+static void maybe_enforce_fullscreen(app_t *a) {
+    if (!a || !a->fullscreen_requested || a->fullscreen ||
+        monotonic_ms() < a->fullscreen_retry_at_ms) return;
+    if (wm_reports_fullscreen(a)) {
+        a->fullscreen = true;
+        layout_video_window(a);
+        return;
+    }
+    if (a->fullscreen_attempts < 4) {
+        send_fullscreen_request(a, true);
+        ++a->fullscreen_attempts;
+        a->fullscreen_retry_at_ms = monotonic_ms() + 160;
+        return;
+    }
+    fprintf(stderr, "[player] window manager não confirmou fullscreen; usando fallback sem bordas\n");
+    apply_borderless_fullscreen(a);
+}
+
 
 /* Enter playback without destroying the mpv process: loadfile is sent over
  * IPC and optional resume position is applied after the file is loaded. */
@@ -2124,7 +2265,7 @@ static void enter_player(app_t *a, size_t channel_index) {
     a->current_channel = channel_index;
     a->player_item_live = a->content_kind == CONTENT_LIVE && !a->series_episode_mode;
     a->screen = SCREEN_PLAYER;
-    if (!a->fullscreen) set_fullscreen(a, true);
+    if (!a->fullscreen_requested) set_fullscreen(a, true);
     snprintf(a->player_status, sizeof(a->player_status), "Abrindo stream...");
     a->player_open_ms = monotonic_ms();
     a->player_last_progress_save_ms = a->player_open_ms;
@@ -2167,7 +2308,7 @@ static void leave_player(app_t *a) {
     if (a->player) vip_mpv_player_stop(a->player);
     set_video_visible(a, false);
     if (a->thumbs) vip_thumbnail_scheduler_set_paused(a->thumbs, false);
-    if (a->fullscreen) set_fullscreen(a, false);
+    if (a->fullscreen_requested || a->fullscreen) set_fullscreen(a, false);
     a->screen = SCREEN_BROWSE;
     a->input_focus = INPUT_SEARCH;
     a->timeline_dragging = false;
@@ -2960,7 +3101,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
     bool printable = n > 0 && !ctrl && (unsigned char)buf[0] >= 0x20u;
 
     if (sym == XK_F11) {
-        set_fullscreen(a, !a->fullscreen);
+        set_fullscreen(a, !a->fullscreen_requested);
         show_player_hud(a);
         return;
     }
@@ -3100,6 +3241,14 @@ static void process_event(app_t *a, XEvent *e) {
             }
             break;
         case ClientMessage: if((Atom)e->xclient.data.l[0]==a->wm_delete)a->quit=true;break;
+        case PropertyNotify:
+            if (e->xproperty.window == a->win &&
+                e->xproperty.atom == XInternAtom(a->dpy, "_NET_WM_STATE", False)) {
+                bool actual = wm_reports_fullscreen(a);
+                if (actual || !a->fullscreen_fallback) a->fullscreen = actual || a->fullscreen_fallback;
+                if (a->fullscreen) layout_video_window(a);
+            }
+            break;
         case MotionNotify:
             if(a->screen==SCREEN_PLAYER){
                 show_player_hud(a);
@@ -3154,7 +3303,7 @@ static bool init_x11(app_t *a, vip_error_t *error) {
                                  (unsigned)a->width,(unsigned)a->height,0,
                                  BlackPixel(a->dpy,a->screen_num),BlackPixel(a->dpy,a->screen_num));
     XStoreName(a->dpy,a->win,APP_TITLE);
-    XSelectInput(a->dpy,a->win,ExposureMask|KeyPressMask|ButtonPressMask|ButtonReleaseMask|PointerMotionMask|StructureNotifyMask|FocusChangeMask);
+    XSelectInput(a->dpy,a->win,ExposureMask|KeyPressMask|ButtonPressMask|ButtonReleaseMask|PointerMotionMask|StructureNotifyMask|FocusChangeMask|PropertyChangeMask);
     a->wm_delete=XInternAtom(a->dpy,"WM_DELETE_WINDOW",False);
     XSetWMProtocols(a->dpy,a->win,&a->wm_delete,1);
     a->clipboard=XInternAtom(a->dpy,"CLIPBOARD",False);
@@ -3339,6 +3488,7 @@ int vip_x11_app_run(void) {
         maybe_start_details_load(&a);
         prefetch_thumbnail_batch(&a);
         maybe_failover_player(&a);
+        maybe_enforce_fullscreen(&a);
         sync_video_window(&a);
         int64_t now=monotonic_ms();
         if (a.screen==SCREEN_PLAYER) save_current_progress(&a,false);
