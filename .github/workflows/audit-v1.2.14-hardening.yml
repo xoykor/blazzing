@@ -7,6 +7,7 @@ on:
     paths:
       - .github/scripts/apply_audit_hardening.py
       - .github/scripts/fix_audit_hardening_order.py
+      - .github/scripts/fix_audit_hardening_regressions.py
       - .github/workflows/audit-v1.2.14-hardening.yml
 
 permissions:
@@ -25,6 +26,7 @@ jobs:
         run: |
           python3 .github/scripts/apply_audit_hardening.py
           python3 .github/scripts/fix_audit_hardening_order.py
+          python3 .github/scripts/fix_audit_hardening_regressions.py
 
       - name: Install dependencies
         run: |
