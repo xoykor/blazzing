@@ -419,9 +419,13 @@ static void init_paths(app_t *a) {
         data_base = data_fallback;
     }
 
-    snprintf(a->cache_dir, sizeof(a->cache_dir), "%s/visual-iptv-x11/thumbnails", cache_base);
+    int cache_n = snprintf(a->cache_dir, sizeof(a->cache_dir), "%s/visual-iptv-x11/thumbnails", cache_base);
     char data_dir[1024];
-    snprintf(data_dir, sizeof(data_dir), "%s/visual-iptv-x11", data_base);
+    int data_n = snprintf(data_dir, sizeof(data_dir), "%s/visual-iptv-x11", data_base);
+    if (cache_n < 0 || (size_t)cache_n >= sizeof(a->cache_dir))
+        snprintf(a->cache_dir, sizeof(a->cache_dir), "/tmp/visual-iptv-x11-%ld/thumbnails", (long)getuid());
+    if (data_n < 0 || (size_t)data_n >= sizeof(data_dir))
+        snprintf(data_dir, sizeof(data_dir), "/tmp/visual-iptv-x11-%ld", (long)getuid());
     if (mkdir_parents(a->cache_dir) != 0)
         fprintf(stderr, "[paths] não foi possível criar cache: %s\n", a->cache_dir);
     if (mkdir_parents(data_dir) != 0)
@@ -745,16 +749,10 @@ static void load_media_state(app_t *a) {
                                          &ACTIVE_CHANNELS(a), a->progress_flags, count, &error);
     }
     if (a->series_watched && a->series_total) {
-        for (size_t i = 0; i < count; ++i) {
-            vip_series_progress_t sp = {0};
-            vip_error_clear(&error);
-            if (vip_database_get_series_progress(a->db, ACTIVE_CHANNELS(a).items[i].provider_id,
-                                                 ACTIVE_CHANNELS(a).items[i].id, &sp, &error) == VIP_OK) {
-                a->series_watched[i] = sp.watched_count;
-                a->series_total[i] = sp.total_count;
-            }
-            vip_series_progress_clear(&sp);
-        }
+        vip_error_clear(&error);
+        (void)vip_database_load_series_progress(a->db, ACTIVE_CHANNELS(a).items[0].provider_id,
+                                                &ACTIVE_CHANNELS(a), a->series_watched,
+                                                a->series_total, count, &error);
     }
 }
 
@@ -804,7 +802,7 @@ static const char *all_content_label(app_t *a) {
 
 static void switch_content(app_t *a, content_kind_t kind) {
     if (!a || kind < CONTENT_LIVE || kind > CONTENT_SERIES) return;
-    if (atomic_load(&a->series_running)) return;
+    if (atomic_load(&a->series_running) || a->series_thread_started) return;
     a->series_episode_mode = false;
     clear_details_view(a);
     a->content_kind = kind;
@@ -1221,6 +1219,7 @@ static void start_login(app_t *a) {
     atomic_store(&a->login_running, true);
     if (pthread_create(&a->login_thread, NULL, login_worker, job) != 0) {
         atomic_store(&a->login_running, false);
+        if (job->password) { volatile char *wipe = job->password; size_t n = strlen(job->password); while (n-- > 0u) *wipe++ = 0; }
         free(job->server); free(job->server_alt); free(job->username); free(job->password); free(job->profile_name); free(job);
         snprintf(a->status, sizeof(a->status), "Falha ao iniciar conexão");
         return;
@@ -1302,6 +1301,7 @@ static void start_series_load(app_t *a, size_t channel_index) {
     atomic_store(&a->series_running, true);
     if (pthread_create(&a->series_thread, NULL, series_worker, job) != 0) {
         atomic_store(&a->series_running, false);
+        if (job->password) { volatile char *wipe = job->password; size_t n = strlen(job->password); while (n-- > 0u) *wipe++ = 0; }
         free(job->server); free(job->username); free(job->password); free(job->series_id); free(job->title); free(job);
         return;
     }

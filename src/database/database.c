@@ -617,6 +617,45 @@ vip_status_t vip_database_set_series_progress(vip_database_t *db,
     return VIP_OK;
 }
 
+vip_status_t vip_database_load_series_progress(vip_database_t *db,
+                                               const char *provider_id,
+                                               const vip_channel_list_t *series,
+                                               int *watched,
+                                               int *total,
+                                               size_t len,
+                                               vip_error_t *error) {
+    if (!db || !provider_id || !series || !watched || !total || len < series->len)
+        return VIP_ERR_INVALID_ARGUMENT;
+    memset(watched, 0, len * sizeof(*watched));
+    memset(total, 0, len * sizeof(*total));
+    pthread_mutex_lock(&db->mutex);
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db->conn,
+            "SELECT series_id,watched_count,total_count FROM series_progress WHERE provider_id=?1",
+            -1, &stmt, NULL) != SQLITE_OK) {
+        pthread_mutex_unlock(&db->mutex);
+        return db_error(db, error, "falha ao carregar progresso das séries");
+    }
+    sqlite3_bind_text(stmt, 1, provider_id, -1, SQLITE_TRANSIENT);
+    int rc = SQLITE_DONE;
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        const char *id = (const char *)sqlite3_column_text(stmt, 0);
+        if (!id) continue;
+        for (size_t i = 0; i < series->len; ++i) {
+            if (series->items[i].id && strcmp(series->items[i].id, id) == 0) {
+                watched[i] = sqlite3_column_int(stmt, 1);
+                total[i] = sqlite3_column_int(stmt, 2);
+                break;
+            }
+        }
+    }
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(&db->mutex);
+    if (rc != SQLITE_DONE) return db_error(db, error, "falha ao carregar progresso das séries");
+    vip_error_clear(error);
+    return VIP_OK;
+}
+
 void vip_series_progress_clear(vip_series_progress_t *progress) {
     if (!progress) return;
     free(progress->last_episode_id);

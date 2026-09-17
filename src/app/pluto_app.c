@@ -193,7 +193,9 @@ static void init_cache_path(pluto_app_t *a) {
         snprintf(fallback, sizeof(fallback), "%s/.cache", home);
         base = fallback;
     }
-    snprintf(a->cache_dir, sizeof(a->cache_dir), "%s/visual-iptv-x11/thumbnails", base);
+    int n = snprintf(a->cache_dir, sizeof(a->cache_dir), "%s/visual-iptv-x11/thumbnails", base);
+    if (n < 0 || (size_t)n >= sizeof(a->cache_dir))
+        snprintf(a->cache_dir, sizeof(a->cache_dir), "/tmp/visual-iptv-x11-%ld/thumbnails", (long)getuid());
     if (mkdir_parents(a->cache_dir) != 0)
         fprintf(stderr, "[pluto/cache] não foi possível criar %s\n", a->cache_dir);
 }

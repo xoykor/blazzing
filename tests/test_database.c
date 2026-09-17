@@ -72,6 +72,14 @@ int main(void) {
     TEST_CHECK(series_progress.total_count == 10);
     TEST_CHECK(series_progress.last_episode_id && strcmp(series_progress.last_episode_id, "episode:2") == 0);
     vip_series_progress_clear(&series_progress);
+    vip_channel_list_t series_catalog; vip_channel_list_init(&series_catalog);
+    vip_channel_t series_item = {.provider_id="p", .id="series:7", .name="Série", .stream_url="series://7", .position=0};
+    TEST_STATUS(vip_channel_list_push(&series_catalog, &series_item, &error), VIP_OK, &error);
+    int watched[1] = {0}, total[1] = {0};
+    TEST_STATUS(vip_database_load_series_progress(db, "p", &series_catalog, watched, total, 1, &error), VIP_OK, &error);
+    TEST_CHECK(watched[0] == 2);
+    TEST_CHECK(total[0] == 10);
+    vip_channel_list_clear(&series_catalog);
 
     vip_media_metadata_t metadata = {
         .plot = "Sinopse persistida",

@@ -82,11 +82,6 @@ static void hub_text(hub_window_t *h, int x, int y, const char *text, unsigned l
     XDrawString(h->dpy, h->win, h->gc, x, y, text, (int)strlen(text));
 }
 
-static void hub_center(hub_window_t *h, int x, int y, int w, const char *text, unsigned long color) {
-    int tw = hub_text_width(h, text);
-    hub_text(h, x + (w - tw) / 2, y, text, color);
-}
-
 static void card_geometry(const hub_window_t *h, int index, int *x, int *y, int *w, int *height) {
     const int gap = 18;
     const int cols = 3;
