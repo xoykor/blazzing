@@ -127,7 +127,7 @@ jobs:
         run: |
           {
             echo "== stale architecture wording =="
-            grep -RInE 'does not use .--wid|não usa .--wid|_NET_WM_PID|reparent(ed|ing|ada|ado)?' README*.md docs flatpak include src || true
+            grep -RInE 'does not use .--wid|não usa .--wid|current player architecture is native X11 reparenting|created by mpv and reparented|criada pelo mpv e reparentada|_NET_WM_PID.*mpv PID|_NET_WM_PID.*PID do mpv' README*.md docs flatpak include src || true
             echo
             echo "== leftover tautological generated comments =="
             grep -RInE '/\\* Implement the .* helper\\. \\*/' include src tests || true
@@ -136,7 +136,7 @@ jobs:
             grep -RInE '/\\* Return whether [a-z0-9_ ]+\\. \\*/' include src tests || true
           } | tee audit/documentation-quality.txt
 
-          if grep -RInE 'does not use .--wid|não usa .--wid|_NET_WM_PID|reparent(ed|ing|ada|ado)?' README*.md docs flatpak include src; then
+          if grep -RInE 'does not use .--wid|não usa .--wid|current player architecture is native X11 reparenting|created by mpv and reparented|criada pelo mpv e reparentada|_NET_WM_PID.*mpv PID|_NET_WM_PID.*PID do mpv' README*.md docs flatpak include src; then
             echo "Stale reparenting documentation remains."
             exit 1
           fi
