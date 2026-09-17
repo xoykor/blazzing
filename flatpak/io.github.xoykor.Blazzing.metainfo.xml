@@ -20,6 +20,11 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.2.16" date="2026-09-17">
+      <description>
+        <p>Fixes M3U routing into TV, movies and series, groups episode entries into series cards with season navigation, strengthens search focus, and removes external browser streaming-service entries.</p>
+      </description>
+    </release>
     <release version="1.2.15" date="2026-09-17">
       <description>
         <p>Redesigns the IPTV and streaming-hub interfaces and adds season-first navigation for series before episode selection.</p>
