@@ -1,11 +1,8 @@
 /* SPDX-License-Identifier: MIT */
 #define _POSIX_C_SOURCE 200809L
 #include "visual_iptv/hub.h"
-#include "visual_iptv/core.h"
-#include "visual_iptv/streaming_services.h"
 
 #include <X11/Xlib.h>
-#include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -32,7 +29,6 @@ typedef struct {
     int width;
     int height;
     int selected;
-    char status[256];
     unsigned long bg;
     unsigned long panel;
     unsigned long panel2;
@@ -107,18 +103,17 @@ static void hub_text(hub_window_t *h, int x, int y, const char *text, unsigned l
 }
 
 static void card_geometry(const hub_window_t *h, int index, int *x, int *y, int *w, int *height) {
-    const int gap = 18;
-    const int cols = 3;
-    int margin = h->width > 1100 ? 74 : 34;
-    int available = h->width - margin * 2 - gap * (cols - 1);
-    int card_w = available / cols;
-    if (card_w < 240) card_w = 240;
-    int row = index / cols;
-    int col = index % cols;
-    *x = margin + col * (card_w + gap);
-    *y = 188 + row * 194;
+    const int gap = 24;
+    int margin = h->width > 1000 ? 86 : 34;
+    int card_w = (h->width - margin * 2 - gap) / 2;
+    if (card_w < 280) card_w = 280;
+    if (card_w > 520) card_w = 520;
+    int total_w = card_w * 2 + gap;
+    int start_x = (h->width - total_w) / 2;
+    *x = start_x + index * (card_w + gap);
+    *y = 214;
     *w = card_w;
-    *height = 166;
+    *height = 214;
 }
 
 static void draw_service_card(hub_window_t *h, int index, const char *monogram,
@@ -126,42 +121,38 @@ static void draw_service_card(hub_window_t *h, int index, const char *monogram,
     int x = 0, y = 0, w = 0, height = 0;
     card_geometry(h, index, &x, &y, &w, &height);
     bool selected = h->selected == index;
-    hub_round_fill(h, x + 4, y + 6, w, height, 20, h->shadow);
-    hub_round_fill(h, x, y, w, height, 20, selected ? h->accent2 : h->panel2);
-    hub_round_stroke(h, x, y, w, height, 20, selected ? h->accent : h->border);
-    if (selected) hub_round_stroke(h, x + 2, y + 2, w - 4, height - 4, 18, h->accent);
+    hub_round_fill(h, x + 5, y + 7, w, height, 22, h->shadow);
+    hub_round_fill(h, x, y, w, height, 22, selected ? h->accent2 : h->panel2);
+    hub_round_stroke(h, x, y, w, height, 22, selected ? h->accent : h->border);
+    if (selected) hub_round_stroke(h, x + 2, y + 2, w - 4, height - 4, 20, h->accent);
 
-    hub_round_fill(h, x + 18, y + 18, 42, 42, 13, selected ? h->accent : h->panel);
-    hub_text_font(h, h->heading_font, x + 31, y + 47, monogram, selected ? h->bg : h->text);
-    hub_text_font(h, h->heading_font, x + 76, y + 43, name, h->text);
-    hub_text(h, x + 18, y + 86, subtitle, selected ? h->text : h->muted);
-    hub_round_fill(h, x + 18, y + height - 43, w - 36, 27, 10, selected ? h->panel : h->bg);
-    hub_text(h, x + 30, y + height - 24, mode, selected ? h->text : h->muted);
+    hub_round_fill(h, x + 22, y + 22, 48, 48, 14, selected ? h->accent : h->panel);
+    hub_text_font(h, h->heading_font, x + 38, y + 55, monogram, selected ? h->bg : h->text);
+    hub_text_font(h, h->heading_font, x + 88, y + 51, name, h->text);
+    hub_text(h, x + 22, y + 104, subtitle, selected ? h->text : h->muted);
+    hub_round_fill(h, x + 22, y + height - 54, w - 44, 34, 11, selected ? h->panel : h->bg);
+    hub_text(h, x + 36, y + height - 31, mode, selected ? h->text : h->muted);
 }
 
 static void hub_draw(hub_window_t *h) {
     hub_fill(h, 0, 0, h->width, h->height, h->bg);
     hub_fill(h, 0, 0, h->width, 5, h->accent);
-    hub_fill(h, 0, 5, h->width, 112, h->panel);
-    hub_round_fill(h, 52, 34, 48, 48, 15, h->accent);
-    hub_text_font(h, h->heading_font, 68, 67, "B", h->bg);
-    hub_text_font(h, h->title_font, 116, 58, "Blazzing", h->text);
-    hub_text(h, 116, 82, "Seu hub de streaming e IPTV", h->muted);
+    hub_fill(h, 0, 5, h->width, 118, h->panel);
+    hub_round_fill(h, 52, 35, 48, 48, 15, h->accent);
+    hub_text_font(h, h->heading_font, 68, 68, "B", h->bg);
+    hub_text_font(h, h->title_font, 116, 59, "Blazzing", h->text);
+    hub_text(h, 116, 83, "IPTV e Pluto TV, sem atalhos para serviços externos", h->muted);
 
-    hub_text_font(h, h->heading_font, 54, 154, "O que você quer assistir?", h->text);
-    hub_text(h, 54, 177, "Fontes nativas ficam dentro do Blazzing; serviços com DRM mantêm a sessão no navegador oficial.", h->muted);
+    hub_text_font(h, h->heading_font, 54, 164, "Escolha uma fonte", h->text);
+    hub_text(h, 54, 188, "O Blazzing mantém apenas reprodução que funciona de forma nativa dentro do aplicativo.", h->muted);
 
     draw_service_card(h, 0, "I", "IPTV / Listas", "Xtream, M3U e perfis salvos", "NATIVO  |  MPV");
-    draw_service_card(h, 1, "P", "Pluto TV", "TV gratuita, sem login obrigatório", "NATIVO  |  MPV");
-    draw_service_card(h, 2, "P", "Prime Video", "Conta e reprodução no ambiente oficial", "NAVEGADOR  |  SESSÃO EXTERNA");
-    draw_service_card(h, 3, "M", "Max", "Conta e reprodução no ambiente oficial", "NAVEGADOR  |  SESSÃO EXTERNA");
-    draw_service_card(h, 4, "G", "Globoplay", "Conta e reprodução no ambiente oficial", "NAVEGADOR  |  SESSÃO EXTERNA");
+    draw_service_card(h, 1, "P", "Pluto TV", "TV gratuita integrada ao Blazzing", "NATIVO  |  MPV");
 
     int footer_y = h->height - 68;
     hub_fill(h, 0, footer_y, h->width, 68, h->panel);
     hub_fill(h, 0, footer_y, h->width, 1, h->border);
-    hub_text(h, 54, footer_y + 27, "Setas: navegar   Enter: abrir   Esc: sair", h->muted);
-    if (h->status[0]) hub_text(h, 54, footer_y + 50, h->status, h->text);
+    hub_text(h, 54, footer_y + 40, "Setas: navegar   Enter: abrir   Esc: sair", h->muted);
     XFlush(h->dpy);
 }
 
@@ -169,24 +160,8 @@ static bool point_in(int px, int py, int x, int y, int w, int height) {
     return px >= x && px < x + w && py >= y && py < y + height;
 }
 
-static hub_action_t activate_selected(hub_window_t *h) {
-    if (h->selected == 0) return HUB_ACTION_IPTV;
-    if (h->selected == 1) return HUB_ACTION_PLUTO;
-
-    vip_streaming_service_id_t service_id = VIP_SERVICE_PRIME_VIDEO;
-    if (h->selected == 3) service_id = VIP_SERVICE_MAX;
-    else if (h->selected == 4) service_id = VIP_SERVICE_GLOBOPLAY;
-
-    vip_error_t error = {0};
-    vip_status_t st = vip_streaming_service_open(service_id, NULL, &error);
-    if (st == VIP_OK) {
-        const vip_streaming_service_t *service = vip_streaming_service_get(service_id);
-        snprintf(h->status, sizeof(h->status), "%s aberto. Continue no navegador; a sessão permanece lá.",
-                 service ? service->name : "Serviço");
-    } else {
-        snprintf(h->status, sizeof(h->status), "Falha ao abrir: %.200s", error.message);
-    }
-    return HUB_ACTION_NONE;
+static hub_action_t activate_selected(const hub_window_t *h) {
+    return h->selected == 0 ? HUB_ACTION_IPTV : HUB_ACTION_PLUTO;
 }
 
 static hub_action_t hub_window_run(void) {
@@ -205,7 +180,7 @@ static hub_action_t hub_window_run(void) {
     h.win = XCreateSimpleWindow(h.dpy, RootWindow(h.dpy, h.screen), 40, 40,
                                 (unsigned)h.width, (unsigned)h.height, 0,
                                 BlackPixel(h.dpy, h.screen), BlackPixel(h.dpy, h.screen));
-    XStoreName(h.dpy, h.win, "Blazzing - Streaming Hub");
+    XStoreName(h.dpy, h.win, "Blazzing");
     XSelectInput(h.dpy, h.win, ExposureMask | KeyPressMask | ButtonPressMask | StructureNotifyMask);
     h.wm_delete = XInternAtom(h.dpy, "WM_DELETE_WINDOW", False);
     XSetWMProtocols(h.dpy, h.win, &h.wm_delete, 1);
@@ -238,14 +213,13 @@ static hub_action_t hub_window_run(void) {
                 break;
             case ButtonPress:
                 if (event.xbutton.button == Button1) {
-                    for (int i = 0; i < 5; ++i) {
+                    for (int i = 0; i < 2; ++i) {
                         int x = 0, y = 0, w = 0, height = 0;
                         card_geometry(&h, i, &x, &y, &w, &height);
                         if (point_in(event.xbutton.x, event.xbutton.y, x, y, w, height)) {
                             h.selected = i;
                             action = activate_selected(&h);
-                            if (action != HUB_ACTION_NONE) done = true;
-                            hub_draw(&h);
+                            done = true;
                             break;
                         }
                     }
@@ -254,14 +228,11 @@ static hub_action_t hub_window_run(void) {
             case KeyPress: {
                 KeySym sym = XLookupKeysym(&event.xkey, 0);
                 if (sym == XK_Escape) { action = HUB_ACTION_QUIT; done = true; }
-                else if (sym == XK_Left) { if (h.selected > 0) --h.selected; hub_draw(&h); }
-                else if (sym == XK_Right) { if (h.selected < 4) ++h.selected; hub_draw(&h); }
-                else if (sym == XK_Up) { if (h.selected >= 3) h.selected -= 3; hub_draw(&h); }
-                else if (sym == XK_Down) { if (h.selected <= 1) h.selected += 3; else if (h.selected == 2) h.selected = 4; hub_draw(&h); }
+                else if (sym == XK_Left || sym == XK_Up) { h.selected = 0; hub_draw(&h); }
+                else if (sym == XK_Right || sym == XK_Down) { h.selected = 1; hub_draw(&h); }
                 else if (sym == XK_Return || sym == XK_KP_Enter) {
                     action = activate_selected(&h);
-                    if (action != HUB_ACTION_NONE) done = true;
-                    hub_draw(&h);
+                    done = true;
                 }
                 break;
             }
