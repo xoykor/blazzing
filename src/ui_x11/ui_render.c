@@ -4,7 +4,6 @@
 #include <cairo/cairo.h>
 #include <cairo/cairo-xlib.h>
 #include <pango/pangocairo.h>
-#include <math.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -52,6 +51,18 @@ static void rounded_path(cairo_t *cr, double x, double y,
 static void sync_external_draw(vip_ui_renderer_t *renderer) {
     cairo_surface_t *surface = surface_of(renderer);
     if (surface) cairo_surface_mark_dirty(surface);
+}
+
+static PangoFontDescription *set_layout_font(vip_ui_renderer_t *renderer,
+                                              const char *text,
+                                              const char *font) {
+    PangoLayout *layout = layout_of(renderer);
+    if (!layout) return NULL;
+    PangoFontDescription *desc = pango_font_description_from_string(font && font[0] ? font : "Sans 11");
+    if (!desc) return NULL;
+    pango_layout_set_font_description(layout, desc);
+    pango_layout_set_text(layout, text ? text : "", -1);
+    return desc;
 }
 
 bool vip_ui_renderer_begin(vip_ui_renderer_t *renderer,
@@ -165,10 +176,8 @@ void vip_ui_render_text(vip_ui_renderer_t *renderer,
     sync_external_draw(renderer);
     cairo_t *cr = context_of(renderer);
     PangoLayout *layout = layout_of(renderer);
-    PangoFontDescription *desc = pango_font_description_from_string(font && font[0] ? font : "Sans 11");
+    PangoFontDescription *desc = set_layout_font(renderer, text, font);
     if (!desc) return;
-    pango_layout_set_font_description(layout, desc);
-    pango_layout_set_text(layout, text, -1);
     pango_layout_set_width(layout, width * PANGO_SCALE);
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
     pango_layout_set_single_paragraph_mode(layout, TRUE);
@@ -178,4 +187,22 @@ void vip_ui_render_text(vip_ui_renderer_t *renderer,
     pango_cairo_show_layout(cr, layout);
     cairo_surface_flush(surface_of(renderer));
     pango_font_description_free(desc);
+}
+
+int vip_ui_render_text_width(vip_ui_renderer_t *renderer,
+                             const char *text,
+                             const char *font) {
+    if (!renderer || !renderer->active || !text || !text[0]) return 0;
+    PangoLayout *layout = layout_of(renderer);
+    PangoFontDescription *desc = set_layout_font(renderer, text, font);
+    if (!desc) return 0;
+    pango_layout_set_width(layout, -1);
+    pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_NONE);
+    pango_layout_set_single_paragraph_mode(layout, TRUE);
+    int width = 0;
+    int height = 0;
+    pango_layout_get_pixel_size(layout, &width, &height);
+    (void)height;
+    pango_font_description_free(desc);
+    return width;
 }
