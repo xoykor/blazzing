@@ -70,21 +70,10 @@ static void hub_stroke(hub_window_t *h, int x, int y, int w, int height, unsigne
     XDrawRectangle(h->dpy, h->win, h->gc, x, y, (unsigned)w, (unsigned)height);
 }
 
-static int hub_text_width(hub_window_t *h, const char *text) {
-    if (!text) return 0;
-    if (h->font) return XTextWidth(h->font, text, (int)strlen(text));
-    return (int)strlen(text) * 8;
-}
-
 static void hub_text(hub_window_t *h, int x, int y, const char *text, unsigned long color) {
     if (!text) return;
     XSetForeground(h->dpy, h->gc, color);
     XDrawString(h->dpy, h->win, h->gc, x, y, text, (int)strlen(text));
-}
-
-static void hub_center(hub_window_t *h, int x, int y, int w, const char *text, unsigned long color) {
-    int tw = hub_text_width(h, text);
-    hub_text(h, x + (w - tw) / 2, y, text, color);
 }
 
 static void card_geometry(const hub_window_t *h, int index, int *x, int *y, int *w, int *height) {
@@ -124,13 +113,13 @@ static void hub_draw(hub_window_t *h) {
     hub_text(h, 54, 42, "Blazzing", h->text);
     hub_text(h, 54, 67, "Streaming hub", h->muted);
     hub_text(h, 54, 132, "Escolha uma fonte", h->text);
-    hub_text(h, 54, 154, "IPTV e Pluto rodam nativamente. Servicos com DRM abrem no ambiente web oficial.", h->muted);
+    hub_text(h, 54, 154, "IPTV e Pluto rodam nativamente. DRM abre no navegador; login e sessão ficam no navegador.", h->muted);
 
     draw_service_card(h, 0, "IPTV / Listas", "Xtream, M3U e perfis salvos", "NATIVO  |  MPV");
     draw_service_card(h, 1, "Pluto TV", "TV gratis, sem login", "NATIVO  |  MPV");
-    draw_service_card(h, 2, "Prime Video", "Conta Amazon no site oficial", "WEB  |  DRM OFICIAL");
-    draw_service_card(h, 3, "Max", "Conta Max no site oficial", "WEB  |  DRM OFICIAL");
-    draw_service_card(h, 4, "Globoplay", "Conta Globo no site oficial", "WEB  |  DRM OFICIAL");
+    draw_service_card(h, 2, "Prime Video", "Login e sessão ficam no navegador", "ABRIR NO NAVEGADOR");
+    draw_service_card(h, 3, "Max", "Login e sessão ficam no navegador", "ABRIR NO NAVEGADOR");
+    draw_service_card(h, 4, "Globoplay", "Login e sessão ficam no navegador", "ABRIR NO NAVEGADOR");
 
     int footer_y = h->height - 70;
     hub_fill(h, 0, footer_y, h->width, 70, h->panel);
@@ -155,7 +144,7 @@ static hub_action_t activate_selected(hub_window_t *h) {
     vip_status_t st = vip_streaming_service_open(service_id, NULL, &error);
     if (st == VIP_OK) {
         const vip_streaming_service_t *service = vip_streaming_service_get(service_id);
-        snprintf(h->status, sizeof(h->status), "%s aberto no navegador.", service ? service->name : "Servico");
+        snprintf(h->status, sizeof(h->status), "%s aberto no navegador; a sessão não é capturada pelo Blazzing.", service ? service->name : "Servico");
     } else {
         snprintf(h->status, sizeof(h->status), "Falha ao abrir: %.200s", error.message);
     }

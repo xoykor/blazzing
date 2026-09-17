@@ -314,19 +314,22 @@ static size_t utf8_to_latin1(char *dst, size_t cap, const char *src) {
     if (!src) src = "";
     size_t out = 0u;
     const unsigned char *p = (const unsigned char *)src;
-    while (*p && out + 1u < cap) {
+    const unsigned char *end = p + strlen(src);
+    while (p < end && out + 1u < cap) {
+        size_t remaining = (size_t)(end - p);
         uint32_t cp = 0u;
         size_t advance = 1u;
         if (*p < 0x80u) {
             cp = *p;
-        } else if ((*p & 0xe0u) == 0xc0u && (p[1] & 0xc0u) == 0x80u) {
+        } else if (remaining >= 2u && (*p & 0xe0u) == 0xc0u && (p[1] & 0xc0u) == 0x80u) {
             cp = ((uint32_t)(p[0] & 0x1fu) << 6) | (uint32_t)(p[1] & 0x3fu);
             advance = 2u;
-        } else if ((*p & 0xf0u) == 0xe0u && (p[1] & 0xc0u) == 0x80u && (p[2] & 0xc0u) == 0x80u) {
+        } else if (remaining >= 3u && (*p & 0xf0u) == 0xe0u &&
+                   (p[1] & 0xc0u) == 0x80u && (p[2] & 0xc0u) == 0x80u) {
             cp = ((uint32_t)(p[0] & 0x0fu) << 12) | ((uint32_t)(p[1] & 0x3fu) << 6) | (uint32_t)(p[2] & 0x3fu);
             advance = 3u;
-        } else if ((*p & 0xf8u) == 0xf0u && (p[1] & 0xc0u) == 0x80u &&
-                   (p[2] & 0xc0u) == 0x80u && (p[3] & 0xc0u) == 0x80u) {
+        } else if (remaining >= 4u && (*p & 0xf8u) == 0xf0u &&
+                   (p[1] & 0xc0u) == 0x80u && (p[2] & 0xc0u) == 0x80u && (p[3] & 0xc0u) == 0x80u) {
             cp = ((uint32_t)(p[0] & 0x07u) << 18) | ((uint32_t)(p[1] & 0x3fu) << 12) |
                  ((uint32_t)(p[2] & 0x3fu) << 6) | (uint32_t)(p[3] & 0x3fu);
             advance = 4u;
@@ -404,12 +407,32 @@ static int mkdir_parents(const char *path) {
 
 static void init_paths(app_t *a) {
     const char *home = getenv("HOME");
-    if (!home) home = "/tmp";
-    snprintf(a->cache_dir, sizeof(a->cache_dir), "%s/.cache/visual-iptv-x11/thumbnails", home);
+    if (!home || !home[0]) home = "/tmp";
+
+    char cache_fallback[1024];
+    char data_fallback[1024];
+    const char *cache_base = getenv("XDG_CACHE_HOME");
+    const char *data_base = getenv("XDG_DATA_HOME");
+    if (!cache_base || !cache_base[0]) {
+        snprintf(cache_fallback, sizeof(cache_fallback), "%s/.cache", home);
+        cache_base = cache_fallback;
+    }
+    if (!data_base || !data_base[0]) {
+        snprintf(data_fallback, sizeof(data_fallback), "%s/.local/share", home);
+        data_base = data_fallback;
+    }
+
+    int cache_n = snprintf(a->cache_dir, sizeof(a->cache_dir), "%s/visual-iptv-x11/thumbnails", cache_base);
     char data_dir[1024];
-    snprintf(data_dir, sizeof(data_dir), "%s/.local/share/visual-iptv-x11", home);
-    (void)mkdir_parents(a->cache_dir);
-    (void)mkdir_parents(data_dir);
+    int data_n = snprintf(data_dir, sizeof(data_dir), "%s/visual-iptv-x11", data_base);
+    if (cache_n < 0 || (size_t)cache_n >= sizeof(a->cache_dir))
+        snprintf(a->cache_dir, sizeof(a->cache_dir), "/tmp/visual-iptv-x11-%ld/thumbnails", (long)getuid());
+    if (data_n < 0 || (size_t)data_n >= sizeof(data_dir))
+        snprintf(data_dir, sizeof(data_dir), "/tmp/visual-iptv-x11-%ld", (long)getuid());
+    if (mkdir_parents(a->cache_dir) != 0)
+        fprintf(stderr, "[paths] não foi possível criar cache: %s\n", a->cache_dir);
+    if (mkdir_parents(data_dir) != 0)
+        fprintf(stderr, "[paths] não foi possível criar dados: %s\n", data_dir);
     size_t dn = strlen(data_dir);
     if (dn + sizeof("/catalog.db") <= sizeof(a->db_path)) {
         memcpy(a->db_path, data_dir, dn);
@@ -677,7 +700,6 @@ static void rebuild_filter(app_t *a) {
     pthread_mutex_unlock(&a->data_mutex);
     a->grid_scroll = 0;
     a->focused_filtered = 0;
-    if (a->thumbs) vip_thumbnail_scheduler_cancel_pending(a->thumbs);
 }
 
 static void recalc_category_counts(app_t *a) {
@@ -729,16 +751,10 @@ static void load_media_state(app_t *a) {
                                          &ACTIVE_CHANNELS(a), a->progress_flags, count, &error);
     }
     if (a->series_watched && a->series_total) {
-        for (size_t i = 0; i < count; ++i) {
-            vip_series_progress_t sp = {0};
-            vip_error_clear(&error);
-            if (vip_database_get_series_progress(a->db, ACTIVE_CHANNELS(a).items[i].provider_id,
-                                                 ACTIVE_CHANNELS(a).items[i].id, &sp, &error) == VIP_OK) {
-                a->series_watched[i] = sp.watched_count;
-                a->series_total[i] = sp.total_count;
-            }
-            vip_series_progress_clear(&sp);
-        }
+        vip_error_clear(&error);
+        (void)vip_database_load_series_progress(a->db, ACTIVE_CHANNELS(a).items[0].provider_id,
+                                                &ACTIVE_CHANNELS(a), a->series_watched,
+                                                a->series_total, count, &error);
     }
 }
 
@@ -788,7 +804,7 @@ static const char *all_content_label(app_t *a) {
 
 static void switch_content(app_t *a, content_kind_t kind) {
     if (!a || kind < CONTENT_LIVE || kind > CONTENT_SERIES) return;
-    if (atomic_load(&a->series_running)) return;
+    if (atomic_load(&a->series_running) || a->series_thread_started) return;
     a->series_episode_mode = false;
     clear_details_view(a);
     a->content_kind = kind;
@@ -798,6 +814,7 @@ static void switch_content(app_t *a, content_kind_t kind) {
     a->grid_scroll = 0;
     a->focused_filtered = 0;
     a->search[0] = '\0';
+    a->input_focus = INPUT_SEARCH;
     free(a->favorite_flags);
     a->favorite_flags = NULL;
     recalc_category_counts(a);
@@ -814,6 +831,7 @@ static void return_from_episode_list(app_t *a) {
     a->grid_scroll = 0;
     a->focused_filtered = 0;
     a->search[0] = '\0';
+    a->input_focus = INPUT_SEARCH;
     recalc_category_counts(a);
     load_media_state(a);
     rebuild_filter(a);
@@ -826,7 +844,7 @@ static void thumbnail_ready(const vip_thumbnail_request_t *request,
                             void *userdata) {
     app_t *a = userdata;
     static atomic_uint_fast64_t failure_count = 0;
-    if (status != VIP_OK) {
+    if (status != VIP_OK && status != VIP_ERR_CANCELLED) {
         uint64_t n = atomic_fetch_add(&failure_count, 1u) + 1u;
         if (n <= 20u || (n % 100u) == 0u) {
             fprintf(stderr, "[thumbs] falha #%llu item=%s status=%d: %s\n",
@@ -914,30 +932,41 @@ static void prefetch_thumbnail_batch(app_t *a) {
     if (now < a->thumb_prefetch_next_ms) return;
     a->thumb_prefetch_next_ms = now + THUMB_PREFETCH_INTERVAL_MS;
 
-    bool episode_source = a->series_episode_mode && a->episode_channels.len > 0u;
-    size_t sources = episode_source ? 1u : 0u;
-    for (int k = 0; k < 3; ++k) {
-        if (a->catalogs[k].loaded && a->catalogs[k].channels.len > 0u) ++sources;
-    }
-    if (sources == 0u) return;
-
     size_t budget = THUMB_PREFETCH_BATCH;
-    for (int k = 0; k < 3 && budget > 0u; ++k) {
+    const size_t primary_budget = (THUMB_PREFETCH_BATCH * 3u) / 4u;
+    bool episode_source = a->series_episode_mode && a->episode_channels.len > 0u;
+    int active_kind = (int)a->content_kind;
+
+    /* Spend most of every batch on what the user can actually see. Older
+       versions split bandwidth evenly across TV/VOD/series, making the active
+       catalog look slow even while invisible catalogs were downloading. */
+    if (episode_source) {
+        size_t used = prefetch_thumbnail_list(a, &a->episode_channels,
+                                              &a->episode_prefetch_cursor,
+                                              primary_budget, THUMB_BACKGROUND_PRIORITY + 1000LL);
+        budget -= used > budget ? budget : used;
+    } else if (active_kind >= 0 && active_kind < 3 && a->catalogs[active_kind].loaded) {
+        size_t used = prefetch_thumbnail_list(a, &a->catalogs[active_kind].channels,
+                                              &a->thumb_prefetch_cursor[active_kind],
+                                              primary_budget, THUMB_BACKGROUND_PRIORITY + 1000LL);
+        budget -= used > budget ? budget : used;
+    }
+
+    size_t secondary_sources = 0u;
+    for (int k = 0; k < 3; ++k) {
+        if (!episode_source && k == active_kind) continue;
+        if (a->catalogs[k].loaded && a->catalogs[k].channels.len > 0u) ++secondary_sources;
+    }
+    for (int k = 0; k < 3 && budget > 0u && secondary_sources > 0u; ++k) {
+        if (!episode_source && k == active_kind) continue;
         catalog_t *catalog = &a->catalogs[k];
         if (!catalog->loaded || catalog->channels.len == 0u) continue;
-
-        size_t quota = (budget + sources - 1u) / sources;
+        size_t quota = (budget + secondary_sources - 1u) / secondary_sources;
         size_t used = prefetch_thumbnail_list(a, &catalog->channels,
                                               &a->thumb_prefetch_cursor[k],
                                               quota, THUMB_BACKGROUND_PRIORITY);
-        budget -= used;
-        --sources;
-    }
-
-    if (episode_source && budget > 0u) {
-        (void)prefetch_thumbnail_list(a, &a->episode_channels,
-                                      &a->episode_prefetch_cursor,
-                                      budget, THUMB_BACKGROUND_PRIORITY);
+        budget -= used > budget ? budget : used;
+        --secondary_sources;
     }
 }
 
@@ -1062,8 +1091,10 @@ static void *login_worker(void *userdata) {
         /* StreamFire/Spark-compatible fallback. Only an HTTP 404 from the
          * regular Xtream endpoint activates it. Every candidate returned by
          * the resolver API is verified through player_api.php before use. */
-        if (st != VIP_OK && saw_http_404) {
-            fprintf(stderr, "[login] endpoint Xtream retornou 404; procurando servidor pela API do provider\n");
+        const char *resolver_opt = getenv("VIPTV_ALLOW_EXTERNAL_RESOLVER");
+        bool allow_external_resolver = resolver_opt && resolver_opt[0] && strcmp(resolver_opt, "0") != 0;
+        if (st != VIP_OK && saw_http_404 && allow_external_resolver) {
+            fprintf(stderr, "[login] endpoint Xtream retornou 404; resolvedor externo autorizado pelo usuário\n");
             pthread_mutex_lock(&a->data_mutex);
             snprintf(a->status, sizeof(a->status), "Servidor retornou 404; procurando endpoint automaticamente...");
             pthread_mutex_unlock(&a->data_mutex);
@@ -1101,6 +1132,9 @@ static void *login_worker(void *userdata) {
                 error = resolve_error;
             }
             vip_server_resolution_clear(&resolution);
+        } else if (st != VIP_OK && saw_http_404 && !allow_external_resolver) {
+            vip_error_set(&error, VIP_ERR_NETWORK,
+                          "servidor retornou HTTP 404; descoberta externa desativada por privacidade (VIPTV_ALLOW_EXTERNAL_RESOLVER=1 para autorizar)");
         }
         if (st == VIP_OK) snprintf(provider_id, sizeof(provider_id), "%s", credentials.provider_id);
     }
@@ -1169,7 +1203,7 @@ static void *login_worker(void *userdata) {
 }
 
 static void start_login(app_t *a) {
-    if (atomic_load(&a->login_running)) return;
+    if (atomic_load(&a->login_running) || a->login_thread_started) return;
     if (!a->server[0]) {
         snprintf(a->status, sizeof(a->status), a->login_mode == LOGIN_M3U
                  ? "Informe uma URL ou caminho de playlist M3U" : "Preencha servidor, usuário e senha");
@@ -1189,6 +1223,7 @@ static void start_login(app_t *a) {
     job->password = vip_strdup(a->password);
     job->profile_name = vip_strdup(a->profile_name);
     if (!job->server || !job->server_alt || !job->username || !job->password || !job->profile_name) {
+        if (job->password) { volatile char *wipe = job->password; size_t n = strlen(job->password); while (n-- > 0u) *wipe++ = 0; }
         free(job->server); free(job->server_alt); free(job->username); free(job->password); free(job->profile_name); free(job);
         snprintf(a->status, sizeof(a->status), "Sem memória"); return;
     }
@@ -1198,6 +1233,7 @@ static void start_login(app_t *a) {
     atomic_store(&a->login_running, true);
     if (pthread_create(&a->login_thread, NULL, login_worker, job) != 0) {
         atomic_store(&a->login_running, false);
+        if (job->password) { volatile char *wipe = job->password; size_t n = strlen(job->password); while (n-- > 0u) *wipe++ = 0; }
         free(job->server); free(job->server_alt); free(job->username); free(job->password); free(job->profile_name); free(job);
         snprintf(a->status, sizeof(a->status), "Falha ao iniciar conexão");
         return;
@@ -1253,7 +1289,8 @@ static void *series_worker(void *userdata) {
 
 static void start_series_load(app_t *a, size_t channel_index) {
     if (!a || a->content_kind != CONTENT_SERIES || a->series_episode_mode ||
-        atomic_load(&a->series_running) || channel_index >= ACTIVE_CHANNELS(a).len) return;
+        atomic_load(&a->series_running) || a->series_thread_started ||
+        channel_index >= ACTIVE_CHANNELS(a).len) return;
     vip_channel_t *series = &ACTIVE_CHANNELS(a).items[channel_index];
     if (!series->id || strncmp(series->id, "series:", 7u) != 0) return;
     snprintf(a->series_parent_id, sizeof(a->series_parent_id), "%s", series->id);
@@ -1267,6 +1304,7 @@ static void start_series_load(app_t *a, size_t channel_index) {
     job->series_id = vip_strdup(series->id);
     job->title = vip_strdup(series->name);
     if (!job->server || !job->username || !job->password || !job->series_id || !job->title) {
+        if (job->password) { volatile char *wipe = job->password; size_t n = strlen(job->password); while (n-- > 0u) *wipe++ = 0; }
         free(job->server); free(job->username); free(job->password); free(job->series_id); free(job->title); free(job);
         return;
     }
@@ -1278,6 +1316,7 @@ static void start_series_load(app_t *a, size_t channel_index) {
     atomic_store(&a->series_running, true);
     if (pthread_create(&a->series_thread, NULL, series_worker, job) != 0) {
         atomic_store(&a->series_running, false);
+        if (job->password) { volatile char *wipe = job->password; size_t n = strlen(job->password); while (n-- > 0u) *wipe++ = 0; }
         free(job->server); free(job->username); free(job->password); free(job->series_id); free(job->title); free(job);
         return;
     }
@@ -1404,7 +1443,7 @@ static void clear_details_view(app_t *a) {
 }
 
 static void start_details_load(app_t *a, size_t channel_index) {
-    if (!a || atomic_load(&a->details_running) || a->login_mode != LOGIN_XTREAM ||
+    if (!a || atomic_load(&a->details_running) || a->details_thread_started || a->login_mode != LOGIN_XTREAM ||
         a->series_episode_mode || (a->content_kind != CONTENT_VOD && a->content_kind != CONTENT_SERIES) ||
         channel_index >= ACTIVE_CHANNELS(a).len) return;
     vip_channel_t *media = &ACTIVE_CHANNELS(a).items[channel_index];
@@ -1449,6 +1488,7 @@ static void start_details_load(app_t *a, size_t channel_index) {
 
 static void maybe_start_details_load(app_t *a) {
     if (!details_panel_active(a) || a->screen != SCREEN_BROWSE || atomic_load(&a->details_running) ||
+        a->details_thread_started ||
         a->filtered_len == 0u) return;
     if (a->focused_filtered >= a->filtered_len) a->focused_filtered = a->filtered_len - 1u;
     size_t channel_index = a->filtered[a->focused_filtered];
@@ -1523,6 +1563,20 @@ static bool executable_in_path(const char *name) {
     return found;
 }
 
+static bool write_all_fd(int fd, const char *data, size_t len) {
+    size_t offset = 0u;
+    while (offset < len) {
+        ssize_t written = write(fd, data + offset, len - offset);
+        if (written > 0) {
+            offset += (size_t)written;
+            continue;
+        }
+        if (written < 0 && errno == EINTR) continue;
+        return false;
+    }
+    return true;
+}
+
 /* Password persistence is delegated to Secret Service via secret-tool.
  * SQLite stores only non-secret profile fields. */
 static bool keyring_store_password(const char *profile_id, const char *password) {
@@ -1539,12 +1593,11 @@ static bool keyring_store_password(const char *profile_id, const char *password)
     close(inpipe[0]);
     if (pid < 0) { close(inpipe[1]); return false; }
     size_t len = strlen(password);
-    (void)write(inpipe[1], password, len);
-    (void)write(inpipe[1], "\n", 1u);
+    bool wrote = write_all_fd(inpipe[1], password, len) && write_all_fd(inpipe[1], "\n", 1u);
     close(inpipe[1]);
     int status = 0;
     while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
-    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    return wrote && WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
 static bool keyring_lookup_password(const char *profile_id, char *out, size_t cap) {
@@ -1789,7 +1842,6 @@ static void leave_player(app_t *a) {
     a->screen = SCREEN_BROWSE;
     a->input_focus = INPUT_SEARCH;
     a->timeline_dragging = false;
-    load_media_state(a);
     rebuild_filter(a);
 }
 
@@ -2484,7 +2536,6 @@ static void handle_wheel(app_t *a, int x, int y, int direction) {
         card_layout_t layout=browse_layout(a); int rows=(int)((a->filtered_len+(size_t)layout.cols-1u)/(size_t)layout.cols);
         int content_h=rows*layout.row_step; int maxscroll=content_h-(a->height-TOPBAR_H-18); if(maxscroll<0)maxscroll=0;
         a->grid_scroll+=direction*(layout.mode==ART_PORTRAIT?220:180); if(a->grid_scroll<0)a->grid_scroll=0; if(a->grid_scroll>maxscroll)a->grid_scroll=maxscroll;
-        if (a->thumbs) vip_thumbnail_scheduler_cancel_pending(a->thumbs);
     }
     (void)y;
 }
@@ -2529,43 +2580,133 @@ static void switch_relative_channel(app_t *a, int delta) {
 }
 
 static void handle_key(app_t *a, XKeyEvent *kev) {
-    KeySym sym=NoSymbol; char buf[64]; int n=XLookupString(kev,buf,sizeof(buf),&sym,NULL);
-    bool ctrl=(kev->state&ControlMask)!=0, shift=(kev->state&ShiftMask)!=0;
-    if (sym==XK_F11) { set_fullscreen(a,!a->fullscreen); show_player_hud(a); return; }
-    if (a->screen==SCREEN_PLAYER) {
+    KeySym sym = NoSymbol;
+    char buf[64];
+    int n = XLookupString(kev, buf, sizeof(buf), &sym, NULL);
+    bool ctrl = (kev->state & ControlMask) != 0;
+    bool shift = (kev->state & ShiftMask) != 0;
+    bool printable = n > 0 && !ctrl && (unsigned char)buf[0] >= 0x20u;
+
+    if (sym == XK_F11) {
+        set_fullscreen(a, !a->fullscreen);
         show_player_hud(a);
-        if (sym==XK_Escape || sym==XK_BackSpace) { leave_player(a); return; }
-        if (sym==XK_space && a->player) { vip_mpv_player_set_paused(a->player,!vip_mpv_player_is_paused(a->player)); save_current_progress(a,true); return; }
-        if (sym==XK_Left) { if(a->player_item_live)switch_relative_channel(a,-1); else if(a->player){vip_error_t e={0};(void)vip_mpv_player_seek_relative(a->player,-10.0,&e);} return; }
-        if (sym==XK_Right) { if(a->player_item_live)switch_relative_channel(a,1); else if(a->player){vip_error_t e={0};(void)vip_mpv_player_seek_relative(a->player,10.0,&e);} return; }
-        if ((sym==XK_Up || sym==XK_Down) && a->player) { vip_mpv_player_snapshot_t sn={0}; vip_mpv_player_snapshot(a->player,&sn); vip_error_t e={0}; double v=sn.volume+(sym==XK_Up?5.0:-5.0); if(v<0)v=0;if(v>100)v=100;(void)vip_mpv_player_set_volume(a->player,v,&e); return; }
         return;
     }
-    if (a->screen==SCREEN_BROWSE) {
-        if(sym==XK_1){switch_content(a,CONTENT_LIVE);return;} if(sym==XK_2){switch_content(a,CONTENT_VOD);return;} if(sym==XK_3){switch_content(a,CONTENT_SERIES);return;}
-        if(sym==XK_l||sym==XK_L){if(a->thumbs)vip_thumbnail_scheduler_cancel_pending(a->thumbs);refresh_profiles(a);a->screen=SCREEN_LOGIN;a->input_focus=INPUT_SERVER;return;}
-        if(sym==XK_Left){move_grid_focus(a,-1,0);return;} if(sym==XK_Right){move_grid_focus(a,1,0);return;} if(sym==XK_Up){move_grid_focus(a,0,-1);return;} if(sym==XK_Down){move_grid_focus(a,0,1);return;}
-        if((sym==XK_Return||sym==XK_KP_Enter)&&a->filtered_len>0){if(a->focused_filtered>=a->filtered_len)a->focused_filtered=a->filtered_len-1u;activate_item(a,a->filtered[a->focused_filtered]);return;}
-        if((sym==XK_f||sym==XK_F)&&!ctrl&&a->filtered_len>0){if(a->focused_filtered>=a->filtered_len)a->focused_filtered=a->filtered_len-1u;toggle_favorite(a,a->filtered[a->focused_filtered]);return;}
+
+    if (a->screen == SCREEN_PLAYER) {
+        show_player_hud(a);
+        if (sym == XK_Escape || sym == XK_BackSpace) { leave_player(a); return; }
+        if (sym == XK_space && a->player) {
+            vip_mpv_player_set_paused(a->player, !vip_mpv_player_is_paused(a->player));
+            save_current_progress(a, true);
+            return;
+        }
+        if (sym == XK_Left) {
+            if (a->player_item_live) switch_relative_channel(a, -1);
+            else if (a->player) { vip_error_t e = {0}; (void)vip_mpv_player_seek_relative(a->player, -10.0, &e); }
+            return;
+        }
+        if (sym == XK_Right) {
+            if (a->player_item_live) switch_relative_channel(a, 1);
+            else if (a->player) { vip_error_t e = {0}; (void)vip_mpv_player_seek_relative(a->player, 10.0, &e); }
+            return;
+        }
+        if ((sym == XK_Up || sym == XK_Down) && a->player) {
+            vip_mpv_player_snapshot_t sn = {0};
+            vip_mpv_player_snapshot(a->player, &sn);
+            vip_error_t e = {0};
+            double v = sn.volume + (sym == XK_Up ? 5.0 : -5.0);
+            if (v < 0.0) v = 0.0;
+            if (v > 100.0) v = 100.0;
+            (void)vip_mpv_player_set_volume(a->player, v, &e);
+            return;
+        }
+        return;
     }
-    if(sym==XK_Escape){if(a->screen==SCREEN_BROWSE&&a->series_episode_mode){return_from_episode_list(a);return;}if(a->screen==SCREEN_BROWSE&&a->search[0]){a->search[0]='\0';rebuild_filter(a);}return;}
-    if(ctrl&&(sym==XK_v||sym==XK_V)){request_paste(a,a->clipboard);return;} if(shift&&sym==XK_Insert){request_paste(a,XA_PRIMARY);return;}
-    if(sym==XK_Tab){
-        if(a->screen==SCREEN_LOGIN){
-            if(a->login_mode==LOGIN_M3U)a->input_focus=a->input_focus==INPUT_PROFILE_NAME?INPUT_SERVER:INPUT_PROFILE_NAME;
-            else a->input_focus=a->input_focus==INPUT_PROFILE_NAME?INPUT_SERVER:a->input_focus==INPUT_SERVER?INPUT_SERVER_ALT:a->input_focus==INPUT_SERVER_ALT?INPUT_USERNAME:a->input_focus==INPUT_USERNAME?INPUT_PASSWORD:INPUT_PROFILE_NAME;
-        } else a->input_focus=INPUT_SEARCH; return;
+
+    if (a->screen == SCREEN_BROWSE) {
+        /* Printable keys belong to the search field. Navigation shortcuts use
+           modifiers so typing titles can never switch screens or mutate the
+           playlist/server field left behind by the login screen. */
+        if (ctrl && sym == XK_1) { switch_content(a, CONTENT_LIVE); return; }
+        if (ctrl && sym == XK_2) { switch_content(a, CONTENT_VOD); return; }
+        if (ctrl && sym == XK_3) { switch_content(a, CONTENT_SERIES); return; }
+        if (ctrl && (sym == XK_l || sym == XK_L)) {
+            if (a->thumbs) vip_thumbnail_scheduler_cancel_pending(a->thumbs);
+            refresh_profiles(a);
+            a->screen = SCREEN_LOGIN;
+            a->input_focus = INPUT_SERVER;
+            return;
+        }
+        if (ctrl && (sym == XK_f || sym == XK_F)) { a->input_focus = INPUT_SEARCH; return; }
+        if (ctrl && (sym == XK_d || sym == XK_D) && a->filtered_len > 0u) {
+            if (a->focused_filtered >= a->filtered_len) a->focused_filtered = a->filtered_len - 1u;
+            toggle_favorite(a, a->filtered[a->focused_filtered]);
+            return;
+        }
+        if (sym == XK_Left) { move_grid_focus(a, -1, 0); return; }
+        if (sym == XK_Right) { move_grid_focus(a, 1, 0); return; }
+        if (sym == XK_Up) { move_grid_focus(a, 0, -1); return; }
+        if (sym == XK_Down) { move_grid_focus(a, 0, 1); return; }
+        if ((sym == XK_Return || sym == XK_KP_Enter) && a->filtered_len > 0u) {
+            if (a->focused_filtered >= a->filtered_len) a->focused_filtered = a->filtered_len - 1u;
+            activate_item(a, a->filtered[a->focused_filtered]);
+            return;
+        }
+        if (sym == XK_Escape) {
+            if (a->series_episode_mode) { return_from_episode_list(a); return; }
+            if (a->search[0]) { a->search[0] = '\0'; rebuild_filter(a); }
+            a->input_focus = INPUT_SEARCH;
+            return;
+        }
+        if (ctrl && (sym == XK_v || sym == XK_V)) {
+            a->input_focus = INPUT_SEARCH;
+            request_paste(a, a->clipboard);
+            return;
+        }
+        if (shift && sym == XK_Insert) {
+            a->input_focus = INPUT_SEARCH;
+            request_paste(a, XA_PRIMARY);
+            return;
+        }
+        if (sym == XK_Tab) { a->input_focus = INPUT_SEARCH; return; }
+        if (sym == XK_BackSpace) { a->input_focus = INPUT_SEARCH; backspace_input(a); return; }
+        if (printable) { a->input_focus = INPUT_SEARCH; append_input(a, buf, (size_t)n); return; }
+        return;
     }
-    if(sym==XK_Return||sym==XK_KP_Enter){if(a->screen==SCREEN_LOGIN)start_login(a);return;}
-    if(sym==XK_BackSpace){backspace_input(a);return;} if(n>0&&!ctrl&&(unsigned char)buf[0]>=0x20u)append_input(a,buf,(size_t)n);
+
+    if (sym == XK_Escape) return;
+    if (ctrl && (sym == XK_v || sym == XK_V)) { request_paste(a, a->clipboard); return; }
+    if (shift && sym == XK_Insert) { request_paste(a, XA_PRIMARY); return; }
+    if (sym == XK_Tab) {
+        if (a->login_mode == LOGIN_M3U)
+            a->input_focus = a->input_focus == INPUT_PROFILE_NAME ? INPUT_SERVER : INPUT_PROFILE_NAME;
+        else
+            a->input_focus = a->input_focus == INPUT_PROFILE_NAME ? INPUT_SERVER :
+                             a->input_focus == INPUT_SERVER ? INPUT_SERVER_ALT :
+                             a->input_focus == INPUT_SERVER_ALT ? INPUT_USERNAME :
+                             a->input_focus == INPUT_USERNAME ? INPUT_PASSWORD : INPUT_PROFILE_NAME;
+        return;
+    }
+    if (sym == XK_Return || sym == XK_KP_Enter) { start_login(a); return; }
+    if (sym == XK_BackSpace) { backspace_input(a); return; }
+    if (printable) append_input(a, buf, (size_t)n);
 }
 
 static void handle_selection(app_t *a, XSelectionEvent *sel) {
+    int target = a->paste_target;
+    a->paste_target = 0;
     if (sel->property == None) return;
-    Atom type; int format; unsigned long nitems, after; unsigned char *data = NULL;
+    Atom type;
+    int format;
+    unsigned long nitems, after;
+    unsigned char *data = NULL;
     if (XGetWindowProperty(a->dpy, a->win, sel->property, 0, 8192, True, AnyPropertyType,
                            &type, &format, &nitems, &after, &data) == Success && data) {
-        if (format == 8) append_input(a, (const char *)data, nitems);
+        /* Selection conversion is asynchronous. Discard it if focus/screen
+           changed meanwhile instead of pasting into an unrelated field. */
+        if (format == 8 && target != 0 && target == a->input_focus)
+            append_input(a, (const char *)data, nitems);
         XFree(data);
     }
 }

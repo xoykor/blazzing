@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 static const vip_streaming_service_t SERVICES[] = {
@@ -55,6 +56,16 @@ vip_status_t vip_streaming_service_open(vip_streaming_service_id_t id,
     if (pid == 0) {
         execlp("xdg-open", "xdg-open", url, (char *)NULL);
         _exit(127);
+    }
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno == EINTR) continue;
+        vip_error_set(error, VIP_ERR_IO, "falha ao aguardar xdg-open: %s", strerror(errno));
+        return VIP_ERR_IO;
+    }
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        vip_error_set(error, VIP_ERR_IO, "xdg-open não conseguiu abrir o navegador");
+        return VIP_ERR_IO;
     }
     vip_error_clear(error);
     return VIP_OK;

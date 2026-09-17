@@ -14,6 +14,8 @@
 
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
 #include <stdint.h>
 
 #define THUMB_INTERACTIVE_PRIORITY INT64_C(500000)
@@ -32,6 +34,16 @@ extern vip_status_t __real_vip_thumbnail_capture_with_decoder(const vip_thumbnai
 
 static bool has_artwork(const vip_thumbnail_request_t *request) {
     return request && request->logo_url && request->logo_url[0] != '\0';
+}
+
+static bool remote_stream(const vip_thumbnail_request_t *request) {
+    const char *url = request ? request->stream_url : NULL;
+    return url && (!strncmp(url, "http://", 7u) || !strncmp(url, "https://", 8u));
+}
+
+static bool remote_capture_enabled(void) {
+    const char *value = getenv("VIPTV_ALLOW_REMOTE_THUMB_CAPTURE");
+    return value && value[0] && strcmp(value, "0") != 0;
 }
 
 static bool frame_slot_try_acquire(void) {
@@ -59,16 +71,22 @@ vip_status_t __wrap_vip_thumbnail_scheduler_enqueue(vip_thumbnail_scheduler_t *s
         vip_error_clear(error);
         return VIP_OK;
     }
+    /* Passing authenticated stream URLs to ffmpeg via argv exposes them to
+       local process inspection and slow stream opens can starve artwork jobs.
+       Keep remote frame capture disabled unless the user explicitly opts in. */
+    if (!has_artwork(request) && remote_stream(request) && !remote_capture_enabled()) {
+        vip_error_clear(error);
+        return VIP_OK;
+    }
 
     return __real_vip_thumbnail_scheduler_enqueue(scheduler, request, error);
 }
 
 void __wrap_vip_thumbnail_scheduler_cancel_pending(vip_thumbnail_scheduler_t *scheduler) {
-    /* Scroll/filter rebuilds used to erase the entire queue. Keeping queued
-       requests alive means cache warming continues while the user navigates.
-       Requests own copies of their strings, so retaining them is safe across
-       viewport changes and even provider/profile switches. */
-    (void)scheduler;
+    /* Callers use cancellation only at provider/list boundaries. Viewport and
+       search changes no longer call this function, so ordinary navigation
+       keeps cache warming while a provider switch drops stale queued jobs. */
+    __real_vip_thumbnail_scheduler_cancel_pending(scheduler);
 }
 
 vip_status_t __wrap_vip_thumbnail_capture_with_decoder(const vip_thumbnail_request_t *request,
@@ -84,6 +102,10 @@ vip_status_t __wrap_vip_thumbnail_capture_with_decoder(const vip_thumbnail_reque
        filtered by enqueue already. Do not open a stream if it reaches here. */
     if (request->priority < THUMB_INTERACTIVE_PRIORITY) {
         vip_error_set(error, VIP_ERR_CANCELLED, "captura de frame ignorada fora do viewport");
+        return VIP_ERR_CANCELLED;
+    }
+    if (remote_stream(request) && !remote_capture_enabled()) {
+        vip_error_set(error, VIP_ERR_CANCELLED, "captura remota de frame desativada por privacidade");
         return VIP_ERR_CANCELLED;
     }
 

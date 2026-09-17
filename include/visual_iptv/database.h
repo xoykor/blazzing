@@ -153,6 +153,14 @@ vip_status_t vip_database_get_series_progress(vip_database_t *db,
                                               const char *series_id,
                                               vip_series_progress_t *out,
                                               vip_error_t *error);
+/** Bulk-load aggregate series progress aligned with a series catalog. */
+vip_status_t vip_database_load_series_progress(vip_database_t *db,
+                                               const char *provider_id,
+                                               const vip_channel_list_t *series,
+                                               int *watched,
+                                               int *total,
+                                               size_t len,
+                                               vip_error_t *error);
 void vip_series_progress_clear(vip_series_progress_t *progress);
 
 /* Lazy rich metadata cache. Passwords/stream URLs are not stored here. */

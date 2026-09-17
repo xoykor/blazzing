@@ -1,3 +1,17 @@
+## 1.2.14 — 2026-09-17
+
+Hardening de confiabilidade, segurança e desempenho das miniaturas:
+
+- o encerramento do scheduler de miniaturas agora para rapidamente em vez de esvaziar toda a fila pendente;
+- trocas de provider/perfil descartam trabalhos antigos, enquanto rolagem e filtros comuns continuam aquecendo o cache;
+- JPEGs corrompidos passam a ser tratados como falha normal de decodificação, sem permitir que a libjpeg encerre o processo;
+- downloads de artwork muito lentos são abortados mais cedo para liberar workers;
+- o prefetch em segundo plano prioriza principalmente o catálogo ativo antes de aquecer catálogos ocultos;
+- os caminhos de reset e compactação do buffer IPC JSON do mpv foram reforçados;
+- a gravação de senhas no Secret Service agora trata corretamente writes parciais e interrupções;
+- serviços externos com DRM são apresentados explicitamente como sessões abertas no navegador, sem sugerir login integrado;
+- as alterações finais foram validadas em Release, ASan/UBSan, Cppcheck e GCC analyzer.
+
 ## 1.2.13 — 2026-09-17
 
 Suporte a playlists M3U grandes:

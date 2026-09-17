@@ -38,6 +38,7 @@ static void stable_id(char out[17], const char *text) {
 
 static size_t curl_write(void *ptr, size_t size, size_t nmemb, void *userdata) {
     m3u_buf_t *buf = userdata;
+    if (size != 0u && nmemb > SIZE_MAX / size) { buf->overflow = true; return 0u; }
     size_t bytes = size * nmemb;
     if (bytes > VIP_M3U_MAX_BYTES || buf->len > VIP_M3U_MAX_BYTES - bytes) {
         buf->overflow = true;
@@ -70,8 +71,14 @@ static vip_status_t load_http(const char *url, char **body_out, vip_error_t *err
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 6000L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 20000L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Visual-IPTV/1.1");
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 60000L);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
+    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Blazzing/1.2");
+#ifdef CURL_HTTP_VERSION_2TLS
+    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+#endif
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
     CURLcode rc = curl_easy_perform(curl);
@@ -153,7 +160,14 @@ static char *attr_dup(const char *line, const char *key) {
 }
 
 static char *extinf_name(const char *line) {
-    const char *comma = strrchr(line, ',');
+    /* The title begins at the first comma outside a quoted attribute. Using
+       strrchr() truncated ordinary titles such as "News, HD" to " HD". */
+    bool quoted = false;
+    const char *comma = NULL;
+    for (const char *p = line; p && *p; ++p) {
+        if (*p == '"') quoted = !quoted;
+        else if (*p == ',' && !quoted) { comma = p; break; }
+    }
     const char *name = comma ? comma + 1 : "Canal";
     while (*name && isspace((unsigned char)*name)) ++name;
     return vip_strdup(*name ? name : "Canal");
@@ -198,6 +212,17 @@ static char *resolve_url(const char *source, const char *stream) {
     if (has_scheme(stream) || strncmp(stream, "rtmp:", 5u) == 0 || strncmp(stream, "udp:", 4u) == 0)
         return vip_strdup(stream);
     if (strncmp(source, "http://", 7u) == 0 || strncmp(source, "https://", 8u) == 0) {
+        if (stream[0] == '/') {
+            const char *authority = strstr(source, "://");
+            authority = authority ? authority + 3 : source;
+            const char *path = strchr(authority, '/');
+            size_t origin = path ? (size_t)(path - source) : strlen(source);
+            char *out = malloc(origin + strlen(stream) + 1u);
+            if (!out) return NULL;
+            memcpy(out, source, origin);
+            strcpy(out + origin, stream);
+            return out;
+        }
         const char *slash = strrchr(source, '/');
         if (!slash) return vip_strdup(stream);
         size_t base = (size_t)(slash - source + 1);
@@ -239,16 +264,18 @@ vip_status_t vip_m3u_load(const char *source,
     char *pending_name = NULL;
     char *pending_logo = NULL;
     char *pending_group = NULL;
+    char *pending_tvg_id = NULL;
     int position = 0;
     char *saveptr = NULL;
     for (char *line = strtok_r(body, "\n", &saveptr); line; line = strtok_r(NULL, "\n", &saveptr)) {
         line = trim(line);
         if (!line[0] || strcmp(line, "#EXTM3U") == 0) continue;
         if (strncmp(line, "#EXTINF", 7u) == 0) {
-            free(pending_name); free(pending_logo); free(pending_group);
+            free(pending_name); free(pending_logo); free(pending_group); free(pending_tvg_id);
             pending_name = extinf_name(line);
             pending_logo = attr_dup(line, "tvg-logo");
             pending_group = attr_dup(line, "group-title");
+            pending_tvg_id = attr_dup(line, "tvg-id");
             continue;
         }
         if (line[0] == '#') continue;
@@ -258,7 +285,9 @@ vip_status_t vip_m3u_load(const char *source,
         char cat_id[32];
         st = ensure_category(categories_out, provider_id_out, pending_group, cat_id, error);
         if (st != VIP_OK) { free(stream_url); break; }
-        char id_hash[17]; stable_id(id_hash, stream_url);
+        char id_hash[17];
+        const char *identity = pending_tvg_id && pending_tvg_id[0] ? pending_tvg_id : stream_url;
+        stable_id(id_hash, identity);
         char channel_id[32]; snprintf(channel_id, sizeof(channel_id), "m3u:%s", id_hash);
         vip_channel_t item = {
             .provider_id = provider_id_out,
@@ -268,16 +297,18 @@ vip_status_t vip_m3u_load(const char *source,
             .logo_url = pending_logo,
             .stream_url = stream_url,
             .epg_channel_id = NULL,
-            .position = position++,
+            .position = position,
         };
         st = vip_channel_list_push(channels_out, &item, error);
+        if (st == VIP_OK) ++position;
         free(stream_url);
         free(pending_name); pending_name = NULL;
         free(pending_logo); pending_logo = NULL;
         free(pending_group); pending_group = NULL;
+        free(pending_tvg_id); pending_tvg_id = NULL;
         if (st != VIP_OK) break;
     }
-    free(pending_name); free(pending_logo); free(pending_group);
+    free(pending_name); free(pending_logo); free(pending_group); free(pending_tvg_id);
     free(body);
 
     if (st != VIP_OK) {

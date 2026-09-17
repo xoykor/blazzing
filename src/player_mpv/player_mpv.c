@@ -2,10 +2,9 @@
 /*
  * Persistent mpv adapter.
  *
- * A single idle mpv process is controlled through JSON IPC.  Media URLs are
- * sent over the private Unix socket instead of argv.  On X11, mpv creates its
- * own native rendering window; the monitor discovers it by _NET_WM_PID and
- * reparents it into the application's video container.
+ * A single idle mpv process is controlled through JSON IPC. Media URLs are
+ * sent over the private Unix socket instead of argv. On X11, mpv is embedded
+ * directly into the application's video container with --wid.
  */
 #define _POSIX_C_SOURCE 200809L
 #include "visual_iptv/player_mpv.h"
@@ -379,7 +378,7 @@ static int spawn_runtime(vip_mpv_player_t *player, int *log_read_fd) {
 
     const char *vo_arg = use_x11_vo ? "--vo=x11" : (use_gpu_next ? "--vo=gpu-next,gpu" : "--vo=gpu");
     const char *context_arg = use_x11_vo ? NULL : (use_gpu_next ? "--gpu-context=x11egl,x11,x11vk" : "--gpu-context=x11");
-    debug_log(player, "runtime persistente renderer=%s hwdec=%s embed=native-x11-reparent parent=%lu",
+    debug_log(player, "runtime persistente renderer=%s hwdec=%s embed=wid parent=%lu",
               use_x11_vo ? "x11" : (use_gpu_next ? "gpu-next-x11" : "gpu-x11"), hwdec, player->window_id);
 
     int log_pipe[2] = {-1, -1};
@@ -398,9 +397,11 @@ static int spawn_runtime(vip_mpv_player_t *player, int *log_read_fd) {
         char ipc_arg[160];
         char hwdec_arg[96];
         char title_arg[96];
+        char wid_arg[96];
         snprintf(ipc_arg, sizeof(ipc_arg), "--input-ipc-server=%s", player->ipc_path);
         snprintf(hwdec_arg, sizeof(hwdec_arg), "--hwdec=%s", hwdec);
         snprintf(title_arg, sizeof(title_arg), "--title=visual-iptv-mpv-%ld", (long)getpid());
+        snprintf(wid_arg, sizeof(wid_arg), "--wid=%lu", player->window_id);
         char *const audio_arg = player->audio ? "--audio=auto" : "--no-audio";
         char *argv[36];
         size_t ai = 0u;
@@ -409,7 +410,7 @@ static int spawn_runtime(vip_mpv_player_t *player, int *log_read_fd) {
         argv[ai++] = "--idle=yes";
         argv[ai++] = "--force-window=immediate";
         argv[ai++] = "--no-border";
-        argv[ai++] = "--geometry=64x64+0+0";
+        argv[ai++] = wid_arg;
         argv[ai++] = title_arg;
         argv[ai++] = "--keep-open=no";
         argv[ai++] = "--osc=no";
@@ -714,7 +715,7 @@ static void consume_ipc(vip_mpv_player_t *player, char *buf, size_t *len) {
     pthread_mutex_unlock(&player->mutex);
     if (fd < 0) return;
     for (;;) {
-        if (*len + 1u >= VIP_MPV_IPC_BUF_CAP) *len = 0u;
+        if (*len + 1u >= VIP_MPV_IPC_BUF_CAP) { *len = 0u; buf[0] = '\0'; }
         ssize_t n = read(fd, buf + *len, VIP_MPV_IPC_BUF_CAP - *len - 1u);
         if (n > 0) {
             *len += (size_t)n;
@@ -727,10 +728,11 @@ static void consume_ipc(vip_mpv_player_t *player, char *buf, size_t *len) {
                     start = i + 1u;
                 }
             }
-            if (start > 0u) {
-                memmove(buf, buf + start, *len - start);
-                *len -= start;
-                buf[*len] = '\0';
+            if (start > 0u && start <= *len) {
+                size_t remaining = *len - start;
+                if (remaining > 0u) memmove(buf, buf + start, remaining);
+                *len = remaining;
+                buf[remaining] = '\0';
             }
             continue;
         }
@@ -743,8 +745,9 @@ static void consume_ipc(vip_mpv_player_t *player, char *buf, size_t *len) {
  * process liveness and native-window reparent/resize synchronization. */
 static void *monitor_main(void *userdata) {
     vip_mpv_player_t *player = userdata;
-    Display *embed_dpy = XOpenDisplay(NULL);
-    if (!embed_dpy) debug_log(player, "DISPLAY X11 indisponível no monitor; janela nativa não poderá ser anexada");
+    /* --wid embeds directly into video_win. Keep the legacy native-window
+       synchronizer dormant rather than racing the window manager/reparent path. */
+    Display *embed_dpy = NULL;
     char ipc_buf[VIP_MPV_IPC_BUF_CAP] = {0};
     size_t ipc_len = 0u;
     int status = 0;
@@ -975,7 +978,7 @@ vip_status_t vip_mpv_player_create(vip_mpv_player_t **out,
         return VIP_ERR_NOMEM;
     }
     if (player->debug)
-        debug_log(player, "diagnóstico habilitado; janela X11 nativa do mpv reparentada + overlay de entrada + IPC JSON");
+        debug_log(player, "diagnóstico habilitado; mpv embutido via --wid + overlay de entrada + IPC JSON");
     *out = player;
     vip_error_clear(error);
     return VIP_OK;
