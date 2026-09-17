@@ -1,3 +1,15 @@
+## 1.2.16 — 2026-09-17
+
+M3U catalog routing and series-navigation fix:
+
+- M3U playlists are now split into live TV, movies and series instead of putting every item in the TV tab;
+- movie and series group-title categories populate the correct tabs for M3U sources;
+- M3U episode entries are collapsed into one series card in the series root view;
+- selecting an M3U series now opens season selection first and then the episodes for the chosen season;
+- the search field now has a much stronger active-focus state with highlighted background, accent rail and caret;
+- browser-launched Prime Video, Max and Globoplay entries and their external-session API were removed completely;
+- the home hub now contains only native IPTV/list playback and Pluto TV.
+
 ## 1.2.15 — 2026-09-17
 
 UI/UX and series-navigation update:
