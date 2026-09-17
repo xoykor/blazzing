@@ -5,6 +5,7 @@ on:
     branches: [revamp-v1.3.0]
     paths:
       - .github/workflows/revamp-visual-capture.yml
+      - src/app/hub.c
 
 permissions:
   contents: read
