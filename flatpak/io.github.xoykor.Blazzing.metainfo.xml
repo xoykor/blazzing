@@ -20,6 +20,11 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.2.13" date="2026-09-17">
+      <description>
+        <p>Raises the M3U playlist size limit from 32 MiB to 128 MiB for large local and remote playlists, with consistent limit diagnostics.</p>
+      </description>
+    </release>
     <release version="1.2.12" date="2026-09-08">
       <description>
         <p>Automatic provider endpoint discovery after Xtream HTTP 404, with native resolver decoding and verified server failover.</p>
