@@ -20,6 +20,7 @@ pkg_check_modules(PNG REQUIRED IMPORTED_TARGET libpng)
 pkg_check_modules(WEBP REQUIRED IMPORTED_TARGET libwebp)
 pkg_check_modules(CAIRO REQUIRED IMPORTED_TARGET cairo)
 pkg_check_modules(PANGOCAIRO REQUIRED IMPORTED_TARGET pangocairo)
+pkg_check_modules(QRENCODE REQUIRED IMPORTED_TARGET libqrencode)
 find_program(FFMPEG_EXECUTABLE NAMES ffmpeg REQUIRED)
 find_program(MPV_EXECUTABLE NAMES mpv)
 
@@ -78,7 +79,7 @@ add_library(vip_ui_x11
     src/ui_x11/ui_render.c)
 target_link_libraries(vip_ui_x11 PUBLIC
     vip_core vip_provider vip_database vip_decoder vip_thumbnails vip_player_mpv vip_pairing
-    PkgConfig::X11 PkgConfig::JPEG PkgConfig::CURL PkgConfig::CAIRO PkgConfig::PANGOCAIRO Threads::Threads)
+    PkgConfig::X11 PkgConfig::JPEG PkgConfig::CURL PkgConfig::CAIRO PkgConfig::PANGOCAIRO PkgConfig::QRENCODE Threads::Threads)
 vip_warnings(vip_ui_x11)
 
 add_executable(visual-iptv
