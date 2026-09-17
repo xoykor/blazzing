@@ -6,7 +6,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <ifaddrs.h>
-#include <net/if.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -45,11 +44,10 @@ static void discover_ipv4(char out[INET_ADDRSTRLEN]) {
 
     for (struct ifaddrs *it = ifaddr; it; it = it->ifa_next) {
         if (!it->ifa_addr || it->ifa_addr->sa_family != AF_INET) continue;
-        if ((it->ifa_flags & IFF_LOOPBACK) != 0) continue;
         const struct sockaddr_in *addr = (const struct sockaddr_in *)it->ifa_addr;
         char candidate[INET_ADDRSTRLEN];
         if (!inet_ntop(AF_INET, &addr->sin_addr, candidate, sizeof(candidate))) continue;
-        if (starts_with(candidate, "169.254.")) continue;
+        if (starts_with(candidate, "127.") || starts_with(candidate, "169.254.")) continue;
         snprintf(out, INET_ADDRSTRLEN, "%s", candidate);
         break;
     }
