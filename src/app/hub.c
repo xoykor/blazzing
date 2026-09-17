@@ -70,12 +70,6 @@ static void hub_stroke(hub_window_t *h, int x, int y, int w, int height, unsigne
     XDrawRectangle(h->dpy, h->win, h->gc, x, y, (unsigned)w, (unsigned)height);
 }
 
-static int hub_text_width(hub_window_t *h, const char *text) {
-    if (!text) return 0;
-    if (h->font) return XTextWidth(h->font, text, (int)strlen(text));
-    return (int)strlen(text) * 8;
-}
-
 static void hub_text(hub_window_t *h, int x, int y, const char *text, unsigned long color) {
     if (!text) return;
     XSetForeground(h->dpy, h->gc, color);
@@ -123,9 +117,9 @@ static void hub_draw(hub_window_t *h) {
 
     draw_service_card(h, 0, "IPTV / Listas", "Xtream, M3U e perfis salvos", "NATIVO  |  MPV");
     draw_service_card(h, 1, "Pluto TV", "TV gratis, sem login", "NATIVO  |  MPV");
-    draw_service_card(h, 2, "Prime Video", "Conta Amazon no site oficial", "WEB  |  DRM OFICIAL");
-    draw_service_card(h, 3, "Max", "Conta Max no site oficial", "WEB  |  DRM OFICIAL");
-    draw_service_card(h, 4, "Globoplay", "Conta Globo no site oficial", "WEB  |  DRM OFICIAL");
+    draw_service_card(h, 2, "Prime Video", "Login e sessão ficam no navegador", "ABRIR NO NAVEGADOR");
+    draw_service_card(h, 3, "Max", "Login e sessão ficam no navegador", "ABRIR NO NAVEGADOR");
+    draw_service_card(h, 4, "Globoplay", "Login e sessão ficam no navegador", "ABRIR NO NAVEGADOR");
 
     int footer_y = h->height - 70;
     hub_fill(h, 0, footer_y, h->width, 70, h->panel);

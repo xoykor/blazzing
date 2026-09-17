@@ -17,6 +17,7 @@
 #include <webp/decode.h>
 #include <openssl/evp.h>
 #include <pthread.h>
+#include <setjmp.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +27,16 @@
 #define MAP_BUCKETS 4096u
 #define THUMB_MAX_PENDING 512u
 #define THUMB_INTERACTIVE_PRIORITY 500000LL
+
+typedef struct {
+    struct jpeg_error_mgr pub;
+    jmp_buf env;
+} thumbnail_jpeg_error_t;
+
+static void thumbnail_jpeg_fail(j_common_ptr cinfo) {
+    thumbnail_jpeg_error_t *err = (thumbnail_jpeg_error_t *)cinfo->err;
+    longjmp(err->env, 1);
+}
 
 /* Cache files are always generated as JPEG.  A valid cache entry must at
  * least have JPEG SOI/EOI markers; visible decode failures are also removed
@@ -203,6 +214,13 @@ static queue_item_t heap_pop(vip_thumbnail_scheduler_t *s) {
 static bool next_request(vip_thumbnail_scheduler_t *s, vip_thumbnail_request_t *out) {
     pthread_mutex_lock(&s->mutex);
     for (;;) {
+        /* Shutdown must not drain a potentially huge queue of slow network
+         * jobs. Running captures are allowed to finish; pending work is
+         * discarded by destroy after workers have exited. */
+        if (s->stopping) {
+            pthread_mutex_unlock(&s->mutex);
+            return false;
+        }
         while (!s->paused && s->heap_len > 0) {
             queue_item_t item = heap_pop(s);
             sched_entry_t *e = map_find(s, item.request.provider_id, item.request.channel_id);
@@ -214,10 +232,6 @@ static bool next_request(vip_thumbnail_scheduler_t *s, vip_thumbnail_request_t *
             *out = item.request;
             pthread_mutex_unlock(&s->mutex);
             return true;
-        }
-        if (s->stopping) {
-            pthread_mutex_unlock(&s->mutex);
-            return false;
         }
         pthread_cond_wait(&s->cond, &s->mutex);
     }
@@ -474,10 +488,20 @@ vip_status_t vip_thumbnail_save_rgb_jpeg(const uint8_t *rgb,
         vip_error_set(error, VIP_ERR_IO, "não foi possível abrir cache temporário: %s", strerror(errno));
         return VIP_ERR_IO;
     }
-    struct jpeg_compress_struct cinfo;
-    struct jpeg_error_mgr jerr;
-    cinfo.err = jpeg_std_error(&jerr);
-    jpeg_create_compress(&cinfo);
+    struct jpeg_compress_struct cinfo; memset(&cinfo, 0, sizeof(cinfo));
+    thumbnail_jpeg_error_t jerr;
+    volatile bool created = false;
+    cinfo.err = jpeg_std_error(&jerr.pub);
+    jerr.pub.error_exit = thumbnail_jpeg_fail;
+    if (setjmp(jerr.env)) {
+        if (created) jpeg_destroy_compress(&cinfo);
+        fclose(fp);
+        (void)remove(tmp_path);
+        free(tmp_path); free(scaled);
+        vip_error_set(error, VIP_ERR_IO, "falha da libjpeg ao gravar thumbnail");
+        return VIP_ERR_IO;
+    }
+    jpeg_create_compress(&cinfo); created = true;
     jpeg_stdio_dest(&cinfo, fp);
     cinfo.image_width = (JDIMENSION)out_w; cinfo.image_height = (JDIMENSION)out_h;
     cinfo.input_components = 3; cinfo.in_color_space = JCS_RGB;
@@ -589,6 +613,8 @@ static vip_status_t download_logo(const char *url, image_download_t *buf, vip_er
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 3500L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 10000L);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1024L);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 4L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "Blazzing/1.2");
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
 #ifdef CURL_HTTP_VERSION_2TLS
@@ -599,12 +625,12 @@ static vip_status_t download_logo(const char *url, image_download_t *buf, vip_er
     CURLcode rc = curl_easy_perform(curl);
     long http = 0;
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http);
-    if (rc != CURLE_OK) {
-        vip_error_set(error, VIP_ERR_NETWORK, "download da capa: %s", curl_easy_strerror(rc));
-        return VIP_ERR_NETWORK;
-    }
     if (buf->overflow) {
         vip_error_set(error, VIP_ERR_NETWORK, "capa excede 12 MiB");
+        return VIP_ERR_NETWORK;
+    }
+    if (rc != CURLE_OK) {
+        vip_error_set(error, VIP_ERR_NETWORK, "download da capa: %s", curl_easy_strerror(rc));
         return VIP_ERR_NETWORK;
     }
     if (http >= 400) {
@@ -637,9 +663,20 @@ static vip_status_t read_local_logo(const char *source, image_download_t *buf, v
 
 static vip_status_t decode_jpeg_memory(const uint8_t *data, size_t len, decoded_image_t *out, vip_error_t *error) {
     struct jpeg_decompress_struct cinfo;
-    struct jpeg_error_mgr jerr;
-    cinfo.err = jpeg_std_error(&jerr);
+    memset(&cinfo, 0, sizeof(cinfo));
+    thumbnail_jpeg_error_t jerr;
+    volatile bool created = false;
+    uint8_t *volatile rgb = NULL;
+    cinfo.err = jpeg_std_error(&jerr.pub);
+    jerr.pub.error_exit = thumbnail_jpeg_fail;
+    if (setjmp(jerr.env)) {
+        free((void *)rgb);
+        if (created) jpeg_destroy_decompress(&cinfo);
+        vip_error_set(error, VIP_ERR_INVALID_FRAME, "JPEG de capa inválido ou corrompido");
+        return VIP_ERR_INVALID_FRAME;
+    }
     jpeg_create_decompress(&cinfo);
+    created = true;
     jpeg_mem_src(&cinfo, data, len);
     if (jpeg_read_header(&cinfo, TRUE) != JPEG_HEADER_OK) {
         jpeg_destroy_decompress(&cinfo);
@@ -651,15 +688,15 @@ static vip_status_t decode_jpeg_memory(const uint8_t *data, size_t len, decoded_
     if (!width || !height || width > 8192u || height > 8192u || width > SIZE_MAX / 3u / height) {
         jpeg_destroy_decompress(&cinfo); return VIP_ERR_INVALID_FRAME;
     }
-    uint8_t *rgb = malloc(width * height * 3u);
+    rgb = malloc(width * height * 3u);
     if (!rgb) { jpeg_destroy_decompress(&cinfo); return VIP_ERR_NOMEM; }
     while (cinfo.output_scanline < cinfo.output_height) {
-        JSAMPROW row = rgb + (size_t)cinfo.output_scanline * width * 3u;
+        JSAMPROW row = (uint8_t *)rgb + (size_t)cinfo.output_scanline * width * 3u;
         (void)jpeg_read_scanlines(&cinfo, &row, 1u);
     }
     (void)jpeg_finish_decompress(&cinfo);
     jpeg_destroy_decompress(&cinfo);
-    out->data=rgb; out->width=width; out->height=height; out->stride=width*3u;
+    out->data=(uint8_t *)rgb; out->width=width; out->height=height; out->stride=width*3u;
     vip_error_clear(error);
     return VIP_OK;
 }
@@ -724,8 +761,19 @@ static vip_status_t save_rgb_jpeg_exact(const uint8_t *rgb, size_t width, size_t
         vip_error_set(error, VIP_ERR_IO, "não foi possível abrir cache temporário de capa");
         return VIP_ERR_IO;
     }
-    struct jpeg_compress_struct cinfo; struct jpeg_error_mgr jerr;
-    cinfo.err=jpeg_std_error(&jerr); jpeg_create_compress(&cinfo); jpeg_stdio_dest(&cinfo,fp);
+    struct jpeg_compress_struct cinfo; memset(&cinfo, 0, sizeof(cinfo));
+    thumbnail_jpeg_error_t jerr;
+    volatile bool created = false;
+    cinfo.err=jpeg_std_error(&jerr.pub); jerr.pub.error_exit=thumbnail_jpeg_fail;
+    if (setjmp(jerr.env)) {
+        if (created) jpeg_destroy_compress(&cinfo);
+        fclose(fp);
+        (void)remove(tmp_path);
+        free(tmp_path);
+        vip_error_set(error, VIP_ERR_IO, "falha da libjpeg ao gravar capa");
+        return VIP_ERR_IO;
+    }
+    jpeg_create_compress(&cinfo); created = true; jpeg_stdio_dest(&cinfo,fp);
     cinfo.image_width=(JDIMENSION)width; cinfo.image_height=(JDIMENSION)height;
     cinfo.input_components=3; cinfo.in_color_space=JCS_RGB; jpeg_set_defaults(&cinfo);
     jpeg_set_quality(&cinfo, quality < 1 ? 82 : quality > 100 ? 100 : quality, TRUE);

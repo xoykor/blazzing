@@ -2,10 +2,9 @@
 /*
  * Persistent mpv adapter.
  *
- * A single idle mpv process is controlled through JSON IPC.  Media URLs are
- * sent over the private Unix socket instead of argv.  On X11, mpv creates its
- * own native rendering window; the monitor discovers it by _NET_WM_PID and
- * reparents it into the application's video container.
+ * A single idle mpv process is controlled through JSON IPC. Media URLs are
+ * sent over the private Unix socket instead of argv. On X11, mpv is embedded
+ * directly into the application's video container with --wid.
  */
 #define _POSIX_C_SOURCE 200809L
 #include "visual_iptv/player_mpv.h"
@@ -716,7 +715,7 @@ static void consume_ipc(vip_mpv_player_t *player, char *buf, size_t *len) {
     pthread_mutex_unlock(&player->mutex);
     if (fd < 0) return;
     for (;;) {
-        if (*len + 1u >= VIP_MPV_IPC_BUF_CAP) *len = 0u;
+        if (*len + 1u >= VIP_MPV_IPC_BUF_CAP) { *len = 0u; buf[0] = '\0'; }
         ssize_t n = read(fd, buf + *len, VIP_MPV_IPC_BUF_CAP - *len - 1u);
         if (n > 0) {
             *len += (size_t)n;
@@ -729,10 +728,11 @@ static void consume_ipc(vip_mpv_player_t *player, char *buf, size_t *len) {
                     start = i + 1u;
                 }
             }
-            if (start > 0u) {
-                memmove(buf, buf + start, *len - start);
-                *len -= start;
-                buf[*len] = '\0';
+            if (start > 0u && start <= *len) {
+                size_t remaining = *len - start;
+                if (remaining > 0u) memmove(buf, buf + start, remaining);
+                *len = remaining;
+                buf[remaining] = '\0';
             }
             continue;
         }
@@ -978,7 +978,7 @@ vip_status_t vip_mpv_player_create(vip_mpv_player_t **out,
         return VIP_ERR_NOMEM;
     }
     if (player->debug)
-        debug_log(player, "diagnóstico habilitado; janela X11 nativa do mpv reparentada + overlay de entrada + IPC JSON");
+        debug_log(player, "diagnóstico habilitado; mpv embutido via --wid + overlay de entrada + IPC JSON");
     *out = player;
     vip_error_clear(error);
     return VIP_OK;

@@ -314,19 +314,22 @@ static size_t utf8_to_latin1(char *dst, size_t cap, const char *src) {
     if (!src) src = "";
     size_t out = 0u;
     const unsigned char *p = (const unsigned char *)src;
-    while (*p && out + 1u < cap) {
+    const unsigned char *end = p + strlen(src);
+    while (p < end && out + 1u < cap) {
+        size_t remaining = (size_t)(end - p);
         uint32_t cp = 0u;
         size_t advance = 1u;
         if (*p < 0x80u) {
             cp = *p;
-        } else if ((*p & 0xe0u) == 0xc0u && (p[1] & 0xc0u) == 0x80u) {
+        } else if (remaining >= 2u && (*p & 0xe0u) == 0xc0u && (p[1] & 0xc0u) == 0x80u) {
             cp = ((uint32_t)(p[0] & 0x1fu) << 6) | (uint32_t)(p[1] & 0x3fu);
             advance = 2u;
-        } else if ((*p & 0xf0u) == 0xe0u && (p[1] & 0xc0u) == 0x80u && (p[2] & 0xc0u) == 0x80u) {
+        } else if (remaining >= 3u && (*p & 0xf0u) == 0xe0u &&
+                   (p[1] & 0xc0u) == 0x80u && (p[2] & 0xc0u) == 0x80u) {
             cp = ((uint32_t)(p[0] & 0x0fu) << 12) | ((uint32_t)(p[1] & 0x3fu) << 6) | (uint32_t)(p[2] & 0x3fu);
             advance = 3u;
-        } else if ((*p & 0xf8u) == 0xf0u && (p[1] & 0xc0u) == 0x80u &&
-                   (p[2] & 0xc0u) == 0x80u && (p[3] & 0xc0u) == 0x80u) {
+        } else if (remaining >= 4u && (*p & 0xf8u) == 0xf0u &&
+                   (p[1] & 0xc0u) == 0x80u && (p[2] & 0xc0u) == 0x80u && (p[3] & 0xc0u) == 0x80u) {
             cp = ((uint32_t)(p[0] & 0x07u) << 18) | ((uint32_t)(p[1] & 0x3fu) << 12) |
                  ((uint32_t)(p[2] & 0x3fu) << 6) | (uint32_t)(p[3] & 0x3fu);
             advance = 4u;
@@ -697,7 +700,6 @@ static void rebuild_filter(app_t *a) {
     pthread_mutex_unlock(&a->data_mutex);
     a->grid_scroll = 0;
     a->focused_filtered = 0;
-    if (a->thumbs) vip_thumbnail_scheduler_cancel_pending(a->thumbs);
 }
 
 static void recalc_category_counts(app_t *a) {
@@ -930,30 +932,41 @@ static void prefetch_thumbnail_batch(app_t *a) {
     if (now < a->thumb_prefetch_next_ms) return;
     a->thumb_prefetch_next_ms = now + THUMB_PREFETCH_INTERVAL_MS;
 
-    bool episode_source = a->series_episode_mode && a->episode_channels.len > 0u;
-    size_t sources = episode_source ? 1u : 0u;
-    for (int k = 0; k < 3; ++k) {
-        if (a->catalogs[k].loaded && a->catalogs[k].channels.len > 0u) ++sources;
-    }
-    if (sources == 0u) return;
-
     size_t budget = THUMB_PREFETCH_BATCH;
-    for (int k = 0; k < 3 && budget > 0u; ++k) {
+    const size_t primary_budget = (THUMB_PREFETCH_BATCH * 3u) / 4u;
+    bool episode_source = a->series_episode_mode && a->episode_channels.len > 0u;
+    int active_kind = (int)a->content_kind;
+
+    /* Spend most of every batch on what the user can actually see. Older
+       versions split bandwidth evenly across TV/VOD/series, making the active
+       catalog look slow even while invisible catalogs were downloading. */
+    if (episode_source) {
+        size_t used = prefetch_thumbnail_list(a, &a->episode_channels,
+                                              &a->episode_prefetch_cursor,
+                                              primary_budget, THUMB_BACKGROUND_PRIORITY + 1000LL);
+        budget -= used > budget ? budget : used;
+    } else if (active_kind >= 0 && active_kind < 3 && a->catalogs[active_kind].loaded) {
+        size_t used = prefetch_thumbnail_list(a, &a->catalogs[active_kind].channels,
+                                              &a->thumb_prefetch_cursor[active_kind],
+                                              primary_budget, THUMB_BACKGROUND_PRIORITY + 1000LL);
+        budget -= used > budget ? budget : used;
+    }
+
+    size_t secondary_sources = 0u;
+    for (int k = 0; k < 3; ++k) {
+        if (!episode_source && k == active_kind) continue;
+        if (a->catalogs[k].loaded && a->catalogs[k].channels.len > 0u) ++secondary_sources;
+    }
+    for (int k = 0; k < 3 && budget > 0u && secondary_sources > 0u; ++k) {
+        if (!episode_source && k == active_kind) continue;
         catalog_t *catalog = &a->catalogs[k];
         if (!catalog->loaded || catalog->channels.len == 0u) continue;
-
-        size_t quota = (budget + sources - 1u) / sources;
+        size_t quota = (budget + secondary_sources - 1u) / secondary_sources;
         size_t used = prefetch_thumbnail_list(a, &catalog->channels,
                                               &a->thumb_prefetch_cursor[k],
                                               quota, THUMB_BACKGROUND_PRIORITY);
-        budget -= used;
-        --sources;
-    }
-
-    if (episode_source && budget > 0u) {
-        (void)prefetch_thumbnail_list(a, &a->episode_channels,
-                                      &a->episode_prefetch_cursor,
-                                      budget, THUMB_BACKGROUND_PRIORITY);
+        budget -= used > budget ? budget : used;
+        --secondary_sources;
     }
 }
 
@@ -1210,6 +1223,7 @@ static void start_login(app_t *a) {
     job->password = vip_strdup(a->password);
     job->profile_name = vip_strdup(a->profile_name);
     if (!job->server || !job->server_alt || !job->username || !job->password || !job->profile_name) {
+        if (job->password) { volatile char *wipe = job->password; size_t n = strlen(job->password); while (n-- > 0u) *wipe++ = 0; }
         free(job->server); free(job->server_alt); free(job->username); free(job->password); free(job->profile_name); free(job);
         snprintf(a->status, sizeof(a->status), "Sem memória"); return;
     }
@@ -1290,6 +1304,7 @@ static void start_series_load(app_t *a, size_t channel_index) {
     job->series_id = vip_strdup(series->id);
     job->title = vip_strdup(series->name);
     if (!job->server || !job->username || !job->password || !job->series_id || !job->title) {
+        if (job->password) { volatile char *wipe = job->password; size_t n = strlen(job->password); while (n-- > 0u) *wipe++ = 0; }
         free(job->server); free(job->username); free(job->password); free(job->series_id); free(job->title); free(job);
         return;
     }
@@ -1548,6 +1563,20 @@ static bool executable_in_path(const char *name) {
     return found;
 }
 
+static bool write_all_fd(int fd, const char *data, size_t len) {
+    size_t offset = 0u;
+    while (offset < len) {
+        ssize_t written = write(fd, data + offset, len - offset);
+        if (written > 0) {
+            offset += (size_t)written;
+            continue;
+        }
+        if (written < 0 && errno == EINTR) continue;
+        return false;
+    }
+    return true;
+}
+
 /* Password persistence is delegated to Secret Service via secret-tool.
  * SQLite stores only non-secret profile fields. */
 static bool keyring_store_password(const char *profile_id, const char *password) {
@@ -1564,12 +1593,11 @@ static bool keyring_store_password(const char *profile_id, const char *password)
     close(inpipe[0]);
     if (pid < 0) { close(inpipe[1]); return false; }
     size_t len = strlen(password);
-    (void)write(inpipe[1], password, len);
-    (void)write(inpipe[1], "\n", 1u);
+    bool wrote = write_all_fd(inpipe[1], password, len) && write_all_fd(inpipe[1], "\n", 1u);
     close(inpipe[1]);
     int status = 0;
     while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
-    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    return wrote && WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
 static bool keyring_lookup_password(const char *profile_id, char *out, size_t cap) {
@@ -2508,7 +2536,6 @@ static void handle_wheel(app_t *a, int x, int y, int direction) {
         card_layout_t layout=browse_layout(a); int rows=(int)((a->filtered_len+(size_t)layout.cols-1u)/(size_t)layout.cols);
         int content_h=rows*layout.row_step; int maxscroll=content_h-(a->height-TOPBAR_H-18); if(maxscroll<0)maxscroll=0;
         a->grid_scroll+=direction*(layout.mode==ART_PORTRAIT?220:180); if(a->grid_scroll<0)a->grid_scroll=0; if(a->grid_scroll>maxscroll)a->grid_scroll=maxscroll;
-        if (a->thumbs) vip_thumbnail_scheduler_cancel_pending(a->thumbs);
     }
     (void)y;
 }

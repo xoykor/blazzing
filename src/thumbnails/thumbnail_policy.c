@@ -83,11 +83,10 @@ vip_status_t __wrap_vip_thumbnail_scheduler_enqueue(vip_thumbnail_scheduler_t *s
 }
 
 void __wrap_vip_thumbnail_scheduler_cancel_pending(vip_thumbnail_scheduler_t *scheduler) {
-    /* Scroll/filter rebuilds used to erase the entire queue. Keeping queued
-       requests alive means cache warming continues while the user navigates.
-       Requests own copies of their strings, so retaining them is safe across
-       viewport changes and even provider/profile switches. */
-    (void)scheduler;
+    /* Callers use cancellation only at provider/list boundaries. Viewport and
+       search changes no longer call this function, so ordinary navigation
+       keeps cache warming while a provider switch drops stale queued jobs. */
+    __real_vip_thumbnail_scheduler_cancel_pending(scheduler);
 }
 
 vip_status_t __wrap_vip_thumbnail_capture_with_decoder(const vip_thumbnail_request_t *request,

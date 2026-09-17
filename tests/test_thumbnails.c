@@ -4,9 +4,11 @@
 #include "test_common.h"
 #include <pthread.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 struct ready_state {
     pthread_mutex_t mutex;
@@ -43,6 +45,28 @@ int main(void) {
     char *b = vip_thumbnail_cache_path("/tmp/cache", "p", "42", &error);
     TEST_CHECK(a && b && strcmp(a, b) == 0);
     free(a); free(b);
+
+    char bad_logo[] = "/tmp/blazzing-bad-jpeg-XXXXXX";
+    int bad_fd = mkstemp(bad_logo);
+    TEST_CHECK(bad_fd >= 0);
+    FILE *bad = fdopen(bad_fd, "wb");
+    TEST_CHECK(bad != NULL);
+    const unsigned char broken_jpeg[16] = {0xff,0xd8,0xff,0xe0,0,16,'J','F','I','F',0,1,2,3,4,5};
+    TEST_CHECK(fwrite(broken_jpeg, 1u, sizeof(broken_jpeg), bad) == sizeof(broken_jpeg));
+    TEST_CHECK(fclose(bad) == 0);
+    vip_thumbnail_decoder_t *decoder = NULL;
+    vip_ffmpeg_decoder_config_t cfg = {.ffmpeg_path="ffmpeg", .timeout_ms=1000, .candidate_frames=1, .output_width=64, .output_height=36};
+    TEST_STATUS(vip_ffmpeg_decoder_create(&decoder, &cfg, &error), VIP_OK, &error);
+    vip_thumbnail_capture_context_t context = {0};
+    TEST_STATUS(vip_thumbnail_capture_context_init(&context, decoder, "/tmp/blazzing-thumb-test-cache", 82, &error), VIP_OK, &error);
+    vip_thumbnail_request_t bad_req = {.provider_id="p", .channel_id="broken-jpeg", .logo_url=bad_logo, .stream_url="http://unused", .priority=999999};
+    char *bad_path = NULL;
+    vip_status_t bad_status = vip_thumbnail_capture_with_decoder(&bad_req, &bad_path, &error, &context);
+    TEST_CHECK(bad_status != VIP_OK);
+    free(bad_path);
+    vip_thumbnail_capture_context_clear(&context);
+    vip_thumbnail_decoder_destroy(decoder);
+    unlink(bad_logo);
 
     struct ready_state state = {0};
     pthread_mutex_init(&state.mutex, NULL);
