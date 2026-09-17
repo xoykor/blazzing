@@ -10,18 +10,18 @@
 
 Blazzing é um player IPTV nativo para Linux escrito em C17. Ele reúne interface X11/XWayland, renderização Cairo/Pango, reprodução persistente com mpv, carregamento assíncrono de imagens, persistência SQLite, Xtream Codes, M3U/M3U8 e Pluto TV em um único aplicativo desktop.
 
-> **Estado do projeto:** a **v1.3.0 é a versão final de recursos**. O conjunto de funcionalidades está congelado. Uma nova versão só será publicada se for necessária para corrigir bug, problema de segurança ou incompatibilidade.
+> **Estado do projeto:** a **v1.3.0 é a versão final de recursos**. O conjunto de funcionalidades está congelado. A **v1.3.1 é uma versão de manutenção** com a revisão final de legibilidade, documentação e limpeza do código.
 
 > Use o Blazzing somente com listas, servidores e conteúdos que você tenha autorização para acessar.
 
 ## Download
 
-A instalação recomendada é o **Flatpak oficial da v1.3.0** disponível na [release do GitHub](https://github.com/xoykor/blazzing/releases/tag/v1.3.0).
+A instalação recomendada é o **Flatpak oficial da v1.3.1** disponível na [release do GitHub](https://github.com/xoykor/blazzing/releases/tag/v1.3.1).
 
-Depois de baixar `Blazzing-v1.3.0-x86_64.flatpak`:
+Depois de baixar `Blazzing-v1.3.1-x86_64.flatpak`:
 
 ```sh
-flatpak install --user ./Blazzing-v1.3.0-x86_64.flatpak
+flatpak install --user ./Blazzing-v1.3.1-x86_64.flatpak
 flatpak run io.github.xoykor.Blazzing
 ```
 
