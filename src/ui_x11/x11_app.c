@@ -125,6 +125,7 @@ typedef struct {
     char *password;
     char *series_id;
     char *title;
+    char *logo_url;
 } series_job_t;
 
 typedef struct {
@@ -202,8 +203,10 @@ struct app {
     catalog_t catalogs[3];
     vip_category_list_t episode_categories;
     vip_channel_list_t episode_channels;
+    vip_channel_list_t season_channels;
     content_kind_t content_kind;
     bool series_episode_mode;
+    bool series_season_select;
     char series_title[256];
     char series_parent_id[128];
     vip_media_metadata_t details_metadata;
@@ -263,7 +266,9 @@ static vip_category_list_t *active_categories(app_t *a) {
 }
 
 static vip_channel_list_t *active_channels(app_t *a) {
-    return a->series_episode_mode ? &a->episode_channels : &a->catalogs[(int)a->content_kind].channels;
+    if (a->series_season_select) return &a->season_channels;
+    if (a->series_episode_mode) return &a->episode_channels;
+    return &a->catalogs[(int)a->content_kind].channels;
 }
 
 #define ACTIVE_CATEGORIES(a) (*active_categories((a)))
@@ -588,6 +593,7 @@ static bool draw_cached_image_contain(app_t *a, const char *path,
 
 
 static artwork_mode_t default_artwork_mode(const app_t *a) {
+    if (a->series_season_select) return ART_PORTRAIT;
     if (a->series_episode_mode) return ART_LANDSCAPE;
     if (a->content_kind == CONTENT_VOD || a->content_kind == CONTENT_SERIES) return ART_PORTRAIT;
     return ART_LANDSCAPE;
@@ -745,7 +751,8 @@ static void load_media_state(app_t *a) {
     if (a->favorite_flags)
         (void)vip_database_load_favorite_flags(a->db, ACTIVE_CHANNELS(a).items[0].provider_id,
                                                &ACTIVE_CHANNELS(a), a->favorite_flags, count, &error);
-    if (a->progress_flags && (a->content_kind == CONTENT_VOD || a->series_episode_mode)) {
+    if (a->progress_flags &&
+        (a->content_kind == CONTENT_VOD || (a->series_episode_mode && !a->series_season_select))) {
         vip_error_clear(&error);
         (void)vip_database_load_progress(a->db, ACTIVE_CHANNELS(a).items[0].provider_id,
                                          &ACTIVE_CHANNELS(a), a->progress_flags, count, &error);
@@ -783,6 +790,7 @@ static const char *content_label(content_kind_t kind) {
 }
 
 static const char *content_plural(app_t *a) {
+    if (a->series_season_select) return "temporadas";
     if (a->series_episode_mode) return "episódios";
     switch (a->content_kind) {
         case CONTENT_VOD: return "filmes";
@@ -793,6 +801,7 @@ static const char *content_plural(app_t *a) {
 }
 
 static const char *all_content_label(app_t *a) {
+    if (a->series_season_select) return "Todas as temporadas";
     if (a->series_episode_mode) return "Todos os episódios";
     switch (a->content_kind) {
         case CONTENT_VOD: return "Todos os filmes";
@@ -806,6 +815,7 @@ static void switch_content(app_t *a, content_kind_t kind) {
     if (!a || kind < CONTENT_LIVE || kind > CONTENT_SERIES) return;
     if (atomic_load(&a->series_running) || a->series_thread_started) return;
     a->series_episode_mode = false;
+    a->series_season_select = false;
     clear_details_view(a);
     a->content_kind = kind;
     a->favorites_only = false;
@@ -824,7 +834,22 @@ static void switch_content(app_t *a, content_kind_t kind) {
 
 static void return_from_episode_list(app_t *a) {
     if (!a || !a->series_episode_mode) return;
+    if (!a->series_season_select) {
+        a->series_season_select = true;
+        a->selected_category = -1;
+        a->category_scroll = 0;
+        a->grid_scroll = 0;
+        a->focused_filtered = 0;
+        a->search[0] = '\0';
+        a->input_focus = INPUT_SEARCH;
+        snprintf(a->status, sizeof(a->status), "Escolha uma temporada de %s", a->series_title);
+        recalc_category_counts(a);
+        load_media_state(a);
+        rebuild_filter(a);
+        return;
+    }
     a->series_episode_mode = false;
+    a->series_season_select = false;
     clear_details_view(a);
     a->selected_category = -1;
     a->category_scroll = 0;
@@ -934,14 +959,15 @@ static void prefetch_thumbnail_batch(app_t *a) {
 
     size_t budget = THUMB_PREFETCH_BATCH;
     const size_t primary_budget = (THUMB_PREFETCH_BATCH * 3u) / 4u;
-    bool episode_source = a->series_episode_mode && a->episode_channels.len > 0u;
+    vip_channel_list_t *series_source = a->series_season_select ? &a->season_channels : &a->episode_channels;
+    bool episode_source = a->series_episode_mode && series_source->len > 0u;
     int active_kind = (int)a->content_kind;
 
     /* Spend most of every batch on what the user can actually see. Older
        versions split bandwidth evenly across TV/VOD/series, making the active
        catalog look slow even while invisible catalogs were downloading. */
     if (episode_source) {
-        size_t used = prefetch_thumbnail_list(a, &a->episode_channels,
+        size_t used = prefetch_thumbnail_list(a, series_source,
                                               &a->episode_prefetch_cursor,
                                               primary_budget, THUMB_BACKGROUND_PRIORITY + 1000LL);
         budget -= used > budget ? budget : used;
@@ -1169,6 +1195,7 @@ static void *login_worker(void *userdata) {
         a->active_server_alt = used_alternate;
         a->content_kind = CONTENT_LIVE;
         a->series_episode_mode = false;
+        a->series_season_select = false;
         snprintf(a->active_profile_id, sizeof(a->active_profile_id), "%s", provider_id);
         if (job->mode == LOGIN_XTREAM) {
             fprintf(stderr, "[catalog] filmes: %zu itens/%zu categorias; séries: %zu itens/%zu categorias\n",
@@ -1248,6 +1275,7 @@ static void *series_worker(void *userdata) {
     vip_xtream_client_t *client = NULL;
     vip_category_list_t seasons; vip_category_list_init(&seasons);
     vip_channel_list_t episodes; vip_channel_list_init(&episodes);
+    vip_channel_list_t season_cards; vip_channel_list_init(&season_cards);
     vip_error_t error = {0};
 
     vip_status_t st = vip_credentials_init(&credentials, job->server, job->username, job->password, &error);
@@ -1255,16 +1283,42 @@ static void *series_worker(void *userdata) {
     if (st == VIP_OK) st = vip_xtream_series_episodes(client, job->series_id, &seasons, &episodes, &error);
 
     if (st == VIP_OK) {
+        const char *fallback_provider = episodes.len > 0u ? episodes.items[0].provider_id : credentials.provider_id;
+        for (size_t i = 0; i < seasons.len; ++i) {
+            vip_category_t *season = &seasons.items[i];
+            char season_id[512];
+            snprintf(season_id, sizeof(season_id), "season:%s:%s", job->series_id,
+                     season->id ? season->id : "0");
+            vip_channel_t card = {
+                .provider_id = season->provider_id && season->provider_id[0] ? season->provider_id : (char *)fallback_provider,
+                .id = season_id,
+                .category_id = season->id,
+                .name = season->name ? season->name : "Temporada",
+                .logo_url = job->logo_url && job->logo_url[0] ? job->logo_url : NULL,
+                .stream_url = "series://season",
+                .epg_channel_id = NULL,
+                .position = (int)i,
+            };
+            st = vip_channel_list_push(&season_cards, &card, &error);
+            if (st != VIP_OK) break;
+        }
+    }
+
+    if (st == VIP_OK && season_cards.len > 0u) {
         pthread_mutex_lock(&a->data_mutex);
         vip_category_list_clear(&a->episode_categories);
         vip_channel_list_clear(&a->episode_channels);
+        vip_channel_list_clear(&a->season_channels);
         a->episode_categories = seasons; memset(&seasons, 0, sizeof(seasons));
         a->episode_channels = episodes; memset(&episodes, 0, sizeof(episodes));
+        a->season_channels = season_cards; memset(&season_cards, 0, sizeof(season_cards));
         snprintf(a->series_title, sizeof(a->series_title), "%s", job->title ? job->title : "Série");
-        snprintf(a->status, sizeof(a->status), "%zu episódios", a->episode_channels.len);
+        snprintf(a->status, sizeof(a->status), "%zu temporadas • %zu episódios",
+                 a->season_channels.len, a->episode_channels.len);
         pthread_mutex_unlock(&a->data_mutex);
         atomic_store(&a->series_success, true);
     } else {
+        if (st == VIP_OK) vip_error_set(&error, VIP_ERR_MALFORMED, "nenhuma temporada encontrada");
         pthread_mutex_lock(&a->data_mutex);
         snprintf(a->status, sizeof(a->status), "Falha ao carregar episódios: %s",
                  error.message[0] ? error.message : "erro desconhecido");
@@ -1276,12 +1330,13 @@ static void *series_worker(void *userdata) {
     vip_credentials_clear(&credentials);
     vip_category_list_clear(&seasons);
     vip_channel_list_clear(&episodes);
+    vip_channel_list_clear(&season_cards);
     if (job->password) {
         volatile char *wipe = job->password;
         size_t n = strlen(job->password);
         while (n-- > 0u) *wipe++ = 0;
     }
-    free(job->server); free(job->username); free(job->password); free(job->series_id); free(job->title); free(job);
+    free(job->server); free(job->username); free(job->password); free(job->series_id); free(job->title); free(job->logo_url); free(job);
     atomic_store(&a->series_running, false);
     atomic_store(&a->series_done, true);
     return NULL;
@@ -1303,13 +1358,14 @@ static void start_series_load(app_t *a, size_t channel_index) {
     job->password = vip_strdup(a->password);
     job->series_id = vip_strdup(series->id);
     job->title = vip_strdup(series->name);
-    if (!job->server || !job->username || !job->password || !job->series_id || !job->title) {
+    job->logo_url = vip_strdup(series->logo_url ? series->logo_url : "");
+    if (!job->server || !job->username || !job->password || !job->series_id || !job->title || !job->logo_url) {
         if (job->password) { volatile char *wipe = job->password; size_t n = strlen(job->password); while (n-- > 0u) *wipe++ = 0; }
-        free(job->server); free(job->username); free(job->password); free(job->series_id); free(job->title); free(job);
+        free(job->server); free(job->username); free(job->password); free(job->series_id); free(job->title); free(job->logo_url); free(job);
         return;
     }
     pthread_mutex_lock(&a->data_mutex);
-    snprintf(a->status, sizeof(a->status), "Carregando episódios de %s...", series->name);
+    snprintf(a->status, sizeof(a->status), "Carregando temporadas de %s...", series->name);
     pthread_mutex_unlock(&a->data_mutex);
     atomic_store(&a->series_done, false);
     atomic_store(&a->series_success, false);
@@ -1317,7 +1373,7 @@ static void start_series_load(app_t *a, size_t channel_index) {
     if (pthread_create(&a->series_thread, NULL, series_worker, job) != 0) {
         atomic_store(&a->series_running, false);
         if (job->password) { volatile char *wipe = job->password; size_t n = strlen(job->password); while (n-- > 0u) *wipe++ = 0; }
-        free(job->server); free(job->username); free(job->password); free(job->series_id); free(job->title); free(job);
+        free(job->server); free(job->username); free(job->password); free(job->series_id); free(job->title); free(job->logo_url); free(job);
         return;
     }
     a->series_thread_started = true;
@@ -1501,12 +1557,37 @@ static void maybe_start_details_load(app_t *a) {
     if (!same) start_details_load(a, channel_index);
 }
 
+static void select_season(app_t *a, size_t season_channel_index) {
+    if (!a || !a->series_season_select || season_channel_index >= a->season_channels.len) return;
+    vip_channel_t *season = &a->season_channels.items[season_channel_index];
+    int season_index = season->position;
+    if (season_index < 0 || (size_t)season_index >= a->episode_categories.len) return;
+    a->series_season_select = false;
+    a->selected_category = season_index;
+    a->category_scroll = 0;
+    a->grid_scroll = 0;
+    a->focused_filtered = 0;
+    a->search[0] = '\0';
+    a->input_focus = INPUT_SEARCH;
+    snprintf(a->status, sizeof(a->status), "%s • %s", a->series_title,
+             a->episode_categories.items[season_index].name);
+    recalc_category_counts(a);
+    load_media_state(a);
+    rebuild_filter(a);
+}
+
 static void activate_item(app_t *a, size_t channel_index) {
-    if (a->content_kind == CONTENT_SERIES && !a->series_episode_mode) {
-        start_series_load(a, channel_index);
-    } else {
-        enter_player(a, channel_index);
+    if (a->content_kind == CONTENT_SERIES) {
+        if (a->series_season_select) {
+            select_season(a, channel_index);
+            return;
+        }
+        if (!a->series_episode_mode) {
+            start_series_load(a, channel_index);
+            return;
+        }
     }
+    enter_player(a, channel_index);
 }
 
 static void request_paste(app_t *a, Atom selection) {
@@ -2248,7 +2329,8 @@ static void draw_browse(app_t *a) {
                         favorite ? a->colors.accent : a->colors.border);
             draw_centered(a, card_fav_x, card_fav_y + 19, card_fav_w, favorite ? "SALVO" : "FAV",
                           favorite ? a->colors.text : a->colors.muted);
-            if (a->progress_flags && (a->content_kind == CONTENT_VOD || a->series_episode_mode)) {
+            if (a->progress_flags &&
+                (a->content_kind == CONTENT_VOD || (a->series_episode_mode && !a->series_season_select))) {
                 vip_watch_progress_t *pr = &a->progress_flags[chidx];
                 if (pr->duration_seconds > 1.0 || pr->completed) {
                     double ratio = pr->completed ? 1.0 : pr->position_seconds / pr->duration_seconds;
@@ -2868,6 +2950,7 @@ static void destroy_app(app_t *a) {
     }
     vip_category_list_clear(&a->episode_categories);
     vip_channel_list_clear(&a->episode_channels);
+    vip_channel_list_clear(&a->season_channels);
     pthread_mutex_destroy(&a->data_mutex);
     if (a->dpy) {
         if (a->font) XFreeFont(a->dpy,a->font);
@@ -2896,7 +2979,7 @@ static void handle_async(app_t *a) {
         if(a->series_thread_started){pthread_join(a->series_thread,NULL);a->series_thread_started=false;}
         if(atomic_load(&a->series_success)&&a->content_kind==CONTENT_SERIES){
             clear_details_view(a);
-            a->series_episode_mode=true;a->favorites_only=false;a->selected_category=-1;a->category_scroll=0;a->grid_scroll=0;a->focused_filtered=0;a->search[0]='\0';
+            a->series_episode_mode=true;a->series_season_select=true;a->favorites_only=false;a->selected_category=-1;a->category_scroll=0;a->grid_scroll=0;a->focused_filtered=0;a->search[0]='\0';
             recalc_category_counts(a);load_media_state(a);rebuild_filter(a);
             fprintf(stderr,"[series] %zu episódios carregados\n",ACTIVE_CHANNELS(a).len);
         }
@@ -2937,6 +3020,7 @@ int vip_x11_app_run(void) {
     }
     vip_category_list_init(&a.episode_categories);
     vip_channel_list_init(&a.episode_channels);
+    vip_channel_list_init(&a.season_channels);
     vip_profile_list_init(&a.profiles);
     atomic_init(&a.login_running,false); atomic_init(&a.login_done,false); atomic_init(&a.login_success,false);
     atomic_init(&a.series_running,false); atomic_init(&a.series_done,false); atomic_init(&a.series_success,false);
