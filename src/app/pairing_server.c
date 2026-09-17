@@ -26,7 +26,7 @@ struct vip_pairing_server {
     int listen_fd;
     uint16_t port;
     char host[INET_ADDRSTRLEN];
-    char token[16];
+    char token[17];
     pthread_t thread;
     atomic_bool stop;
     vip_pairing_submit_fn on_submit;
@@ -37,17 +37,46 @@ static bool starts_with(const char *text, const char *prefix) {
     return text && prefix && strncmp(text, prefix, strlen(prefix)) == 0;
 }
 
+static bool discover_routed_ipv4(char out[INET_ADDRSTRLEN]) {
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0)
+        return false;
+
+    struct sockaddr_in remote = {0};
+    remote.sin_family = AF_INET;
+    remote.sin_port = htons(53);
+    if (inet_pton(AF_INET, "1.1.1.1", &remote.sin_addr) != 1 ||
+        connect(fd, (struct sockaddr *)&remote, sizeof(remote)) != 0) {
+        close(fd);
+        return false;
+    }
+
+    struct sockaddr_in local = {0};
+    socklen_t local_len = sizeof(local);
+    bool ok = getsockname(fd, (struct sockaddr *)&local, &local_len) == 0 &&
+              inet_ntop(AF_INET, &local.sin_addr, out, INET_ADDRSTRLEN) != NULL;
+    close(fd);
+    return ok && !starts_with(out, "127.") && !starts_with(out, "169.254.");
+}
+
 static void discover_ipv4(char out[INET_ADDRSTRLEN]) {
     snprintf(out, INET_ADDRSTRLEN, "127.0.0.1");
+    if (discover_routed_ipv4(out))
+        return;
+
     struct ifaddrs *ifaddr = NULL;
-    if (getifaddrs(&ifaddr) != 0) return;
+    if (getifaddrs(&ifaddr) != 0)
+        return;
 
     for (struct ifaddrs *it = ifaddr; it; it = it->ifa_next) {
-        if (!it->ifa_addr || it->ifa_addr->sa_family != AF_INET) continue;
+        if (!it->ifa_addr || it->ifa_addr->sa_family != AF_INET)
+            continue;
         const struct sockaddr_in *addr = (const struct sockaddr_in *)it->ifa_addr;
         char candidate[INET_ADDRSTRLEN];
-        if (!inet_ntop(AF_INET, &addr->sin_addr, candidate, sizeof(candidate))) continue;
-        if (starts_with(candidate, "127.") || starts_with(candidate, "169.254.")) continue;
+        if (!inet_ntop(AF_INET, &addr->sin_addr, candidate, sizeof(candidate)))
+            continue;
+        if (starts_with(candidate, "127.") || starts_with(candidate, "169.254."))
+            continue;
         snprintf(out, INET_ADDRSTRLEN, "%s", candidate);
         break;
     }
@@ -55,20 +84,24 @@ static void discover_ipv4(char out[INET_ADDRSTRLEN]) {
     freeifaddrs(ifaddr);
 }
 
-static void make_token(char out[16]) {
-    uint32_t value = 0;
+static void make_token(char out[17]) {
+    uint32_t value[2] = {0, 0};
     int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
     if (fd >= 0) {
-        ssize_t n = read(fd, &value, sizeof(value));
+        ssize_t n = read(fd, value, sizeof(value));
         close(fd);
-        if (n != (ssize_t)sizeof(value)) value = 0;
+        if (n != (ssize_t)sizeof(value)) {
+            value[0] = 0;
+            value[1] = 0;
+        }
     }
-    if (value == 0) {
+    if (value[0] == 0 && value[1] == 0) {
         struct timespec ts = {0};
         (void)clock_gettime(CLOCK_MONOTONIC, &ts);
-        value = (uint32_t)ts.tv_nsec ^ (uint32_t)getpid() ^ (uint32_t)ts.tv_sec;
+        value[0] = (uint32_t)ts.tv_nsec ^ (uint32_t)getpid();
+        value[1] = (uint32_t)ts.tv_sec ^ (uint32_t)(uintptr_t)out;
     }
-    snprintf(out, 16, "%06u", 100000u + (value % 900000u));
+    snprintf(out, 17, "%08x%08x", (unsigned int)value[0], (unsigned int)value[1]);
 }
 
 static int hex_value(char c) {
