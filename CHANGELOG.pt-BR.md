@@ -1,3 +1,12 @@
+## 1.2.13 — 2026-09-17
+
+Suporte a playlists M3U grandes:
+
+- aumenta o limite de playlists M3U/M3U8 locais e remotas de 32 MiB para 128 MiB;
+- catálogos grandes, como playlists de aproximadamente 79 MiB, agora podem ser carregados diretamente;
+- redirecionamentos HTTP continuam suportados para URLs diretas ou encurtadas de playlist;
+- mensagens de erro do limite de tamanho agora permanecem sincronizadas com o limite configurado.
+
 ## 1.2.12 — 2026-09-08
 
 Descoberta automática do endpoint do provider:
