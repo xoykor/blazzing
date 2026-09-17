@@ -44,5 +44,8 @@ void vip_ui_render_text(vip_ui_renderer_t *renderer,
                         uint32_t rgb,
                         double alpha,
                         bool centered);
+int vip_ui_render_text_width(vip_ui_renderer_t *renderer,
+                             const char *text,
+                             const char *font);
 
 #endif
