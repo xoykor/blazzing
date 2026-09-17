@@ -10,7 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define VIP_M3U_MAX_BYTES (32u * 1024u * 1024u)
+#define VIP_M3U_MAX_MIB 128u
+#define VIP_M3U_MAX_BYTES ((size_t)VIP_M3U_MAX_MIB * 1024u * 1024u)
 
 typedef struct {
     char *data;
@@ -79,7 +80,7 @@ static vip_status_t load_http(const char *url, char **body_out, vip_error_t *err
     curl_easy_cleanup(curl);
     if (rc != CURLE_OK || buf.overflow || http >= 400) {
         free(buf.data);
-        if (buf.overflow) vip_error_set(error, VIP_ERR_NETWORK, "playlist M3U excede o limite de 32 MiB");
+        if (buf.overflow) vip_error_set(error, VIP_ERR_NETWORK, "playlist M3U excede o limite de %u MiB", VIP_M3U_MAX_MIB);
         else if (http >= 400) vip_error_set(error, VIP_ERR_NETWORK, "servidor M3U respondeu HTTP %ld", http);
         else vip_error_set(error, VIP_ERR_NETWORK, "não foi possível baixar a playlist M3U");
         return VIP_ERR_NETWORK;
@@ -101,7 +102,7 @@ static vip_status_t load_file(const char *path, char **body_out, vip_error_t *er
     long n = ftell(fp);
     if (n < 0 || (unsigned long)n > VIP_M3U_MAX_BYTES) {
         fclose(fp);
-        vip_error_set(error, VIP_ERR_IO, "playlist M3U local inválida ou maior que 32 MiB");
+        vip_error_set(error, VIP_ERR_IO, "playlist M3U local inválida ou maior que %u MiB", VIP_M3U_MAX_MIB);
         return VIP_ERR_IO;
     }
     rewind(fp);
