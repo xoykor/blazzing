@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(visual_iptv_x11 VERSION 1.2.15 LANGUAGES C)
+project(visual_iptv_x11 VERSION 1.2.16 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -36,13 +36,14 @@ function(vip_thumbnail_policy_wrap target)
         -Wl,--wrap=vip_thumbnail_capture_with_decoder)
 endfunction()
 
-add_library(vip_core src/core/core.c src/core/streaming_services.c)
+add_library(vip_core src/core/core.c)
 target_include_directories(vip_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 vip_warnings(vip_core)
 
 add_library(vip_provider
     src/provider/xtream.c
     src/provider/m3u.c
+    src/provider/m3u_catalog.c
     src/provider/server_resolver.c
     src/provider/pluto.c)
 target_link_libraries(vip_provider PUBLIC vip_core PkgConfig::CURL PkgConfig::JSONC OpenSSL::Crypto)
@@ -100,11 +101,6 @@ if(BUILD_TESTING)
     target_link_libraries(test_core PRIVATE vip_core)
     vip_warnings(test_core)
     add_test(NAME core COMMAND test_core)
-
-    add_executable(test_streaming_services tests/test_streaming_services.c)
-    target_link_libraries(test_streaming_services PRIVATE vip_core)
-    vip_warnings(test_streaming_services)
-    add_test(NAME streaming_services COMMAND test_streaming_services)
 
     add_executable(test_provider tests/test_provider.c)
     target_link_libraries(test_provider PRIVATE vip_provider PkgConfig::CURL)
