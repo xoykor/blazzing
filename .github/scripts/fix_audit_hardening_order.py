@@ -16,7 +16,7 @@ static void thumbnail_jpeg_fail(j_common_ptr cinfo) {
 if s.count(block) != 1:
     raise SystemExit(f"expected one jpeg handler block, found {s.count(block)}")
 s = s.replace(block, "", 1)
-anchor = '''#define THUMB_IMAGE_MAX_BYTES (12u * 1024u * 1024u)
+anchor = '''#define THUMB_INTERACTIVE_PRIORITY 500000LL
 
 '''
 if s.count(anchor) != 1:
