@@ -7,6 +7,7 @@ M3U catalog routing and series-navigation fix:
 - M3U episode entries are collapsed into one series card in the series root view;
 - selecting an M3U series now opens season selection first and then the episodes for the chosen season;
 - the search field now has a much stronger active-focus state with highlighted background, accent rail and caret;
+- player fullscreen now tracks the window manager state, retries EWMH fullscreen under KDE/XWayland and falls back to a borderless screen-sized window when needed;
 - browser-launched Prime Video, Max and Globoplay entries and their external-session API were removed completely;
 - the home hub now contains only native IPTV/list playback and Pluto TV.
 
