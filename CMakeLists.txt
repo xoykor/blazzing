@@ -68,12 +68,16 @@ add_library(vip_player_mpv src/player_mpv/player_mpv.c)
 target_link_libraries(vip_player_mpv PUBLIC vip_core Threads::Threads PkgConfig::JSONC)
 vip_warnings(vip_player_mpv)
 
+add_library(vip_pairing src/app/pairing_server.c)
+target_link_libraries(vip_pairing PUBLIC vip_core Threads::Threads)
+vip_warnings(vip_pairing)
+
 add_library(vip_ui_x11
     src/ui_x11/x11_app.c
     src/ui_x11/ui_motion.c
     src/ui_x11/ui_render.c)
 target_link_libraries(vip_ui_x11 PUBLIC
-    vip_core vip_provider vip_database vip_decoder vip_thumbnails vip_player_mpv
+    vip_core vip_provider vip_database vip_decoder vip_thumbnails vip_player_mpv vip_pairing
     PkgConfig::X11 PkgConfig::JPEG PkgConfig::CURL PkgConfig::CAIRO PkgConfig::PANGOCAIRO Threads::Threads)
 vip_warnings(vip_ui_x11)
 
