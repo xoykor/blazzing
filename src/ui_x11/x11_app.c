@@ -15,6 +15,7 @@
 #include "visual_iptv/provider_m3u.h"
 #include "visual_iptv/server_resolver.h"
 #include "visual_iptv/thumbnails.h"
+#include "visual_iptv/ui_motion.h"
 
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
@@ -1411,13 +1412,29 @@ static void *series_worker(void *userdata) {
     vip_category_list_t seasons; vip_category_list_init(&seasons);
     vip_channel_list_t episodes; vip_channel_list_init(&episodes);
     vip_channel_list_t season_cards; vip_channel_list_init(&season_cards);
+    vip_media_metadata_t series_metadata; vip_media_metadata_init(&series_metadata);
     vip_error_t error = {0};
 
     vip_status_t st = vip_credentials_init(&credentials, job->server, job->username, job->password, &error);
     if (st == VIP_OK) st = vip_xtream_client_create(&client, &credentials, &error);
-    if (st == VIP_OK) st = vip_xtream_series_episodes(client, job->series_id, &seasons, &episodes, &error);
+    if (st == VIP_OK) st = vip_xtream_series_info(client, job->series_id, &series_metadata, &seasons, &episodes, &error);
 
     if (st == VIP_OK) {
+        const char *series_art = series_metadata.cover_url && series_metadata.cover_url[0]
+                                     ? series_metadata.cover_url
+                                     : (job->logo_url && job->logo_url[0] ? job->logo_url : NULL);
+        if (series_art) {
+            for (size_t i = 0; i < episodes.len; ++i) {
+                char *inherited = vip_strdup(series_art);
+                if (!inherited) {
+                    vip_error_set(&error, VIP_ERR_NOMEM, "sem memória para capa dos episódios");
+                    st = VIP_ERR_NOMEM;
+                    break;
+                }
+                free(episodes.items[i].logo_url);
+                episodes.items[i].logo_url = inherited;
+            }
+        }
         const char *fallback_provider = episodes.len > 0u ? episodes.items[0].provider_id : credentials.provider_id;
         for (size_t i = 0; i < seasons.len; ++i) {
             vip_category_t *season = &seasons.items[i];
@@ -1429,7 +1446,7 @@ static void *series_worker(void *userdata) {
                 .id = season_id,
                 .category_id = season->id,
                 .name = season->name ? season->name : "Temporada",
-                .logo_url = job->logo_url && job->logo_url[0] ? job->logo_url : NULL,
+                .logo_url = series_art,
                 .stream_url = "series://season",
                 .epg_channel_id = NULL,
                 .position = (int)i,
@@ -1466,6 +1483,7 @@ static void *series_worker(void *userdata) {
     vip_category_list_clear(&seasons);
     vip_channel_list_clear(&episodes);
     vip_channel_list_clear(&season_cards);
+    vip_media_metadata_clear(&series_metadata);
     if (job->password) {
         volatile char *wipe = job->password;
         size_t n = strlen(job->password);
@@ -2641,7 +2659,20 @@ static void draw_toast(app_t *a) {
     draw_centered(a, x, y + 27, w, a->toast, a->colors.text);
 }
 
-static int category_visible_rows(app_t *a) { int n = (a->height - TOPBAR_H - 50) / 40; return n > 1 ? n : 1; }
+static int browse_sidebar_category_y(const app_t *a) {
+    return TOPBAR_H + 12 + (a && a->series_episode_mode ? 48 : 0);
+}
+
+static int category_visible_rows(app_t *a) {
+    int top = browse_sidebar_category_y(a);
+    int n = (a->height - top - 8) / 40;
+    return n > 1 ? n : 1;
+}
+
+static const char *browse_back_label(const app_t *a) {
+    if (!a || !a->series_episode_mode) return "Voltar";
+    return a->series_season_select ? "< Séries" : "< Temporadas";
+}
 
 static void draw_browse(app_t *a) {
     fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.bg);
@@ -2679,6 +2710,12 @@ static void draw_browse(app_t *a) {
     draw_centered(a, list_x, 42, list_w, "Listas", a->colors.muted);
 
     int y = TOPBAR_H + 12;
+    if (a->series_episode_mode) {
+        fill_round_rect(a, 8, y, SIDEBAR_W-16, 38, 11, a->colors.panel);
+        stroke_round_rect(a, 8, y, SIDEBAR_W-16, 38, 11, a->colors.accent);
+        draw_text_font(a, a->font_heading, 18, y+26, browse_back_label(a), a->colors.text);
+        y += 48;
+    }
     bool all_sel = a->selected_category < 0;
     fill_round_rect(a, 8, y, SIDEBAR_W-16, 36, 11, all_sel ? a->colors.accent2 : a->colors.panel2);
     char all_label[128]; snprintf(all_label, sizeof(all_label), "%s (%zu)", all_content_label(a), ACTIVE_CHANNELS(a).len);
@@ -2711,10 +2748,27 @@ static void draw_browse(app_t *a) {
         return;
     }
 
+    int grid_right = a->width - 18;
+    if (details_panel_active(a)) {
+        int px, py, pw, ph;
+        details_panel_geometry(a, &px, &py, &pw, &ph);
+        (void)py; (void)pw; (void)ph;
+        grid_right = px - 12;
+    }
+    if (grid_right > content_x && a->height > content_y) {
+        XRectangle grid_clip = {
+            .x = (short)content_x,
+            .y = (short)content_y,
+            .width = (unsigned short)(grid_right - content_x),
+            .height = (unsigned short)(a->height - content_y),
+        };
+        XSetClipRectangles(a->dpy, a->gc, 0, 0, &grid_clip, 1, Unsorted);
+    }
+
     for (int rr = 0; rr < visible_rows; ++rr) {
         int row = first_row + rr;
         int cy = content_y + y_offset + rr * layout.row_step;
-        if (cy > a->height || cy + layout.card_h < TOPBAR_H) continue;
+        if (cy > a->height || cy + layout.card_h < content_y) continue;
         for (int col = 0; col < layout.cols; ++col) {
             size_t fidx = (size_t)row * (size_t)layout.cols + (size_t)col;
             if (fidx >= a->filtered_len) break;
@@ -2793,6 +2847,7 @@ static void draw_browse(app_t *a) {
         }
     }
 
+    XSetClipMask(a->dpy, a->gc, None);
     draw_details_panel(a);
 
     if (atomic_load(&a->series_running)) {
@@ -2959,7 +3014,13 @@ static void handle_browse_click(app_t *a, int x, int y) {
         snprintf(a->status,sizeof(a->status),"Escolha uma lista salva ou conecte outra"); return;
     }
     if (x < SIDEBAR_W && y >= TOPBAR_H) {
-        int local=y-(TOPBAR_H+12); if (local>=0 && local<36) { choose_category(a,-1); return; }
+        int base = TOPBAR_H + 12;
+        if (a->series_episode_mode && point_in(x, y, 8, base, SIDEBAR_W-16, 38)) {
+            return_from_episode_list(a);
+            return;
+        }
+        int category_y = browse_sidebar_category_y(a);
+        int local=y-category_y; if (local>=0 && local<36) { choose_category(a,-1); return; }
         local-=42; if (local>=0) { int row=local/42; if (local%42<36) { int idx=a->category_scroll+row; if (idx>=0 && (size_t)idx<ACTIVE_CATEGORIES(a).len) choose_category(a,idx); } }
         return;
     }

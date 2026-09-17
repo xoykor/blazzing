@@ -66,7 +66,9 @@ add_library(vip_player_mpv src/player_mpv/player_mpv.c)
 target_link_libraries(vip_player_mpv PUBLIC vip_core Threads::Threads PkgConfig::JSONC PkgConfig::X11)
 vip_warnings(vip_player_mpv)
 
-add_library(vip_ui_x11 src/ui_x11/x11_app.c)
+add_library(vip_ui_x11
+    src/ui_x11/x11_app.c
+    src/ui_x11/ui_motion.c)
 target_link_libraries(vip_ui_x11 PUBLIC
     vip_core vip_provider vip_database vip_decoder vip_thumbnails vip_player_mpv
     PkgConfig::X11 PkgConfig::JPEG PkgConfig::CURL Threads::Threads)
@@ -147,6 +149,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_player_mpv PRIVATE vip_player_mpv)
     vip_warnings(test_player_mpv)
     add_test(NAME player_mpv COMMAND test_player_mpv)
+
+    add_executable(test_ui_motion tests/test_ui_motion.c src/ui_x11/ui_motion.c)
+    target_include_directories(test_ui_motion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    vip_warnings(test_ui_motion)
+    add_test(NAME ui_motion COMMAND test_ui_motion)
 endif()
 
 install(TARGETS visual-iptv RUNTIME DESTINATION bin)
