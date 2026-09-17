@@ -26,6 +26,8 @@ typedef struct {
     Window win;
     GC gc;
     XFontStruct *font;
+    XFontStruct *title_font;
+    XFontStruct *heading_font;
     Atom wm_delete;
     int width;
     int height;
@@ -39,6 +41,7 @@ typedef struct {
     unsigned long muted;
     unsigned long accent;
     unsigned long accent2;
+    unsigned long shadow;
 } hub_window_t;
 
 static unsigned long hub_color(hub_window_t *h, const char *name) {
@@ -50,14 +53,15 @@ static unsigned long hub_color(hub_window_t *h, const char *name) {
 }
 
 static void hub_init_colors(hub_window_t *h) {
-    h->bg = hub_color(h, "#111416");
-    h->panel = hub_color(h, "#202428");
-    h->panel2 = hub_color(h, "#171a1d");
-    h->border = hub_color(h, "#394047");
-    h->text = hub_color(h, "#f1f3f5");
-    h->muted = hub_color(h, "#9aa0a6");
-    h->accent = hub_color(h, "#4ba3ff");
-    h->accent2 = hub_color(h, "#275d84");
+    h->bg = hub_color(h, "#070A12");
+    h->panel = hub_color(h, "#0E1420");
+    h->panel2 = hub_color(h, "#151E2D");
+    h->border = hub_color(h, "#2B3950");
+    h->text = hub_color(h, "#F6F8FC");
+    h->muted = hub_color(h, "#91A0B7");
+    h->accent = hub_color(h, "#62A9FF");
+    h->accent2 = hub_color(h, "#183E6B");
+    h->shadow = hub_color(h, "#030509");
 }
 
 static void hub_fill(hub_window_t *h, int x, int y, int w, int height, unsigned long color) {
@@ -65,15 +69,41 @@ static void hub_fill(hub_window_t *h, int x, int y, int w, int height, unsigned 
     XFillRectangle(h->dpy, h->win, h->gc, x, y, (unsigned)w, (unsigned)height);
 }
 
-static void hub_stroke(hub_window_t *h, int x, int y, int w, int height, unsigned long color) {
+static void hub_round_fill(hub_window_t *h, int x, int y, int w, int height, int r, unsigned long color) {
+    if (w <= 0 || height <= 0) return;
+    if (r * 2 > w) r = w / 2;
+    if (r * 2 > height) r = height / 2;
     XSetForeground(h->dpy, h->gc, color);
-    XDrawRectangle(h->dpy, h->win, h->gc, x, y, (unsigned)w, (unsigned)height);
+    XFillRectangle(h->dpy, h->win, h->gc, x + r, y, (unsigned)(w - 2*r), (unsigned)height);
+    XFillRectangle(h->dpy, h->win, h->gc, x, y + r, (unsigned)w, (unsigned)(height - 2*r));
+    XFillArc(h->dpy, h->win, h->gc, x, y, (unsigned)(2*r), (unsigned)(2*r), 90*64, 90*64);
+    XFillArc(h->dpy, h->win, h->gc, x+w-2*r, y, (unsigned)(2*r), (unsigned)(2*r), 0, 90*64);
+    XFillArc(h->dpy, h->win, h->gc, x, y+height-2*r, (unsigned)(2*r), (unsigned)(2*r), 180*64, 90*64);
+    XFillArc(h->dpy, h->win, h->gc, x+w-2*r, y+height-2*r, (unsigned)(2*r), (unsigned)(2*r), 270*64, 90*64);
+}
+
+static void hub_round_stroke(hub_window_t *h, int x, int y, int w, int height, int r, unsigned long color) {
+    XSetForeground(h->dpy, h->gc, color);
+    XDrawLine(h->dpy, h->win, h->gc, x+r, y, x+w-r, y);
+    XDrawLine(h->dpy, h->win, h->gc, x+r, y+height, x+w-r, y+height);
+    XDrawLine(h->dpy, h->win, h->gc, x, y+r, x, y+height-r);
+    XDrawLine(h->dpy, h->win, h->gc, x+w, y+r, x+w, y+height-r);
+    XDrawArc(h->dpy, h->win, h->gc, x, y, (unsigned)(2*r), (unsigned)(2*r), 90*64, 90*64);
+    XDrawArc(h->dpy, h->win, h->gc, x+w-2*r, y, (unsigned)(2*r), (unsigned)(2*r), 0, 90*64);
+    XDrawArc(h->dpy, h->win, h->gc, x, y+height-2*r, (unsigned)(2*r), (unsigned)(2*r), 180*64, 90*64);
+    XDrawArc(h->dpy, h->win, h->gc, x+w-2*r, y+height-2*r, (unsigned)(2*r), (unsigned)(2*r), 270*64, 90*64);
+}
+
+static void hub_text_font(hub_window_t *h, XFontStruct *font, int x, int y, const char *text, unsigned long color) {
+    if (!text) return;
+    XFontStruct *f = font ? font : h->font;
+    if (f) XSetFont(h->dpy, h->gc, f->fid);
+    XSetForeground(h->dpy, h->gc, color);
+    XDrawString(h->dpy, h->win, h->gc, x, y, text, (int)strlen(text));
 }
 
 static void hub_text(hub_window_t *h, int x, int y, const char *text, unsigned long color) {
-    if (!text) return;
-    XSetForeground(h->dpy, h->gc, color);
-    XDrawString(h->dpy, h->win, h->gc, x, y, text, (int)strlen(text));
+    hub_text_font(h, h->font, x, y, text, color);
 }
 
 static void card_geometry(const hub_window_t *h, int index, int *x, int *y, int *w, int *height) {
@@ -86,45 +116,52 @@ static void card_geometry(const hub_window_t *h, int index, int *x, int *y, int 
     int row = index / cols;
     int col = index % cols;
     *x = margin + col * (card_w + gap);
-    *y = 176 + row * 194;
+    *y = 188 + row * 194;
     *w = card_w;
     *height = 166;
 }
 
-static void draw_service_card(hub_window_t *h,
-                              int index,
-                              const char *name,
-                              const char *subtitle,
-                              const char *mode) {
+static void draw_service_card(hub_window_t *h, int index, const char *monogram,
+                              const char *name, const char *subtitle, const char *mode) {
     int x = 0, y = 0, w = 0, height = 0;
     card_geometry(h, index, &x, &y, &w, &height);
     bool selected = h->selected == index;
-    hub_fill(h, x, y, w, height, selected ? h->accent2 : h->panel2);
-    hub_stroke(h, x, y, w, height, selected ? h->accent : h->border);
-    if (selected) hub_stroke(h, x + 2, y + 2, w - 4, height - 4, h->accent);
-    hub_text(h, x + 18, y + 36, name, h->text);
-    hub_text(h, x + 18, y + 70, subtitle, selected ? h->text : h->muted);
-    hub_text(h, x + 18, y + height - 22, mode, selected ? h->text : h->muted);
+    hub_round_fill(h, x + 4, y + 6, w, height, 20, h->shadow);
+    hub_round_fill(h, x, y, w, height, 20, selected ? h->accent2 : h->panel2);
+    hub_round_stroke(h, x, y, w, height, 20, selected ? h->accent : h->border);
+    if (selected) hub_round_stroke(h, x + 2, y + 2, w - 4, height - 4, 18, h->accent);
+
+    hub_round_fill(h, x + 18, y + 18, 42, 42, 13, selected ? h->accent : h->panel);
+    hub_text_font(h, h->heading_font, x + 31, y + 47, monogram, selected ? h->bg : h->text);
+    hub_text_font(h, h->heading_font, x + 76, y + 43, name, h->text);
+    hub_text(h, x + 18, y + 86, subtitle, selected ? h->text : h->muted);
+    hub_round_fill(h, x + 18, y + height - 43, w - 36, 27, 10, selected ? h->panel : h->bg);
+    hub_text(h, x + 30, y + height - 24, mode, selected ? h->text : h->muted);
 }
 
 static void hub_draw(hub_window_t *h) {
     hub_fill(h, 0, 0, h->width, h->height, h->bg);
-    hub_fill(h, 0, 0, h->width, 92, h->panel);
-    hub_text(h, 54, 42, "Blazzing", h->text);
-    hub_text(h, 54, 67, "Streaming hub", h->muted);
-    hub_text(h, 54, 132, "Escolha uma fonte", h->text);
-    hub_text(h, 54, 154, "IPTV e Pluto rodam nativamente. DRM abre no navegador; login e sessão ficam no navegador.", h->muted);
+    hub_fill(h, 0, 0, h->width, 5, h->accent);
+    hub_fill(h, 0, 5, h->width, 112, h->panel);
+    hub_round_fill(h, 52, 34, 48, 48, 15, h->accent);
+    hub_text_font(h, h->heading_font, 68, 67, "B", h->bg);
+    hub_text_font(h, h->title_font, 116, 58, "Blazzing", h->text);
+    hub_text(h, 116, 82, "Seu hub de streaming e IPTV", h->muted);
 
-    draw_service_card(h, 0, "IPTV / Listas", "Xtream, M3U e perfis salvos", "NATIVO  |  MPV");
-    draw_service_card(h, 1, "Pluto TV", "TV gratis, sem login", "NATIVO  |  MPV");
-    draw_service_card(h, 2, "Prime Video", "Login e sessão ficam no navegador", "ABRIR NO NAVEGADOR");
-    draw_service_card(h, 3, "Max", "Login e sessão ficam no navegador", "ABRIR NO NAVEGADOR");
-    draw_service_card(h, 4, "Globoplay", "Login e sessão ficam no navegador", "ABRIR NO NAVEGADOR");
+    hub_text_font(h, h->heading_font, 54, 154, "O que você quer assistir?", h->text);
+    hub_text(h, 54, 177, "Fontes nativas ficam dentro do Blazzing; serviços com DRM mantêm a sessão no navegador oficial.", h->muted);
 
-    int footer_y = h->height - 70;
-    hub_fill(h, 0, footer_y, h->width, 70, h->panel);
-    hub_text(h, 54, footer_y + 28, "Setas: navegar   Enter: abrir   Esc: sair", h->muted);
-    if (h->status[0]) hub_text(h, 54, footer_y + 52, h->status, h->text);
+    draw_service_card(h, 0, "I", "IPTV / Listas", "Xtream, M3U e perfis salvos", "NATIVO  |  MPV");
+    draw_service_card(h, 1, "P", "Pluto TV", "TV gratuita, sem login obrigatório", "NATIVO  |  MPV");
+    draw_service_card(h, 2, "P", "Prime Video", "Conta e reprodução no ambiente oficial", "NAVEGADOR  |  SESSÃO EXTERNA");
+    draw_service_card(h, 3, "M", "Max", "Conta e reprodução no ambiente oficial", "NAVEGADOR  |  SESSÃO EXTERNA");
+    draw_service_card(h, 4, "G", "Globoplay", "Conta e reprodução no ambiente oficial", "NAVEGADOR  |  SESSÃO EXTERNA");
+
+    int footer_y = h->height - 68;
+    hub_fill(h, 0, footer_y, h->width, 68, h->panel);
+    hub_fill(h, 0, footer_y, h->width, 1, h->border);
+    hub_text(h, 54, footer_y + 27, "Setas: navegar   Enter: abrir   Esc: sair", h->muted);
+    if (h->status[0]) hub_text(h, 54, footer_y + 50, h->status, h->text);
     XFlush(h->dpy);
 }
 
@@ -144,7 +181,8 @@ static hub_action_t activate_selected(hub_window_t *h) {
     vip_status_t st = vip_streaming_service_open(service_id, NULL, &error);
     if (st == VIP_OK) {
         const vip_streaming_service_t *service = vip_streaming_service_get(service_id);
-        snprintf(h->status, sizeof(h->status), "%s aberto no navegador; a sessão não é capturada pelo Blazzing.", service ? service->name : "Servico");
+        snprintf(h->status, sizeof(h->status), "%s aberto. Continue no navegador; a sessão permanece lá.",
+                 service ? service->name : "Serviço");
     } else {
         snprintf(h->status, sizeof(h->status), "Falha ao abrir: %.200s", error.message);
     }
@@ -175,6 +213,8 @@ static hub_action_t hub_window_run(void) {
     h.font = XLoadQueryFont(h.dpy, "-misc-fixed-medium-r-normal--15-*-*-*-*-*-iso8859-1");
     if (!h.font) h.font = XLoadQueryFont(h.dpy, "9x15");
     if (!h.font) h.font = XLoadQueryFont(h.dpy, "fixed");
+    h.title_font = XLoadQueryFont(h.dpy, "-*-helvetica-bold-r-normal--24-*-*-*-*-*-iso8859-1");
+    h.heading_font = XLoadQueryFont(h.dpy, "-*-helvetica-bold-r-normal--18-*-*-*-*-*-iso8859-1");
     if (h.font) XSetFont(h.dpy, h.gc, h.font->fid);
     hub_init_colors(&h);
     XMapWindow(h.dpy, h.win);
@@ -185,9 +225,7 @@ static hub_action_t hub_window_run(void) {
         XEvent event;
         XNextEvent(h.dpy, &event);
         switch (event.type) {
-            case Expose:
-                hub_draw(&h);
-                break;
+            case Expose: hub_draw(&h); break;
             case ConfigureNotify:
                 if (event.xconfigure.window == h.win) {
                     h.width = event.xconfigure.width;
@@ -196,10 +234,7 @@ static hub_action_t hub_window_run(void) {
                 }
                 break;
             case ClientMessage:
-                if ((Atom)event.xclient.data.l[0] == h.wm_delete) {
-                    action = HUB_ACTION_QUIT;
-                    done = true;
-                }
+                if ((Atom)event.xclient.data.l[0] == h.wm_delete) { action = HUB_ACTION_QUIT; done = true; }
                 break;
             case ButtonPress:
                 if (event.xbutton.button == Button1) {
@@ -218,34 +253,24 @@ static hub_action_t hub_window_run(void) {
                 break;
             case KeyPress: {
                 KeySym sym = XLookupKeysym(&event.xkey, 0);
-                if (sym == XK_Escape) {
-                    action = HUB_ACTION_QUIT;
-                    done = true;
-                } else if (sym == XK_Left) {
-                    if (h.selected > 0) --h.selected;
-                    hub_draw(&h);
-                } else if (sym == XK_Right) {
-                    if (h.selected < 4) ++h.selected;
-                    hub_draw(&h);
-                } else if (sym == XK_Up) {
-                    if (h.selected >= 3) h.selected -= 3;
-                    hub_draw(&h);
-                } else if (sym == XK_Down) {
-                    if (h.selected <= 1) h.selected += 3;
-                    else if (h.selected == 2) h.selected = 4;
-                    hub_draw(&h);
-                } else if (sym == XK_Return || sym == XK_KP_Enter) {
+                if (sym == XK_Escape) { action = HUB_ACTION_QUIT; done = true; }
+                else if (sym == XK_Left) { if (h.selected > 0) --h.selected; hub_draw(&h); }
+                else if (sym == XK_Right) { if (h.selected < 4) ++h.selected; hub_draw(&h); }
+                else if (sym == XK_Up) { if (h.selected >= 3) h.selected -= 3; hub_draw(&h); }
+                else if (sym == XK_Down) { if (h.selected <= 1) h.selected += 3; else if (h.selected == 2) h.selected = 4; hub_draw(&h); }
+                else if (sym == XK_Return || sym == XK_KP_Enter) {
                     action = activate_selected(&h);
                     if (action != HUB_ACTION_NONE) done = true;
                     hub_draw(&h);
                 }
                 break;
             }
-            default:
-                break;
+            default: break;
         }
     }
 
+    if (h.title_font) XFreeFont(h.dpy, h.title_font);
+    if (h.heading_font) XFreeFont(h.dpy, h.heading_font);
     if (h.font) XFreeFont(h.dpy, h.font);
     if (h.gc) XFreeGC(h.dpy, h.gc);
     XDestroyWindow(h.dpy, h.win);
