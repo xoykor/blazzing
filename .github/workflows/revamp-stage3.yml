@@ -5,6 +5,7 @@ on:
     branches: [revamp-v1.3.0]
     paths:
       - scripts/revamp-stage3.py
+      - .github/workflows/revamp-stage3.yml
 
 permissions:
   contents: write
