@@ -61,6 +61,14 @@
 #define INPUT_PASSWORD 4
 #define INPUT_SEARCH 5
 #define INPUT_PROFILE_NAME 6
+#define HOVER_NONE 0
+#define HOVER_TAB_BASE 10
+#define HOVER_SEARCH 20
+#define HOVER_FAVORITES 21
+#define HOVER_LISTS 22
+#define HOVER_BACK 23
+#define HOVER_CATEGORY_ALL 30
+#define HOVER_CATEGORY_BASE 1000
 
 typedef enum { SCREEN_LOGIN = 0, SCREEN_BROWSE, SCREEN_PLAYER } screen_t;
 typedef enum { CONTENT_LIVE = 0, CONTENT_VOD = 1, CONTENT_SERIES = 2 } content_kind_t;
@@ -86,6 +94,7 @@ typedef struct {
     unsigned long bg;
     unsigned long panel;
     unsigned long panel2;
+    unsigned long hover;
     unsigned long border;
     unsigned long text;
     unsigned long muted;
@@ -188,6 +197,8 @@ struct app {
     bool hovered_card_valid;
     size_t hovered_filtered;
     vip_ui_motion_t hover_motion;
+    int hovered_control;
+    vip_ui_motion_t control_motion;
     bool ui_motion_active;
     int grid_scroll_target;
     bool grid_scroll_animating;
@@ -319,6 +330,7 @@ static void init_palette(app_t *a) {
     a->colors.bg = alloc_color(a, "#070A12");
     a->colors.panel = alloc_color(a, "#0E1420");
     a->colors.panel2 = alloc_color(a, "#151E2D");
+    a->colors.hover = alloc_color(a, "#1D2C43");
     a->colors.border = alloc_color(a, "#2B3950");
     a->colors.text = alloc_color(a, "#F6F8FC");
     a->colors.muted = alloc_color(a, "#91A0B7");
@@ -781,12 +793,59 @@ static bool browse_card_at(app_t *a, int x, int y, size_t *fidx_out) {
     return true;
 }
 
+static int browse_control_at(app_t *a, int x, int y) {
+    if (!a || a->screen != SCREEN_BROWSE) return HOVER_NONE;
+    const int tab_x[3] = {8, 88, 174};
+    const int tab_w[3] = {74, 80, 88};
+    if (y >= 12 && y < 58 && x < SIDEBAR_W) {
+        for (int k = 0; k < 3; ++k)
+            if (point_in(x, y, tab_x[k], 12, tab_w[k], 46)) return HOVER_TAB_BASE + k;
+    }
+    int list_w = 94, fav_w = 174;
+    int list_x = a->width - list_w - 18;
+    int fav_x = list_x - fav_w - 10;
+    int search_w = fav_x - (SIDEBAR_W + 18) - 10;
+    if (search_w < 180) search_w = 180;
+    if (point_in(x, y, SIDEBAR_W + 18, 12, search_w, 46)) return HOVER_SEARCH;
+    if (point_in(x, y, fav_x, 12, fav_w, 46)) return HOVER_FAVORITES;
+    if (point_in(x, y, list_x, 12, list_w, 46)) return HOVER_LISTS;
+    if (x < SIDEBAR_W && y >= TOPBAR_H) {
+        int base = TOPBAR_H + 12;
+        if (a->series_episode_mode) {
+            if (point_in(x, y, 8, base, SIDEBAR_W - 16, 38)) return HOVER_BACK;
+            base += 48;
+        }
+        if (point_in(x, y, 8, base, SIDEBAR_W - 16, 36)) return HOVER_CATEGORY_ALL;
+        int local = y - (base + 42);
+        if (local >= 0) {
+            int row = local / 42;
+            if (local % 42 < 36) {
+                int idx = a->category_scroll + row;
+                if (idx >= 0 && (size_t)idx < ACTIVE_CATEGORIES(a).len)
+                    return HOVER_CATEGORY_BASE + idx;
+            }
+        }
+    }
+    return HOVER_NONE;
+}
+
 static void update_browse_hover(app_t *a, int x, int y) {
     if (!a) return;
     int64_t now = monotonic_ms();
     a->mouse_x = x;
     a->mouse_y = y;
     a->mouse_inside = true;
+
+    int control = browse_control_at(a, x, y);
+    if (control != a->hovered_control) {
+        a->hovered_control = control;
+        vip_ui_motion_init(&a->control_motion, 0.0f, now);
+        if (control != HOVER_NONE) vip_ui_motion_set_target(&a->control_motion, 1.0f, now);
+        a->ui_motion_active = true;
+    } else if (control != HOVER_NONE) {
+        vip_ui_motion_set_target(&a->control_motion, 1.0f, now);
+    }
+
     size_t hit = 0u;
     if (browse_card_at(a, x, y, &hit)) {
         if (!a->hovered_card_valid || a->hovered_filtered != hit) {
@@ -831,6 +890,9 @@ static bool step_browse_animations(app_t *a, int64_t now) {
         if (vip_ui_motion_step(&a->hover_motion, now, 140)) active = true;
         if (a->hover_motion.value <= 0.0f && a->hover_motion.target <= 0.0f)
             a->hovered_card_valid = false;
+    }
+    if (a->hovered_control != HOVER_NONE) {
+        if (vip_ui_motion_step(&a->control_motion, now, 120)) active = true;
     }
     a->ui_motion_active = active;
     return active;
@@ -921,7 +983,9 @@ static void rebuild_filter(app_t *a) {
     a->grid_scroll_animating = false;
     a->grid_scroll_last_ms = monotonic_ms();
     a->hovered_card_valid = false;
+    a->hovered_control = HOVER_NONE;
     vip_ui_motion_init(&a->hover_motion, 0.0f, a->grid_scroll_last_ms);
+    vip_ui_motion_init(&a->control_motion, 0.0f, a->grid_scroll_last_ms);
     a->ui_motion_active = false;
     a->focused_filtered = 0;
 }
@@ -2782,12 +2846,18 @@ static void draw_browse(app_t *a) {
     const int tab_w[3] = {74, 80, 88};
     for (int k = 0; k < 3; ++k) {
         bool selected = (int)a->content_kind == k;
+        bool hovered = a->hovered_control == HOVER_TAB_BASE + k;
+        float hover_t = hovered ? vip_ui_ease_out_cubic(a->control_motion.value) : 0.0f;
         fill_round_rect(a, tab_x[k], tab_y, tab_w[k], tab_h, 13,
-                        selected ? a->colors.accent2 : a->colors.panel2);
+                        selected ? a->colors.accent2 : (hovered ? a->colors.hover : a->colors.panel2));
         stroke_round_rect(a, tab_x[k], tab_y, tab_w[k], tab_h, 13,
-                          selected ? a->colors.accent : a->colors.border);
+                          (selected || hovered) ? a->colors.accent : a->colors.border);
+        if (hovered && !selected) {
+            int line_w = (int)((float)(tab_w[k] - 24) * hover_t + 0.5f);
+            if (line_w > 0) fill_round_rect(a, tab_x[k] + (tab_w[k] - line_w)/2, tab_y + tab_h - 4, line_w, 3, 1, a->colors.accent);
+        }
         draw_centered(a, tab_x[k], 42, tab_w[k], content_label((content_kind_t)k),
-                      selected ? a->colors.text : a->colors.muted);
+                      (selected || hovered) ? a->colors.text : a->colors.muted);
     }
 
     int list_w = 94, fav_w = 174;
@@ -2797,36 +2867,43 @@ static void draw_browse(app_t *a) {
     if (search_w < 180) search_w = 180;
     char search_hint[96]; snprintf(search_hint, sizeof(search_hint), "Buscar %s...", content_plural(a));
     draw_input(a, SIDEBAR_W+18, 12, search_w, 46, a->search, search_hint, INPUT_SEARCH, false);
-    fill_round_rect(a, fav_x, 12, fav_w, 46, 13, a->favorites_only ? a->colors.accent2 : a->colors.panel2);
-    stroke_round_rect(a, fav_x, 12, fav_w, 46, 13, a->favorites_only ? a->colors.accent : a->colors.border);
+    if (a->hovered_control == HOVER_SEARCH && a->input_focus != INPUT_SEARCH)
+        stroke_round_rect(a, SIDEBAR_W+18, 12, search_w, 46, 13, a->colors.accent);
+    bool fav_hover = a->hovered_control == HOVER_FAVORITES;
+    fill_round_rect(a, fav_x, 12, fav_w, 46, 13, a->favorites_only ? a->colors.accent2 : (fav_hover ? a->colors.hover : a->colors.panel2));
+    stroke_round_rect(a, fav_x, 12, fav_w, 46, 13, (a->favorites_only || fav_hover) ? a->colors.accent : a->colors.border);
     char fav_label[128]; snprintf(fav_label, sizeof(fav_label), "* Favoritos (%zu)", favorite_count(a));
     draw_centered(a, fav_x, 42, fav_w, fav_label, a->favorites_only ? a->colors.text : a->colors.muted);
-    fill_round_rect(a, list_x, 12, list_w, 46, 13, a->colors.panel2);
-    stroke_round_rect(a, list_x, 12, list_w, 46, 13, a->colors.border);
-    draw_centered(a, list_x, 42, list_w, "Listas", a->colors.muted);
+    bool list_hover = a->hovered_control == HOVER_LISTS;
+    fill_round_rect(a, list_x, 12, list_w, 46, 13, list_hover ? a->colors.hover : a->colors.panel2);
+    stroke_round_rect(a, list_x, 12, list_w, 46, 13, list_hover ? a->colors.accent : a->colors.border);
+    draw_centered(a, list_x, 42, list_w, "Listas", list_hover ? a->colors.text : a->colors.muted);
 
     int y = TOPBAR_H + 12;
     if (a->series_episode_mode) {
-        fill_round_rect(a, 8, y, SIDEBAR_W-16, 38, 11, a->colors.panel);
+        bool back_hover = a->hovered_control == HOVER_BACK;
+        fill_round_rect(a, 8, y, SIDEBAR_W-16, 38, 11, back_hover ? a->colors.accent2 : a->colors.panel);
         stroke_round_rect(a, 8, y, SIDEBAR_W-16, 38, 11, a->colors.accent);
         draw_text_font(a, a->font_heading, 18, y+26, browse_back_label(a), a->colors.text);
         y += 48;
     }
     bool all_sel = a->selected_category < 0;
-    fill_round_rect(a, 8, y, SIDEBAR_W-16, 36, 11, all_sel ? a->colors.accent2 : a->colors.panel2);
+    bool all_hover = a->hovered_control == HOVER_CATEGORY_ALL;
+    fill_round_rect(a, 8, y, SIDEBAR_W-16, 36, 11, all_sel ? a->colors.accent2 : (all_hover ? a->colors.hover : a->colors.panel2));
     char all_label[128]; snprintf(all_label, sizeof(all_label), "%s (%zu)", all_content_label(a), ACTIVE_CHANNELS(a).len);
-    draw_text(a, 18, y+24, all_label, all_sel ? a->colors.text : a->colors.muted);
+    draw_text(a, 18, y+24, all_label, (all_sel || all_hover) ? a->colors.text : a->colors.muted);
     y += 42;
     int rows = category_visible_rows(a) - 1;
     for (int r = 0; r < rows; ++r) {
         int idx = a->category_scroll + r;
         if (idx < 0 || (size_t)idx >= ACTIVE_CATEGORIES(a).len) break;
         bool selected = a->selected_category == idx;
-        fill_round_rect(a, 8, y, SIDEBAR_W-16, 36, 11, selected ? a->colors.accent2 : a->colors.panel2);
+        bool hovered = a->hovered_control == HOVER_CATEGORY_BASE + idx;
+        fill_round_rect(a, 8, y, SIDEBAR_W-16, 36, 11, selected ? a->colors.accent2 : (hovered ? a->colors.hover : a->colors.panel2));
         char full_label[512]; char label[256]; size_t count = a->category_counts ? a->category_counts[idx] : 0;
         snprintf(full_label, sizeof(full_label), "%s (%zu)", ACTIVE_CATEGORIES(a).items[idx].name, count);
         bounded_text(label, sizeof(label), full_label, 34);
-        draw_text(a, 18, y+24, label, selected ? a->colors.text : a->colors.muted);
+        draw_text(a, 18, y+24, label, (selected || hovered) ? a->colors.text : a->colors.muted);
         y += 42;
     }
 
@@ -3439,9 +3516,11 @@ static void process_event(app_t *a, XEvent *e) {
                 if(a->timeline_dragging&&!a->player_item_live&&a->player&&e->xmotion.window==a->win){int tx,ty,tw,th;timeline_geometry(a,&tx,&ty,&tw,&th);vip_mpv_player_snapshot_t sn={0};vip_mpv_player_snapshot(a->player,&sn);if(sn.duration_seconds>0&&e->xmotion.x>=tx&&e->xmotion.x<=tx+tw){double pos=((double)(e->xmotion.x-tx)/(double)tw)*sn.duration_seconds;vip_error_t er={0};(void)vip_mpv_player_seek(a->player,pos,&er);}}
             }break;
         case LeaveNotify:
-            if(a->screen==SCREEN_BROWSE && a->hovered_card_valid){
+            if(a->screen==SCREEN_BROWSE){
                 a->mouse_inside=false;
-                vip_ui_motion_set_target(&a->hover_motion,0.0f,monotonic_ms());
+                if(a->hovered_card_valid) vip_ui_motion_set_target(&a->hover_motion,0.0f,monotonic_ms());
+                a->hovered_control=HOVER_NONE;
+                vip_ui_motion_init(&a->control_motion,0.0f,monotonic_ms());
                 a->ui_motion_active=true;
             }
             break;
