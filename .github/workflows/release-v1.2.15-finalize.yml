@@ -1,0 +1,88 @@
+name: Finalize 1.2.15
+
+on:
+  push:
+    branches: [uiux-v1.2.15]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: uiux-v1.2.15
+          fetch-depth: 0
+
+      - name: Apply 1.2.15 release metadata
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              s = p.read_text()
+              if old not in s:
+                  raise SystemExit(f'missing pattern in {path}: {old!r}')
+              p.write_text(s.replace(old, new, 1))
+
+          replace_once('CMakeLists.txt',
+                       'project(visual_iptv_x11 VERSION 1.2.14 LANGUAGES C)',
+                       'project(visual_iptv_x11 VERSION 1.2.15 LANGUAGES C)')
+
+          en = '''## 1.2.15 — 2026-09-17\n\nUI/UX and series-navigation update:\n\n- redesigns the main IPTV interface with a darker blue visual system, rounded surfaces and clearer typography hierarchy;\n- refreshes login, catalog browsing, metadata/details and the embedded-player HUD while preserving existing keyboard and mouse navigation;\n- series now open with a season-first flow, then show the episodes for the selected season;\n- redesigns the streaming hub and labels DRM services as external browser sessions instead of imported/integrated account sessions;\n- keeps the existing Secret Service identifier for backward compatibility while presenting new saved credentials under the Blazzing label;\n- validates the combined redesign with the full 11-test suite.\n\n'''
+          p = Path('CHANGELOG.md')
+          s = p.read_text()
+          if not s.startswith('## 1.2.15'):
+              p.write_text(en + s)
+
+          pt = '''## 1.2.15 — 2026-09-17\n\nAtualização de UI/UX e navegação de séries:\n\n- redesenha a interface principal de IPTV com visual azul-escuro, superfícies arredondadas e hierarquia tipográfica mais clara;\n- renova login, navegação do catálogo, painel de detalhes/metadados e HUD do player incorporado sem alterar os atalhos existentes de teclado e mouse;\n- séries agora abrem primeiro na seleção de temporada e, depois, exibem apenas os episódios da temporada escolhida;\n- redesenha o hub de streaming e identifica serviços com DRM como sessões externas abertas no navegador, sem sugerir importação ou login integrado;\n- mantém o identificador existente do Secret Service para compatibilidade com senhas já salvas, usando “Blazzing” como novo rótulo visível;\n- valida o redesign combinado com a suíte completa de 11 testes.\n\n'''
+          p = Path('CHANGELOG.pt-BR.md')
+          s = p.read_text()
+          if not s.startswith('## 1.2.15'):
+              p.write_text(pt + s)
+
+          meta = Path('flatpak/io.github.xoykor.Blazzing.metainfo.xml')
+          s = meta.read_text()
+          block = '''    <release version="1.2.15" date="2026-09-17">\n      <description>\n        <p>Redesigns the IPTV and streaming-hub interfaces and adds season-first navigation for series before episode selection.</p>\n      </description>\n    </release>\n'''
+          if 'release version="1.2.15"' not in s:
+              s = s.replace('  <releases>\n', '  <releases>\n' + block, 1)
+              meta.write_text(s)
+
+          replace_once('README.md',
+                       '- Seasons and episodes.',
+                       '- Season-first series navigation followed by per-season episode selection.')
+          replace_once('README.pt-BR.md',
+                       '- Temporadas e episódios.',
+                       '- Navegação de séries por temporada antes da seleção dos episódios.')
+
+          replace_once('src/ui_x11/x11_app.c',
+                       '"secret-tool", "store", "--label=Visual IPTV", "application", "visual-iptv",',
+                       '"secret-tool", "store", "--label=Blazzing", "application", "visual-iptv",')
+          PY
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake pkg-config \
+            libx11-dev libcurl4-openssl-dev libjson-c-dev libsqlite3-dev \
+            libjpeg-dev libpng-dev libwebp-dev libssl-dev ffmpeg mpv
+
+      - name: Build and test 1.2.15
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+
+      - name: Commit finalized release metadata
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CMakeLists.txt CHANGELOG.md CHANGELOG.pt-BR.md README.md README.pt-BR.md \
+                  flatpak/io.github.xoykor.Blazzing.metainfo.xml src/ui_x11/x11_app.c
+          git commit -m "chore(release): prepare Blazzing 1.2.15"
+          git push origin HEAD:uiux-v1.2.15
