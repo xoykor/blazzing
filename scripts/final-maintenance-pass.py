@@ -33,6 +33,44 @@ replace_once(
 """
 )
 
+# GCC's static analyzer treats the stdout descriptor intentionally inherited
+# through exec as a leak. Suppress only that diagnostic around spawn_ffmpeg;
+# the parent still closes its write end and owns the read end normally.
+p = Path("src/decoder/ffmpeg_cli.c")
+text = p.read_text()
+needle = """/* execv/execvp receives source as one argv element.  No shell is involved,
+ * so playlist URLs and local paths cannot become shell syntax. */
+static int spawn_ffmpeg(const ffmpeg_impl_t *impl, const char *source, int *stdout_fd) {"""
+replacement = """/* execv/execvp receives source as one argv element.  No shell is involved,
+ * so playlist URLs and local paths cannot become shell syntax. */
+#if defined(__GNUC__) && !defined(__clang__)
+/* The duplicated stdout descriptor is intentionally inherited by exec.
+ * GCC -fanalyzer does not model that ownership transfer and reports a leak. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wanalyzer-fd-leak"
+#endif
+static int spawn_ffmpeg(const ffmpeg_impl_t *impl, const char *source, int *stdout_fd) {"""
+if needle not in text:
+    raise SystemExit("spawn_ffmpeg declaration did not match")
+text = text.replace(needle, replacement, 1)
+needle = """    *stdout_fd = pipefd[0];
+    return (int)pid;
+}
+
+static vip_status_t ffmpeg_capture"""
+replacement = """    *stdout_fd = pipefd[0];
+    return (int)pid;
+}
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+
+static vip_status_t ffmpeg_capture"""
+if needle not in text:
+    raise SystemExit("spawn_ffmpeg end did not match")
+text = text.replace(needle, replacement, 1)
+p.write_text(text)
+
 # mpv is embedded directly through --wid now.  Remove the old PID-search /
 # XReparentWindow implementation so future maintainers do not have to reason
 # about a runtime path that can never execute.
