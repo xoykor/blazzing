@@ -182,6 +182,16 @@ struct app {
     int windowed_w;
     int windowed_h;
     bool mouse_down;
+    int mouse_x;
+    int mouse_y;
+    bool mouse_inside;
+    bool hovered_card_valid;
+    size_t hovered_filtered;
+    vip_ui_motion_t hover_motion;
+    bool ui_motion_active;
+    int grid_scroll_target;
+    bool grid_scroll_animating;
+    int64_t grid_scroll_last_ms;
 
     login_mode_t login_mode;
     char profile_name[128];
@@ -746,6 +756,86 @@ static card_layout_t browse_layout(app_t *a) {
     return layout;
 }
 
+static bool browse_card_at(app_t *a, int x, int y, size_t *fidx_out) {
+    if (!a || a->screen != SCREEN_BROWSE || a->filtered_len == 0u) return false;
+    card_layout_t layout = browse_layout(a);
+    int content_x = SIDEBAR_W + 20;
+    int content_y = TOPBAR_H + 18;
+    if (x < content_x || y < content_y || x >= a->width || y >= a->height) return false;
+    if (details_panel_active(a)) {
+        int px, py, pw, ph;
+        details_panel_geometry(a, &px, &py, &pw, &ph);
+        if (point_in(x, y, px, py, pw, ph) || x >= px - 12) return false;
+    }
+    int relx = x - content_x;
+    int rely = y - content_y + a->grid_scroll;
+    if (relx < 0 || rely < 0) return false;
+    int col = relx / (layout.card_w + GRID_GAP);
+    int row = rely / layout.row_step;
+    if (col < 0 || col >= layout.cols ||
+        relx % (layout.card_w + GRID_GAP) >= layout.card_w ||
+        rely % layout.row_step >= layout.card_h) return false;
+    size_t fidx = (size_t)row * (size_t)layout.cols + (size_t)col;
+    if (fidx >= a->filtered_len) return false;
+    if (fidx_out) *fidx_out = fidx;
+    return true;
+}
+
+static void update_browse_hover(app_t *a, int x, int y) {
+    if (!a) return;
+    int64_t now = monotonic_ms();
+    a->mouse_x = x;
+    a->mouse_y = y;
+    a->mouse_inside = true;
+    size_t hit = 0u;
+    if (browse_card_at(a, x, y, &hit)) {
+        if (!a->hovered_card_valid || a->hovered_filtered != hit) {
+            a->hovered_card_valid = true;
+            a->hovered_filtered = hit;
+            vip_ui_motion_init(&a->hover_motion, 0.0f, now);
+        }
+        vip_ui_motion_set_target(&a->hover_motion, 1.0f, now);
+        a->ui_motion_active = true;
+    } else if (a->hovered_card_valid) {
+        vip_ui_motion_set_target(&a->hover_motion, 0.0f, now);
+        a->ui_motion_active = true;
+    }
+}
+
+static bool step_browse_animations(app_t *a, int64_t now) {
+    if (!a || a->screen != SCREEN_BROWSE) return false;
+    bool active = false;
+    bool scroll_changed = false;
+    if (a->grid_scroll_animating) {
+        if (a->grid_scroll_last_ms <= 0) a->grid_scroll_last_ms = now;
+        int64_t elapsed = now - a->grid_scroll_last_ms;
+        if (elapsed < 1) elapsed = 1;
+        if (elapsed > 32) elapsed = 32;
+        a->grid_scroll_last_ms = now;
+        int diff = a->grid_scroll_target - a->grid_scroll;
+        if (diff == 0) {
+            a->grid_scroll_animating = false;
+        } else {
+            int step = (int)((int64_t)diff * elapsed / 85LL);
+            if (step == 0) step = diff > 0 ? 1 : -1;
+            if ((diff > 0 && step > diff) || (diff < 0 && step < diff)) step = diff;
+            a->grid_scroll += step;
+            scroll_changed = true;
+            if (a->grid_scroll == a->grid_scroll_target) a->grid_scroll_animating = false;
+            else active = true;
+        }
+    }
+    if (scroll_changed && a->mouse_inside)
+        update_browse_hover(a, a->mouse_x, a->mouse_y);
+    if (a->hovered_card_valid) {
+        if (vip_ui_motion_step(&a->hover_motion, now, 140)) active = true;
+        if (a->hover_motion.value <= 0.0f && a->hover_motion.target <= 0.0f)
+            a->hovered_card_valid = false;
+    }
+    a->ui_motion_active = active;
+    return active;
+}
+
 static bool contains_ascii_case(const char *haystack, const char *needle) {
     if (!needle || !needle[0]) return true;
     if (!haystack) return false;
@@ -827,6 +917,12 @@ static void rebuild_filter(app_t *a) {
     free(seen);
     pthread_mutex_unlock(&a->data_mutex);
     a->grid_scroll = 0;
+    a->grid_scroll_target = 0;
+    a->grid_scroll_animating = false;
+    a->grid_scroll_last_ms = monotonic_ms();
+    a->hovered_card_valid = false;
+    vip_ui_motion_init(&a->hover_motion, 0.0f, a->grid_scroll_last_ms);
+    a->ui_motion_active = false;
     a->focused_filtered = 0;
 }
 
@@ -2776,9 +2872,16 @@ static void draw_browse(app_t *a) {
             vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
             int cx = content_x + col * (layout.card_w + GRID_GAP);
             bool focused = fidx == a->focused_filtered;
-            fill_round_rect(a, cx + 4, cy + 6, layout.card_w, layout.card_h, 16, a->colors.black);
+            bool hovered = a->hovered_card_valid && fidx == a->hovered_filtered &&
+                           a->hover_motion.value > 0.001f;
+            float hover_eased = hovered ? vip_ui_ease_out_cubic(a->hover_motion.value) : 0.0f;
+            int lift = (int)(8.0f * hover_eased + 0.5f);
+            int base_cy = cy;
+            cy = base_cy - lift;
+            bool active_card = focused || hovered;
+            fill_round_rect(a, cx + 4, cy + 6 + (int)(3.0f * hover_eased), layout.card_w, layout.card_h, 16, a->colors.black);
             fill_round_rect(a, cx, cy, layout.card_w, layout.card_h, 16, a->colors.panel2);
-            if (focused) {
+            if (active_card) {
                 stroke_round_rect(a, cx-3, cy-3, layout.card_w+6, layout.card_h+6, 18, a->colors.accent);
                 stroke_round_rect(a, cx-1, cy-1, layout.card_w+2, layout.card_h+2, 17, a->colors.accent2);
             }
@@ -2793,7 +2896,14 @@ static void draw_browse(app_t *a) {
                 enqueue_thumbnail(a, ch, priority);
             }
             free(path);
-            stroke_round_rect(a, cx, cy, layout.card_w, layout.art_h, 14, focused ? a->colors.accent : a->colors.border);
+            stroke_round_rect(a, cx, cy, layout.card_w, layout.art_h, 14, active_card ? a->colors.accent : a->colors.border);
+            if (hovered && hover_eased > 0.30f) {
+                int open_w = 78, open_h = 30;
+                int open_x = cx + 8, open_y = cy + layout.art_h - open_h - 8;
+                fill_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent2);
+                stroke_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent);
+                draw_centered_font(a, a->font_small, open_x, open_y + 20, open_w, "ABRIR", a->colors.text);
+            }
             bool favorite = a->favorite_flags && a->favorite_flags[chidx];
             int card_fav_w = 58, card_fav_h = 28, card_fav_x = cx + layout.card_w - card_fav_w - 6, card_fav_y = cy + 6;
             fill_round_rect(a, card_fav_x, card_fav_y, card_fav_w, card_fav_h, 10,
@@ -2829,7 +2939,7 @@ static void draw_browse(app_t *a) {
             char grouped_title[256];
             const char *display_title = m3u_series_display_name(a, ch, grouped_title, sizeof(grouped_title));
             char title[160]; bounded_text(title, sizeof(title), display_title, layout.mode == ART_PORTRAIT ? 28 : 42);
-            draw_text_font(a, focused ? a->font_heading : a->font, cx + 8, cy + layout.art_h + 25, title, a->colors.text);
+            draw_text_font(a, active_card ? a->font_heading : a->font, cx + 8, cy + layout.art_h + 25, title, a->colors.text);
             if (a->series_season_select) {
                 size_t season_count = 0u;
                 for (size_t ei = 0; ei < a->episode_channels.len; ++ei) {
@@ -2844,7 +2954,8 @@ static void draw_browse(app_t *a) {
                 snprintf(progress, sizeof(progress), "%d/%d episódios", a->series_watched[chidx], a->series_total[chidx]);
                 draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 44, progress, a->colors.muted);
             }
-        }
+                    cy = base_cy;
+}
     }
 
     XSetClipMask(a->dpy, a->gc, None);
@@ -3109,7 +3220,13 @@ static void handle_wheel(app_t *a, int x, int y, int direction) {
     } else {
         card_layout_t layout=browse_layout(a); int rows=(int)((a->filtered_len+(size_t)layout.cols-1u)/(size_t)layout.cols);
         int content_h=rows*layout.row_step; int maxscroll=content_h-(a->height-TOPBAR_H-18); if(maxscroll<0)maxscroll=0;
-        a->grid_scroll+=direction*(layout.mode==ART_PORTRAIT?220:180); if(a->grid_scroll<0)a->grid_scroll=0; if(a->grid_scroll>maxscroll)a->grid_scroll=maxscroll;
+        int base = a->grid_scroll_animating ? a->grid_scroll_target : a->grid_scroll;
+        int target = base + direction*(layout.mode==ART_PORTRAIT?220:180);
+        if(target<0)target=0; if(target>maxscroll)target=maxscroll;
+        a->grid_scroll_target=target;
+        a->grid_scroll_last_ms=monotonic_ms();
+        a->grid_scroll_animating=target!=a->grid_scroll;
+        if(a->grid_scroll_animating)a->ui_motion_active=true;
     }
     (void)y;
 }
@@ -3126,6 +3243,8 @@ static void ensure_grid_focus_visible(app_t *a) {
     if(row_top<a->grid_scroll)a->grid_scroll=row_top;
     else if(row_top+layout.card_h>a->grid_scroll+viewport_h)a->grid_scroll=row_top+layout.card_h-viewport_h;
     if(a->grid_scroll<0)a->grid_scroll=0;
+    a->grid_scroll_target=a->grid_scroll;
+    a->grid_scroll_animating=false;
 }
 
 static void move_grid_focus(app_t *a, int dx, int dy) {
@@ -3311,12 +3430,21 @@ static void process_event(app_t *a, XEvent *e) {
             }
             break;
         case MotionNotify:
-            if(a->screen==SCREEN_PLAYER){
+            if(a->screen==SCREEN_BROWSE && e->xmotion.window==a->win){
+                update_browse_hover(a,e->xmotion.x,e->xmotion.y);
+            } else if(a->screen==SCREEN_PLAYER){
                 show_player_hud(a);
                 if(getenv("VIPTV_MPV_DEBUG"))
                     fprintf(stderr,"[mpv-debug] input MotionNotify window=%lu\n",(unsigned long)e->xmotion.window);
                 if(a->timeline_dragging&&!a->player_item_live&&a->player&&e->xmotion.window==a->win){int tx,ty,tw,th;timeline_geometry(a,&tx,&ty,&tw,&th);vip_mpv_player_snapshot_t sn={0};vip_mpv_player_snapshot(a->player,&sn);if(sn.duration_seconds>0&&e->xmotion.x>=tx&&e->xmotion.x<=tx+tw){double pos=((double)(e->xmotion.x-tx)/(double)tw)*sn.duration_seconds;vip_error_t er={0};(void)vip_mpv_player_seek(a->player,pos,&er);}}
             }break;
+        case LeaveNotify:
+            if(a->screen==SCREEN_BROWSE && a->hovered_card_valid){
+                a->mouse_inside=false;
+                vip_ui_motion_set_target(&a->hover_motion,0.0f,monotonic_ms());
+                a->ui_motion_active=true;
+            }
+            break;
         case ButtonRelease: if(e->xbutton.button==Button1){a->mouse_down=false;if(a->screen==SCREEN_PLAYER){a->timeline_dragging=false;save_current_progress(a,true);show_player_hud(a);}}break;
         case ButtonPress:
             a->mouse_down=true;
@@ -3364,7 +3492,7 @@ static bool init_x11(app_t *a, vip_error_t *error) {
                                  (unsigned)a->width,(unsigned)a->height,0,
                                  BlackPixel(a->dpy,a->screen_num),BlackPixel(a->dpy,a->screen_num));
     XStoreName(a->dpy,a->win,APP_TITLE);
-    XSelectInput(a->dpy,a->win,ExposureMask|KeyPressMask|ButtonPressMask|ButtonReleaseMask|PointerMotionMask|StructureNotifyMask|FocusChangeMask|PropertyChangeMask);
+    XSelectInput(a->dpy,a->win,ExposureMask|KeyPressMask|ButtonPressMask|ButtonReleaseMask|PointerMotionMask|EnterWindowMask|LeaveWindowMask|StructureNotifyMask|FocusChangeMask|PropertyChangeMask);
     a->wm_delete=XInternAtom(a->dpy,"WM_DELETE_WINDOW",False);
     XSetWMProtocols(a->dpy,a->win,&a->wm_delete,1);
     a->clipboard=XInternAtom(a->dpy,"CLIPBOARD",False);
@@ -3552,6 +3680,7 @@ int vip_x11_app_run(void) {
         maybe_enforce_fullscreen(&a);
         sync_video_window(&a);
         int64_t now=monotonic_ms();
+        bool ui_animating=step_browse_animations(&a,now);
         if (a.screen==SCREEN_PLAYER) save_current_progress(&a,false);
         if (a.screen==SCREEN_PLAYER && a.test_autoback_delay_ms>0 && !a.test_autoback_done &&
             now-a.player_open_ms >= a.test_autoback_delay_ms) {
@@ -3560,7 +3689,10 @@ int vip_x11_app_run(void) {
             fprintf(stderr,"[test] voltar do player OK\n");
         }
         if (a.test_exit_at_ms>0 && now>=a.test_exit_at_ms) a.quit=true;
-        if (now>=next_draw) { redraw(&a); next_draw=now+(a.screen==SCREEN_PLAYER?33:100); }
+        if (now>=next_draw || ui_animating) {
+            redraw(&a);
+            next_draw=now+(a.screen==SCREEN_PLAYER?33:(ui_animating?16:100));
+        }
         fd_set rfds; FD_ZERO(&rfds); FD_SET(xfd,&rfds);
         struct timeval tv={.tv_sec=0,.tv_usec=16000};
         (void)select(xfd+1,&rfds,NULL,NULL,&tv);
