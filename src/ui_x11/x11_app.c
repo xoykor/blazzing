@@ -1734,7 +1734,7 @@ static bool keyring_store_password(const char *profile_id, const char *password)
     if (pid == 0) {
         dup2(inpipe[0], STDIN_FILENO);
         close(inpipe[0]); close(inpipe[1]);
-        execlp("secret-tool", "secret-tool", "store", "--label=Visual IPTV", "application", "visual-iptv", "profile", profile_id, (char *)NULL);
+        execlp("secret-tool", "secret-tool", "store", "--label=Blazzing", "application", "visual-iptv", "profile", profile_id, (char *)NULL);
         _exit(127);
     }
     close(inpipe[0]);

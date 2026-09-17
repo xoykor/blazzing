@@ -33,7 +33,7 @@ It supports Xtream Codes and M3U playlists and embeds mpv for playback.
   - cast;
   - director;
   - trailer, when provided by the IPTV provider.
-- Seasons and episodes.
+- Season-first series navigation followed by per-season episode selection.
 - Persistent favorites.
 - Playback progress and resume support for movies and episodes.
 - Aggregated series progress.
