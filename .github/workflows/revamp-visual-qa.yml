@@ -5,8 +5,6 @@ on:
     branches: [revamp-v1.3.0]
     paths:
       - .github/workflows/revamp-visual-qa.yml
-      - src/ui_x11/x11_app.c
-      - src/app/pluto_app.c
 
 permissions:
   contents: read
@@ -63,6 +61,6 @@ jobs:
           file visual-artifacts/*.png
       - uses: actions/upload-artifact@v4
         with:
-          name: revamp-visual-qa-final
+          name: revamp-visual-qa-footer
           path: visual-artifacts/
           if-no-files-found: error
