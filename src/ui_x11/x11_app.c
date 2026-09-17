@@ -745,17 +745,10 @@ static void details_panel_geometry(const app_t *a, int *x, int *y, int *w, int *
 static card_layout_t browse_layout(app_t *a) {
     card_layout_t layout = {0};
     layout.mode = detect_artwork_mode(a);
-    if (layout.mode == ART_PORTRAIT) {
-        layout.card_w = 196;
-        layout.art_h = 294;
-    } else if (layout.mode == ART_SQUARE) {
-        layout.card_w = 224;
-        layout.art_h = 224;
-    } else {
-        layout.card_w = 320;
-        layout.art_h = 180;
-    }
-    layout.card_h = layout.art_h + 48;
+    int ideal_w = 196, min_w = 168, max_w = 224;
+    if (layout.mode == ART_SQUARE) { ideal_w = 224; min_w = 184; max_w = 260; }
+    else if (layout.mode == ART_LANDSCAPE) { ideal_w = 320; min_w = 260; max_w = 380; }
+
     int content_x = SIDEBAR_W + 20;
     int avail_w = a->width - content_x - 18;
     if (details_panel_active(a)) {
@@ -764,8 +757,25 @@ static card_layout_t browse_layout(app_t *a) {
         (void)py; (void)ph;
         avail_w = px - content_x - 12;
     }
-    layout.cols = (avail_w + GRID_GAP) / (layout.card_w + GRID_GAP);
+    if (avail_w < min_w) avail_w = min_w;
+    layout.cols = (avail_w + GRID_GAP) / (ideal_w + GRID_GAP);
     if (layout.cols < 1) layout.cols = 1;
+    int fitted = (avail_w - (layout.cols - 1) * GRID_GAP) / layout.cols;
+    while (fitted > max_w && layout.cols < 16) {
+        ++layout.cols;
+        fitted = (avail_w - (layout.cols - 1) * GRID_GAP) / layout.cols;
+    }
+    while (fitted < min_w && layout.cols > 1) {
+        --layout.cols;
+        fitted = (avail_w - (layout.cols - 1) * GRID_GAP) / layout.cols;
+    }
+    if (fitted < min_w) fitted = min_w;
+    if (fitted > max_w) fitted = max_w;
+    layout.card_w = fitted;
+    if (layout.mode == ART_PORTRAIT) layout.art_h = (layout.card_w * 3) / 2;
+    else if (layout.mode == ART_SQUARE) layout.art_h = layout.card_w;
+    else layout.art_h = (layout.card_w * 9) / 16;
+    layout.card_h = layout.art_h + 54;
     layout.row_step = layout.card_h + GRID_GAP;
     return layout;
 }
@@ -2556,14 +2566,21 @@ static void draw_input(app_t *a, int x, int y, int w, int h, const char *value,
         size_t n = strlen(value); if (n > sizeof(masked)-1) n = sizeof(masked)-1;
         memset(masked, '*', n); masked[n] = '\0'; text = masked;
     }
-    draw_text(a, x + 16, y + h/2 + 6, text,
-              search_focused || (value && value[0]) ? a->colors.text : a->colors.muted);
+    bool bright = search_focused || (value && value[0]);
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, x + 16, y + (h - 16) / 2, w - 32, text, "Sans 10",
+                           bright ? 0xF6F8FCu : 0x91A0B7u, 1.0, false);
+    else
+        draw_text(a, x + 16, y + h/2 + 6, text, bright ? a->colors.text : a->colors.muted);
     if (search_focused) {
-        int caret_x = x + 16 + text_width(a, value && value[0] ? value : "");
+        const char *caret_text = value && value[0] ? value : "";
+        int measured = a->renderer.active ? vip_ui_render_text_width(&a->renderer, caret_text, "Sans 10")
+                                          : text_width(a, caret_text);
+        int caret_x = x + 16 + measured;
         if (caret_x < x + 16) caret_x = x + 16;
         if (caret_x > x + w - 18) caret_x = x + w - 18;
         set_fg(a, a->colors.accent);
-        XDrawLine(a->dpy, draw_target(a), a->gc, caret_x, y + 12, caret_x, y + h - 12);
+        XDrawLine(a->dpy, draw_target(a), a->gc, caret_x, y + 11, caret_x, y + h - 11);
     }
 }
 
@@ -2878,8 +2895,13 @@ static void draw_browse(app_t *a) {
             int line_w = (int)((float)(tab_w[k] - 24) * hover_t + 0.5f);
             if (line_w > 0) fill_round_rect(a, tab_x[k] + (tab_w[k] - line_w)/2, tab_y + tab_h - 4, line_w, 3, 1, a->colors.accent);
         }
-        draw_centered(a, tab_x[k], 42, tab_w[k], content_label((content_kind_t)k),
-                      (selected || hovered) ? a->colors.text : a->colors.muted);
+        if (a->renderer.active)
+            vip_ui_render_text(&a->renderer, tab_x[k], tab_y + 14, tab_w[k], content_label((content_kind_t)k),
+                               selected ? "Sans Bold 10" : "Sans 10",
+                               (selected || hovered) ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+        else
+            draw_centered(a, tab_x[k], 42, tab_w[k], content_label((content_kind_t)k),
+                          (selected || hovered) ? a->colors.text : a->colors.muted);
     }
 
     int list_w = 94, fav_w = 174;
@@ -2895,25 +2917,40 @@ static void draw_browse(app_t *a) {
     fill_round_rect(a, fav_x, 12, fav_w, 46, 13, a->favorites_only ? a->colors.accent2 : (fav_hover ? a->colors.hover : a->colors.panel2));
     stroke_round_rect(a, fav_x, 12, fav_w, 46, 13, (a->favorites_only || fav_hover) ? a->colors.accent : a->colors.border);
     char fav_label[128]; snprintf(fav_label, sizeof(fav_label), "* Favoritos (%zu)", favorite_count(a));
-    draw_centered(a, fav_x, 42, fav_w, fav_label, a->favorites_only ? a->colors.text : a->colors.muted);
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, fav_x, 27, fav_w, fav_label, a->favorites_only ? "Sans Bold 10" : "Sans 10",
+                           (a->favorites_only || fav_hover) ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+    else
+        draw_centered(a, fav_x, 42, fav_w, fav_label, a->favorites_only ? a->colors.text : a->colors.muted);
     bool list_hover = a->hovered_control == HOVER_LISTS;
     fill_round_rect(a, list_x, 12, list_w, 46, 13, list_hover ? a->colors.hover : a->colors.panel2);
     stroke_round_rect(a, list_x, 12, list_w, 46, 13, list_hover ? a->colors.accent : a->colors.border);
-    draw_centered(a, list_x, 42, list_w, "Listas", list_hover ? a->colors.text : a->colors.muted);
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, list_x, 27, list_w, "Listas", "Sans 10",
+                           list_hover ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+    else
+        draw_centered(a, list_x, 42, list_w, "Listas", list_hover ? a->colors.text : a->colors.muted);
 
     int y = TOPBAR_H + 12;
     if (a->series_episode_mode) {
         bool back_hover = a->hovered_control == HOVER_BACK;
         fill_round_rect(a, 8, y, SIDEBAR_W-16, 38, 11, back_hover ? a->colors.accent2 : a->colors.panel);
         stroke_round_rect(a, 8, y, SIDEBAR_W-16, 38, 11, a->colors.accent);
-        draw_text_font(a, a->font_heading, 18, y+26, browse_back_label(a), a->colors.text);
+        if (a->renderer.active)
+            vip_ui_render_text(&a->renderer, 18, y + 10, SIDEBAR_W - 36, browse_back_label(a), "Sans Bold 10", 0xF6F8FCu, 1.0, false);
+        else
+            draw_text_font(a, a->font_heading, 18, y+26, browse_back_label(a), a->colors.text);
         y += 48;
     }
     bool all_sel = a->selected_category < 0;
     bool all_hover = a->hovered_control == HOVER_CATEGORY_ALL;
     fill_round_rect(a, 8, y, SIDEBAR_W-16, 36, 11, all_sel ? a->colors.accent2 : (all_hover ? a->colors.hover : a->colors.panel2));
     char all_label[128]; snprintf(all_label, sizeof(all_label), "%s (%zu)", all_content_label(a), ACTIVE_CHANNELS(a).len);
-    draw_text(a, 18, y+24, all_label, (all_sel || all_hover) ? a->colors.text : a->colors.muted);
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, 18, y + 9, SIDEBAR_W - 36, all_label, all_sel ? "Sans Bold 9" : "Sans 9",
+                           (all_sel || all_hover) ? 0xF6F8FCu : 0x91A0B7u, 1.0, false);
+    else
+        draw_text(a, 18, y+24, all_label, (all_sel || all_hover) ? a->colors.text : a->colors.muted);
     y += 42;
     int rows = category_visible_rows(a) - 1;
     for (int r = 0; r < rows; ++r) {
@@ -2925,7 +2962,11 @@ static void draw_browse(app_t *a) {
         char full_label[512]; char label[256]; size_t count = a->category_counts ? a->category_counts[idx] : 0;
         snprintf(full_label, sizeof(full_label), "%s (%zu)", ACTIVE_CATEGORIES(a).items[idx].name, count);
         bounded_text(label, sizeof(label), full_label, 34);
-        draw_text(a, 18, y+24, label, (selected || hovered) ? a->colors.text : a->colors.muted);
+        if (a->renderer.active)
+            vip_ui_render_text(&a->renderer, 18, y + 9, SIDEBAR_W - 36, label, selected ? "Sans Bold 9" : "Sans 9",
+                               (selected || hovered) ? 0xF6F8FCu : 0x91A0B7u, 1.0, false);
+        else
+            draw_text(a, 18, y+24, label, (selected || hovered) ? a->colors.text : a->colors.muted);
         y += 42;
     }
 
@@ -2994,7 +3035,10 @@ static void draw_browse(app_t *a) {
             char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
             bool image_ok = path && draw_cached_image_contain(a, path, cx, cy, layout.card_w, layout.art_h);
             if (!image_ok) {
-                draw_centered(a, cx, cy + layout.art_h/2 + 5, layout.card_w, "carregando imagem...", a->colors.muted);
+                if (a->renderer.active)
+                    vip_ui_render_text(&a->renderer, cx + 8, cy + layout.art_h/2 - 7, layout.card_w - 16, "carregando imagem...", "Sans 9", 0x91A0B7u, 1.0, true);
+                else
+                    draw_centered(a, cx, cy + layout.art_h/2 + 5, layout.card_w, "carregando imagem...", a->colors.muted);
                 int distance = rr >= 0 ? rr : -rr;
                 int64_t priority = 1000000LL - (int64_t)distance * 1000LL - col;
                 enqueue_thumbnail(a, ch, priority);
@@ -3006,7 +3050,10 @@ static void draw_browse(app_t *a) {
                 int open_x = cx + 8, open_y = cy + layout.art_h - open_h - 8;
                 fill_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent2);
                 stroke_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent);
-                draw_centered_font(a, a->font_small, open_x, open_y + 20, open_w, "ABRIR", a->colors.text);
+                if (a->renderer.active)
+                    vip_ui_render_text(&a->renderer, open_x, open_y + 7, open_w, "ABRIR", "Sans Bold 8", 0xF6F8FCu, 1.0, true);
+                else
+                    draw_centered_font(a, a->font_small, open_x, open_y + 20, open_w, "ABRIR", a->colors.text);
             }
             bool favorite = a->favorite_flags && a->favorite_flags[chidx];
             int card_fav_w = 58, card_fav_h = 28, card_fav_x = cx + layout.card_w - card_fav_w - 6, card_fav_y = cy + 6;
@@ -3042,8 +3089,12 @@ static void draw_browse(app_t *a) {
             }
             char grouped_title[256];
             const char *display_title = m3u_series_display_name(a, ch, grouped_title, sizeof(grouped_title));
-            char title[160]; bounded_text(title, sizeof(title), display_title, layout.mode == ART_PORTRAIT ? 28 : 42);
-            draw_text_font(a, active_card ? a->font_heading : a->font, cx + 8, cy + layout.art_h + 25, title, a->colors.text);
+            char title[256]; bounded_text(title, sizeof(title), display_title, 92);
+            if (a->renderer.active)
+                vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 11, layout.card_w - 18, title,
+                                   active_card ? "Sans SemiBold 10" : "Sans 10", 0xF6F8FCu, 1.0, false);
+            else
+                draw_text_font(a, active_card ? a->font_heading : a->font, cx + 8, cy + layout.art_h + 25, title, a->colors.text);
             if (a->series_season_select) {
                 size_t season_count = 0u;
                 for (size_t ei = 0; ei < a->episode_channels.len; ++ei) {
@@ -3051,12 +3102,18 @@ static void draw_browse(app_t *a) {
                     if (cid && ch->category_id && strcmp(cid, ch->category_id) == 0) ++season_count;
                 }
                 char meta[72]; snprintf(meta, sizeof(meta), "%zu episódio%s", season_count, season_count == 1u ? "" : "s");
-                draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 44, meta, a->colors.muted);
+                if (a->renderer.active)
+                    vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 33, layout.card_w - 18, meta, "Sans 8", 0x91A0B7u, 1.0, false);
+                else
+                    draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 44, meta, a->colors.muted);
             } else if (a->content_kind == CONTENT_SERIES && !a->series_episode_mode &&
                 a->series_watched && a->series_total && a->series_total[chidx] > 0) {
                 char progress[80];
                 snprintf(progress, sizeof(progress), "%d/%d episódios", a->series_watched[chidx], a->series_total[chidx]);
-                draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 44, progress, a->colors.muted);
+                if (a->renderer.active)
+                    vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 33, layout.card_w - 18, progress, "Sans 8", 0x91A0B7u, 1.0, false);
+                else
+                    draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 44, progress, a->colors.muted);
             }
                     cy = base_cy;
 }
