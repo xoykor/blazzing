@@ -39,6 +39,7 @@ struct vip_pairing_relay {
     pthread_t thread;
     bool thread_started;
     atomic_bool stop;
+    atomic_bool finished;
 
     vip_pairing_submit_fn on_submit;
     void *userdata;
@@ -504,6 +505,7 @@ static void *relay_worker(void *userdata) {
                 if (relay->on_submit)
                     relay->on_submit(name, url, relay->userdata);
                 delete_remote_session(relay);
+                atomic_store(&relay->finished, true);
                 return NULL;
             }
         } else if (code == CURLE_OK && status == 410L) {
@@ -513,6 +515,7 @@ static void *relay_worker(void *userdata) {
         sleep_poll_interval(&relay->stop);
     }
 
+    atomic_store(&relay->finished, true);
     return NULL;
 }
 
@@ -543,6 +546,7 @@ vip_status_t vip_pairing_relay_start(vip_pairing_relay_t **out_relay,
     relay->on_submit = on_submit;
     relay->userdata = userdata;
     atomic_init(&relay->stop, false);
+    atomic_init(&relay->finished, false);
 
     vip_status_t created = create_remote_session(relay, error);
     if (created != VIP_OK) {
@@ -586,4 +590,8 @@ const char *vip_pairing_relay_page_url(const vip_pairing_relay_t *relay) {
 
 const char *vip_pairing_relay_session_id(const vip_pairing_relay_t *relay) {
     return relay ? relay->session_id : "";
+}
+
+bool vip_pairing_relay_finished(const vip_pairing_relay_t *relay) {
+    return relay ? atomic_load(&relay->finished) : true;
 }
