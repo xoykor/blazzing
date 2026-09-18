@@ -7,6 +7,8 @@ set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(VIPTV_SANITIZE "Enable AddressSanitizer/UBSan" OFF)
+set(VIPTV_PAIRING_DEFAULT_URL "" CACHE STRING
+    "Default HTTPS base URL for the public phone-pairing relay")
 
 find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
@@ -81,6 +83,10 @@ add_library(vip_ui_x11
 target_link_libraries(vip_ui_x11 PUBLIC
     vip_core vip_provider vip_database vip_decoder vip_thumbnails vip_player_mpv vip_pairing
     PkgConfig::X11 PkgConfig::JPEG PkgConfig::CURL PkgConfig::CAIRO PkgConfig::PANGOCAIRO PkgConfig::QRENCODE Threads::Threads)
+if(VIPTV_PAIRING_DEFAULT_URL)
+    target_compile_definitions(vip_ui_x11 PRIVATE
+        VIPTV_PAIRING_DEFAULT_URL="${VIPTV_PAIRING_DEFAULT_URL}")
+endif()
 vip_warnings(vip_ui_x11)
 
 add_executable(visual-iptv
