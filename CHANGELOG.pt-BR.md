@@ -1,3 +1,18 @@
+## 1.4.0 — Unreleased
+
+Pareamento pela Internet substitui o pareamento LAN:
+
+- remove o servidor HTTP local de entrada, descoberta de IP LAN, portas de pareamento e necessidade de regra de firewall no PC;
+- adiciona protocolo de relay público HTTPS com ID aleatório de sessão de 128 bits e chave AES aleatória de 256 bits;
+- cifra nome/URL da playlist no navegador do celular com AES-256-GCM antes do envio ao relay;
+- mantém a chave AES no fragmento `#` do QR, remove o fragmento da barra/histórico após abrir a página e nunca armazena a chave no relay;
+- mantém apenas IV/ciphertext temporários na RAM do relay, com expiração em cinco minutos e exclusão explícita após entrega;
+- adiciona polling HTTPS verificado e descriptografia ao cliente C e rejeita relay que não seja HTTPS;
+- adiciona relay Go independente com rate limit, headers de segurança, testes unitários, teste HTTP real e smoke test no CI;
+- adiciona arquivos systemd/Caddy endurecidos e instalador de uma etapa para Oracle Cloud com Ubuntu 24.04;
+- permite embutir o relay de produção com `VIPTV_PAIRING_DEFAULT_URL` e sobrescrever em desenvolvimento com `VIPTV_PAIRING_URL`;
+- atualiza a documentação EN/PT-BR atual para a arquitetura via Internet.
+
 ## 1.3.3 — 2026-09-17
 
 Correção de acesso ao pareamento pela rede local:
