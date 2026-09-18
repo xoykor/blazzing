@@ -4,6 +4,7 @@ PORT=18787
 BASE="http://127.0.0.1:${PORT}"
 ID="0123456789abcdef0123456789abcdef"
 LOG="/tmp/blazzing-worker-test.log"
+BODY="/tmp/blazzing-worker-body"
 
 npx wrangler dev --ip 127.0.0.1 --port "${PORT}" >"${LOG}" 2>&1 &
 PID=$!
@@ -15,19 +16,38 @@ for _ in $(seq 1 60); do
 done
 curl --fail --silent --output /dev/null "${BASE}/healthz" || { cat "${LOG}"; exit 1; }
 
-status() { curl --silent --output /tmp/blazzing-worker-body --write-out '%{http_code}' "$@"; }
+request_status() {
+  curl --silent --output "${BODY}" --write-out '%{http_code}' "$@"
+}
 
-[[ "$(status -X POST "${BASE}/api/v1/sessions/${ID}")" == "201" ]]
-[[ "$(status "${BASE}/pair/${ID}")" == "200" ]]
-grep -q "Adicionar playlist ao Blazzing" /tmp/blazzing-worker-body
-[[ "$(status "${BASE}/pair.js")" == "200" ]]
-grep -q "AES-GCM" /tmp/blazzing-worker-body
-[[ "$(status "${BASE}/api/v1/sessions/${ID}/payload")" == "204" ]]
+expect_status() {
+  local expected="$1"
+  local label="$2"
+  shift 2
+  local got
+  got="$(request_status "$@")"
+  if [[ "${got}" != "${expected}" ]]; then
+    echo "${label}: expected HTTP ${expected}, got ${got}" >&2
+    cat "${BODY}" >&2 || true
+    echo >&2
+    cat "${LOG}" >&2 || true
+    exit 1
+  fi
+}
+
+expect_status 201 create -X POST "${BASE}/api/v1/sessions/${ID}"
+expect_status 200 pair-page "${BASE}/pair/${ID}"
+grep -q "Adicionar playlist ao Blazzing" "${BODY}"
+expect_status 200 pair-js "${BASE}/pair.js"
+grep -q "AES-GCM" "${BODY}"
+expect_status 204 empty-poll "${BASE}/api/v1/sessions/${ID}/payload"
+
 PAYLOAD='{"iv":"abcdefghijklmnop","ciphertext":"abcdefghijklmnopqrstuvwxyz"}'
-[[ "$(status -X POST -H 'Content-Type: application/json' --data "${PAYLOAD}" "${BASE}/api/v1/sessions/${ID}/payload")" == "204" ]]
-[[ "$(status "${BASE}/api/v1/sessions/${ID}/payload")" == "200" ]]
-grep -q '"ciphertext"' /tmp/blazzing-worker-body
-[[ "$(status -X DELETE "${BASE}/api/v1/sessions/${ID}")" == "204" ]]
-[[ "$(status "${BASE}/api/v1/sessions/${ID}/payload")" == "410" ]]
-[[ "$(status -I "${BASE}/healthz")" == "204" ]]
+expect_status 204 submit -X POST -H 'Content-Type: application/json' --data "${PAYLOAD}" "${BASE}/api/v1/sessions/${ID}/payload"
+expect_status 200 poll "${BASE}/api/v1/sessions/${ID}/payload"
+grep -q '"ciphertext"' "${BODY}"
+expect_status 204 delete -X DELETE "${BASE}/api/v1/sessions/${ID}"
+expect_status 410 deleted-poll "${BASE}/api/v1/sessions/${ID}/payload"
+expect_status 204 health-head -I "${BASE}/healthz"
+
 echo "Worker pairing smoke test: OK"

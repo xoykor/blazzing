@@ -136,7 +136,8 @@ export class PairingRateLimit extends DurableObject {
     if (typeof start !== "number" || typeof count !== "number" || now - start >= RATE_WINDOW_MS) {
       start = now;
       count = 1;
-      await this.ctx.storage.put({ windowStart: start, count });
+      await this.ctx.storage.put("windowStart", start);
+      await this.ctx.storage.put("count", count);
       await this.ctx.storage.setAlarm(now + RATE_CLEANUP_MS);
       return true;
     }
