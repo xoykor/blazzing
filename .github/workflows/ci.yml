@@ -59,6 +59,9 @@ jobs:
         working-directory: relay
         run: go test ./...
 
+      - name: Validate Oracle installer
+        run: bash -n relay/deploy/install-oracle-ubuntu.sh
+
       - name: Build relay
         working-directory: relay
         run: CGO_ENABLED=0 go build -trimpath -o /tmp/blazzing-pairing-relay .
