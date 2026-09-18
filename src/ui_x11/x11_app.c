@@ -68,6 +68,7 @@
 #define INPUT_PHONE 7
 #define INPUT_CONNECT 8
 #define INPUT_MODE 9
+#define INPUT_SAVED_PROFILE 10
 #define BROWSE_FOCUS_GRID 0
 #define BROWSE_FOCUS_SIDEBAR 1
 #define BROWSE_FOCUS_TOP 2
@@ -234,6 +235,7 @@ struct app {
     bool active_server_alt;
     vip_profile_list_t profiles;
     int profile_scroll;
+    int profile_focus;
 
     vip_pairing_server_t *pairing_server;
     atomic_bool pairing_submission;
@@ -2143,6 +2145,39 @@ static void login_select_mode(app_t *a, login_mode_t mode) {
     a->input_focus = INPUT_MODE;
 }
 
+static void login_profile_ensure_visible(app_t *a) {
+    if (!a || a->profiles.len == 0u) {
+        if (a) {
+            a->profile_focus = 0;
+            a->profile_scroll = 0;
+        }
+        return;
+    }
+    if (a->profile_focus < 0)
+        a->profile_focus = 0;
+    if ((size_t)a->profile_focus >= a->profiles.len)
+        a->profile_focus = (int)a->profiles.len - 1;
+    const int visible = 6;
+    if (a->profile_focus < a->profile_scroll)
+        a->profile_scroll = a->profile_focus;
+    if (a->profile_focus >= a->profile_scroll + visible)
+        a->profile_scroll = a->profile_focus - visible + 1;
+    int max_scroll = (int)a->profiles.len - visible;
+    if (max_scroll < 0)
+        max_scroll = 0;
+    if (a->profile_scroll < 0)
+        a->profile_scroll = 0;
+    if (a->profile_scroll > max_scroll)
+        a->profile_scroll = max_scroll;
+}
+
+static void login_focus_saved_profiles(app_t *a) {
+    if (!a || a->pairing_server || a->profiles.len == 0u)
+        return;
+    login_profile_ensure_visible(a);
+    a->input_focus = INPUT_SAVED_PROFILE;
+}
+
 static void draw_pairing_qr(app_t *a, int x, int y, int size) {
     if (!a || !a->pairing_qr || size <= 0)
         return;
@@ -2931,6 +2966,7 @@ static void refresh_profiles(app_t *a) {
         a->profile_scroll = 0;
     if ((size_t)a->profile_scroll > a->profiles.len)
         a->profile_scroll = (int)a->profiles.len;
+    login_profile_ensure_visible(a);
 }
 
 /* Persist active profile. */
