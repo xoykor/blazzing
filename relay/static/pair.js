@@ -6,6 +6,10 @@
   const nameInput = document.getElementById("name");
   const urlInput = document.getElementById("url");
   const status = document.getElementById("status");
+  const pairingKeyText = location.hash.startsWith("#") ? location.hash.slice(1) : "";
+  if (pairingKeyText) {
+    history.replaceState(null, "", location.pathname);
+  }
 
   function setStatus(message, kind = "") {
     status.textContent = message;
@@ -59,8 +63,7 @@
     setStatus("Criptografando e enviando…");
     try {
       const id = sessionID();
-      const keyText = location.hash.startsWith("#") ? location.hash.slice(1) : "";
-      const keyBytes = base64urlToBytes(keyText);
+      const keyBytes = base64urlToBytes(pairingKeyText);
       const body = await encryptPayload(keyBytes, {
         name: nameInput.value.trim(),
         url
