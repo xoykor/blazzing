@@ -4669,8 +4669,8 @@ static void handle_click(app_t *a, int x, int y) {
             start_login(a);
         }
         else {
-            int row_y = py + 132;
-            for (int r = 0; r < 7; ++r) {
+            int row_y = py + 154;
+            for (int r = 0; r < 6; ++r) {
                 int idx = a->profile_scroll + r;
                 if ((size_t)idx >= a->profiles.len)
                     break;
@@ -4727,7 +4727,7 @@ static void handle_wheel(app_t *a, int x, int y, int direction) {
             login_profile_ensure_visible(a);
             return;
         }
-        int max_scroll = (int)a->profiles.len - 7;
+        int max_scroll = (int)a->profiles.len - 6;
         if (max_scroll < 0)
             max_scroll = 0;
 
@@ -4855,6 +4855,10 @@ static bool is_navigation_back(KeySym sym) {
     return sym == XK_Escape || sym == XF86XK_Back;
 }
 
+static bool is_activate_key(KeySym sym) {
+    return sym == XK_Return || sym == XK_KP_Enter || sym == XK_Select;
+}
+
 /* Handle key. */
 static void handle_key(app_t *a, XKeyEvent *kev) {
     KeySym sym = NoSymbol;
@@ -4973,7 +4977,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
             }
             if (sym == XK_Up)
                 return;
-            if (sym == XK_Return || sym == XK_KP_Enter) {
+            if is_activate_key(sym) {
                 browse_activate_top(a);
                 return;
             }
@@ -4998,7 +5002,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
             }
             if (sym == XK_Left)
                 return;
-            if (sym == XK_Return || sym == XK_KP_Enter) {
+            if is_activate_key(sym) {
                 browse_activate_sidebar(a);
                 return;
             }
@@ -5028,7 +5032,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
                 move_grid_focus(a, 0, 1);
                 return;
             }
-            if ((sym == XK_Return || sym == XK_KP_Enter) && a->filtered_len > 0u) {
+            if (is_activate_key(sym) && a->filtered_len > 0u) {
                 if (a->focused_filtered >= a->filtered_len)
                     a->focused_filtered = a->filtered_len - 1u;
                 activate_item(a, a->filtered[a->focused_filtered]);
@@ -5113,7 +5117,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
         }
         if (sym == XK_Right)
             return;
-        if (sym == XK_Return || sym == XK_KP_Enter || sym == XK_Select) {
+        if is_activate_key(sym) {
             if (a->profiles.len == 0u)
                 return;
             size_t index = (size_t)a->profile_focus;
@@ -5157,7 +5161,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
         login_move_focus(a, shift ? -1 : 1);
         return;
     }
-    if (sym == XK_Return || sym == XK_KP_Enter || sym == XK_Select) {
+    if is_activate_key(sym) {
         if (a->input_focus == INPUT_PHONE && a->login_mode == LOGIN_M3U)
             start_phone_pairing(a);
         else if (a->input_focus == INPUT_MODE)
