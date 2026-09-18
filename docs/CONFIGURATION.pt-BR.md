@@ -57,3 +57,17 @@ Se definida, cria o player sem saída de áudio.
 ## `VIPTV_TEST_*`
 
 Reservadas para testes e automações; não fazem parte da interface estável de usuário.
+
+## `VIPTV_PAIRING_URL`
+
+Sobrescreve o relay público HTTPS usado por **Adicionar pelo celular**.
+
+```fish
+set -lx VIPTV_PAIRING_URL https://pair.example.com
+./build/visual-iptv
+```
+
+Pacotes de produção devem normalmente embutir o relay com
+`-DVIPTV_PAIRING_DEFAULT_URL=https://...`. A variável de ambiente tem
+prioridade e serve principalmente para testar outros relays. Apenas URLs
+`https://` são aceitas.
