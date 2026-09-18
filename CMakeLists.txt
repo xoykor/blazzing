@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(visual_iptv_x11 VERSION 1.3.3 LANGUAGES C)
+project(visual_iptv_x11 VERSION 1.4.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -7,6 +7,8 @@ set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(VIPTV_SANITIZE "Enable AddressSanitizer/UBSan" OFF)
+set(VIPTV_PAIRING_DEFAULT_URL "https://blazzing-pairing.vsxk.workers.dev" CACHE STRING
+    "Default HTTPS base URL for the public phone-pairing relay")
 
 find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
@@ -69,8 +71,9 @@ add_library(vip_player_mpv src/player_mpv/player_mpv.c)
 target_link_libraries(vip_player_mpv PUBLIC vip_core Threads::Threads PkgConfig::JSONC)
 vip_warnings(vip_player_mpv)
 
-add_library(vip_pairing src/app/pairing_server.c)
-target_link_libraries(vip_pairing PUBLIC vip_core Threads::Threads)
+add_library(vip_pairing src/app/pairing_relay.c)
+target_link_libraries(vip_pairing PUBLIC
+    vip_core Threads::Threads PkgConfig::CURL PkgConfig::JSONC OpenSSL::Crypto)
 vip_warnings(vip_pairing)
 
 add_library(vip_ui_x11
@@ -80,6 +83,10 @@ add_library(vip_ui_x11
 target_link_libraries(vip_ui_x11 PUBLIC
     vip_core vip_provider vip_database vip_decoder vip_thumbnails vip_player_mpv vip_pairing
     PkgConfig::X11 PkgConfig::JPEG PkgConfig::CURL PkgConfig::CAIRO PkgConfig::PANGOCAIRO PkgConfig::QRENCODE Threads::Threads)
+if(VIPTV_PAIRING_DEFAULT_URL)
+    target_compile_definitions(vip_ui_x11 PRIVATE
+        VIPTV_PAIRING_DEFAULT_URL="${VIPTV_PAIRING_DEFAULT_URL}")
+endif()
 vip_warnings(vip_ui_x11)
 
 add_executable(visual-iptv
@@ -163,10 +170,10 @@ if(BUILD_TESTING)
     vip_warnings(test_ui_motion)
     add_test(NAME ui_motion COMMAND test_ui_motion)
 
-    add_executable(test_pairing_server tests/test_pairing_server.c)
-    target_link_libraries(test_pairing_server PRIVATE vip_pairing Threads::Threads)
-    vip_warnings(test_pairing_server)
-    add_test(NAME pairing_server COMMAND test_pairing_server)
+    add_executable(test_pairing_relay tests/test_pairing_relay.c)
+    target_link_libraries(test_pairing_relay PRIVATE vip_pairing OpenSSL::Crypto)
+    vip_warnings(test_pairing_relay)
+    add_test(NAME pairing_relay COMMAND test_pairing_relay)
 endif()
 
 install(TARGETS visual-iptv RUNTIME DESTINATION bin)

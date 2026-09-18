@@ -175,6 +175,7 @@ modules:
       - -DCMAKE_BUILD_TYPE=Release
       - -DBUILD_TESTING=OFF
       - -DCMAKE_INSTALL_PREFIX=/app
+      - -DVIPTV_PAIRING_DEFAULT_URL=https://blazzing-pairing.vsxk.workers.dev
     post-install:
       # CMake still installs the historical desktop file; Flatpak exports
       # metadata using the reverse-DNS app ID instead.

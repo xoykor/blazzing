@@ -35,3 +35,15 @@ A mídia não é passada por `argv` ao mpv; a URL é enviada pelo socket JSON IP
 ## Relatórios de bug
 
 Nunca publique credenciais reais, playlists privadas, URLs autenticadas completas, dumps do Secret Service ou bancos reais da aplicação.
+
+## Relay de pareamento pelo celular
+
+A entrada M3U pelo celular usa um Cloudflare Worker público HTTPS de curta duração. O
+Blazzing gera localmente o identificador da sessão e a chave AES-256. O
+navegador cifra nome e URL da playlist com AES-256-GCM antes do envio.
+
+O Worker mantém somente IV/ciphertext cifrados e o estado de expiração em um Durable Object SQLite. A sessão é apagada após a entrega ou depois de cinco minutos. A chave AES viaja no fragmento `#` do QR e não faz parte das
+requisições HTTP normais. Depois de abrir a página, o JavaScript remove o
+fragmento da URL visível/histórico.
+
+Como o Worker entrega esse JavaScript, uma versão maliciosamente modificada do frontend poderia teoricamente capturar o texto puro antes da cifra. Use o Worker oficial do Blazzing ou uma implantação sob seu controle. A Cloudflare pode reter dados de armazenamento cifrados conforme as políticas da própria infraestrutura/backup; a chave AES não é armazenada junto do ciphertext.

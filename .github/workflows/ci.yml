@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 permissions:
@@ -32,9 +34,36 @@ jobs:
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=${{ matrix.sanitize == 'ON' && 'Debug' || 'Release' }}
           -DVIPTV_SANITIZE=${{ matrix.sanitize }}
+          -DVIPTV_PAIRING_DEFAULT_URL=https://blazzing-pairing.vsxk.workers.dev
 
       - name: Build
         run: cmake --build build --parallel 2
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+
+  worker-test:
+    name: Pairing Worker
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Worker dependencies
+        working-directory: worker
+        run: npm install
+
+      - name: Validate Worker bundle
+        working-directory: worker
+        run: npm run check
+
+      - name: Smoke-test Worker + Durable Objects
+        working-directory: worker
+        run: npm run smoke

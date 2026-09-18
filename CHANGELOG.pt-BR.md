@@ -1,3 +1,19 @@
+## 1.4.0 — 2026-09-18
+
+Pareamento pela Internet substitui o pareamento LAN:
+
+- remove o servidor HTTP local de entrada, descoberta de IP LAN, portas de pareamento e necessidade de regra de firewall no PC;
+- adiciona protocolo de relay público HTTPS com ID aleatório de sessão de 128 bits e chave AES aleatória de 256 bits;
+- cifra nome/URL da playlist no navegador do celular com AES-256-GCM antes do envio ao relay;
+- mantém a chave AES no fragmento `#` do QR, remove o fragmento da barra/histórico após abrir a página e nunca armazena a chave no relay;
+- mantém apenas IV/ciphertext cifrados e o estado de expiração em um Durable Object SQLite temporário, com expiração em cinco minutos e exclusão explícita após entrega;
+- adiciona polling HTTPS verificado e descriptografia ao cliente C e rejeita relay que não seja HTTPS;
+- adiciona Cloudflare Worker com Durable Objects SQLite, rate limit por IP para criação de sessões, headers de segurança e smoke tests locais;
+- remove hospedagem Oracle/Caddy/systemd e publica o serviço de pareamento diretamente em workers.dev com Wrangler;
+- permite embutir o relay de produção com `VIPTV_PAIRING_DEFAULT_URL` e sobrescrever em desenvolvimento com `VIPTV_PAIRING_URL`;
+- atualiza a documentação EN/PT-BR atual para a arquitetura via Internet.
+- aumenta o intervalo de polling do cliente de 750 ms para 2 segundos, reduzindo bastante o volume de requisições ao Worker/Durable Object sem prejudicar perceptivelmente o envio pelo celular.
+
 ## 1.3.3 — 2026-09-17
 
 Correção de acesso ao pareamento pela rede local:

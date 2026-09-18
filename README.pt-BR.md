@@ -10,18 +10,18 @@
 
 Blazzing é um player IPTV nativo para Linux escrito em C17. Ele reúne interface X11/XWayland, renderização Cairo/Pango, reprodução persistente com mpv, carregamento assíncrono de imagens, persistência SQLite, Xtream Codes, M3U/M3U8 e Pluto TV em um único aplicativo desktop.
 
-> **Estado do projeto:** a **v1.3.3** adiciona navegação por controle remoto e entrada M3U/M3U8 pelo celular. Releases futuras continuam focadas em manutenção, compatibilidade e correções.
+> **Estado do projeto:** a **v1.4.0** substitui o pareamento LAN pelo celular por pareamento cifrado pela Internet via Cloudflare Worker, mantendo a descriptografia da playlist local no Blazzing.
 
 > Use o Blazzing somente com listas, servidores e conteúdos que você tenha autorização para acessar.
 
 ## Download
 
-A instalação recomendada é o **Flatpak oficial da v1.3.3** disponível na [release do GitHub](https://github.com/xoykor/blazzing/releases/tag/v1.3.3).
+A instalação recomendada é o **Flatpak oficial da v1.4.0** disponível na [release do GitHub](https://github.com/xoykor/blazzing/releases/tag/v1.4.0).
 
-Depois de baixar `Blazzing-v1.3.3-x86_64.flatpak`:
+Depois de baixar `Blazzing-v1.4.0-x86_64.flatpak`:
 
 ```sh
-flatpak install --user ./Blazzing-v1.3.3-x86_64.flatpak
+flatpak install --user ./Blazzing-v1.4.0-x86_64.flatpak
 flatpak run io.github.xoykor.Blazzing
 ```
 
@@ -94,31 +94,26 @@ Na grade do catálogo, `←` na primeira coluna entra no menu lateral de categor
 ### Adicionar uma URL M3U/M3U8 pelo celular
 
 1. Abra o modo M3U e selecione **Adicionar pelo celular**.
-2. O Blazzing inicia um servidor HTTP local temporário na porta TCP `47831` quando disponível, usando outra porta livre somente se necessário.
-3. Escaneie o QR Code em um celular conectado à mesma rede local.
+2. O Blazzing cria uma sessão de cinco minutos no Cloudflare Worker público.
+3. Escaneie o QR Code no celular. O celular pode estar no Wi-Fi ou nos dados móveis.
 4. Cole o nome da lista e a URL M3U/M3U8 e envie.
-5. O Blazzing encerra o pareamento e carrega a lista usando o provider M3U normal.
+5. O navegador cifra os dados com AES-256-GCM antes do envio.
+6. O Blazzing recebe o payload cifrado por HTTPS, descriptografa localmente,
+   apaga a sessão e carrega a lista.
 
-A URL de pareamento contém um token aleatório de uso temporário. O pareamento usa HTTP local, não TLS; use-o em uma rede LAN confiável, especialmente se a URL da playlist contiver credenciais embutidas. Se nenhum endereço LAN utilizável for detectado, o Blazzing não mostra um QR para celular e exibe uma URL localhost para teste no próprio PC.
+O QR contém um identificador aleatório de sessão de 128 bits e uma chave AES
+aleatória de 256 bits. A chave fica após o fragmento `#`, não entra nas
+requisições HTTP normais e é removida da barra/histórico do navegador após a
+página iniciar. O Worker mantém somente os dados cifrados da sessão em um
+Durable Object temporário.
 
-#### Se o QR/link ficar carregando no celular
+Nenhum servidor HTTP local é aberto. O pareamento não exige que celular e PC
+estejam na mesma LAN, não exige exceção no firewall do PC e não depende de
+isolamento de clientes do roteador ou CGNAT. Não é necessária VPS.
 
-O celular e o PC precisam estar na mesma LAN e o roteador deve permitir tráfego entre dispositivos. Wi-Fi de convidado costuma bloquear esse acesso.
-
-No CachyOS, o UFW costuma estar ativo e pode bloquear conexões de entrada. O Blazzing mostra abaixo do QR a porta TCP real do pareamento. Quando estiver usando a porta preferencial `47831`, libere apenas a faixa privada correspondente ao IP exibido:
-
-```sh
-# Para LAN 192.168.x.x:
-sudo ufw allow from 192.168.0.0/16 to any port 47831 proto tcp
-
-# Para LAN 10.x.x.x:
-sudo ufw allow from 10.0.0.0/8 to any port 47831 proto tcp
-
-# Para LAN 172.16.x.x–172.31.x.x:
-sudo ufw allow from 172.16.0.0/12 to any port 47831 proto tcp
-```
-
-Se o Blazzing mostrar outra porta de fallback, substitua `47831` pela porta exibida.
+A URL do Worker pode ser embutida no build de produção com
+`VIPTV_PAIRING_DEFAULT_URL`. Em desenvolvimento, `VIPTV_PAIRING_URL` pode
+sobrescrevê-la.
 
 ### Player
 

@@ -1,3 +1,19 @@
+## 1.4.0 — 2026-09-18
+
+Internet pairing replaces LAN pairing:
+
+- removes the inbound local HTTP server, LAN IP discovery, dynamic/stable pairing ports and PC firewall requirements;
+- adds a public HTTPS relay protocol using a random 128-bit session ID and a random 256-bit AES key;
+- encrypts playlist name/URL in the phone browser with AES-256-GCM before relay submission;
+- keeps the AES key in the QR URL fragment, removes it from the browser address bar/history after bootstrap, and never stores the key on the relay;
+- stores only encrypted IV/ciphertext and expiry state in a short-lived SQLite-backed Durable Object, with five-minute expiry and explicit deletion after successful delivery;
+- adds verified HTTPS polling/decryption to the C client and rejects non-HTTPS relay base URLs;
+- adds a Cloudflare Worker with SQLite-backed Durable Objects, per-IP session-creation rate limiting, response hardening and local smoke tests;
+- removes Oracle/Caddy/systemd hosting and deploys the pairing service directly to workers.dev with Wrangler;
+- supports a compiled production relay through `VIPTV_PAIRING_DEFAULT_URL` and a development override through `VIPTV_PAIRING_URL`;
+- updates current EN/PT-BR documentation to the Internet relay architecture.
+- increases the client polling interval from 750 ms to 2 seconds, substantially reducing Worker/Durable Object request volume while keeping phone submissions responsive.
+
 ## 1.3.3 — 2026-09-17
 
 Phone-pairing LAN reachability fix:
