@@ -12,6 +12,7 @@ Pareamento pela Internet substitui o pareamento LAN:
 - remove hospedagem Oracle/Caddy/systemd e publica o serviço de pareamento diretamente em workers.dev com Wrangler;
 - permite embutir o relay de produção com `VIPTV_PAIRING_DEFAULT_URL` e sobrescrever em desenvolvimento com `VIPTV_PAIRING_URL`;
 - atualiza a documentação EN/PT-BR atual para a arquitetura via Internet.
+- aumenta o intervalo de polling do cliente de 750 ms para 2 segundos, reduzindo bastante o volume de requisições ao Worker/Durable Object sem prejudicar perceptivelmente o envio pelo celular.
 
 ## 1.3.3 — 2026-09-17
 

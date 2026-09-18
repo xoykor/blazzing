@@ -27,7 +27,7 @@
 #define RELAY_RESPONSE_MAX 16384u
 #define RELAY_PAYLOAD_MAX 8192u
 #define RELAY_SESSION_TTL_SECONDS 300
-#define RELAY_POLL_MS 750L
+#define RELAY_POLL_MS 2000L
 
 struct vip_pairing_relay {
     char base_url[RELAY_BASE_URL_MAX];

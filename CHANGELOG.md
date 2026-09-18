@@ -12,6 +12,7 @@ Internet pairing replaces LAN pairing:
 - removes Oracle/Caddy/systemd hosting and deploys the pairing service directly to workers.dev with Wrangler;
 - supports a compiled production relay through `VIPTV_PAIRING_DEFAULT_URL` and a development override through `VIPTV_PAIRING_URL`;
 - updates current EN/PT-BR documentation to the Internet relay architecture.
+- increases the client polling interval from 750 ms to 2 seconds, substantially reducing Worker/Durable Object request volume while keeping phone submissions responsive.
 
 ## 1.3.3 — 2026-09-17
 
