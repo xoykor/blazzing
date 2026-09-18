@@ -212,6 +212,7 @@ See [Data and privacy](docs/DATA_AND_PRIVACY.md).
 Supported end-user environment overrides:
 
 - `VIPTV_MPV_DEBUG=1` — detailed player diagnostics;
+- `VIPTV_INPUT_DEBUG=1` — log X11 keycodes/keysyms, useful when mapping a TV remote;
 - `VIPTV_MPV_RENDERER=gpu|gpu-next|x11` — alternate mpv graphics path;
 - `VIPTV_MPV_HWDEC=...` — hardware-decoding override;
 - `VIPTV_NO_AUDIO=1` — start playback without audio output.
