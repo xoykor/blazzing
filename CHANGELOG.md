@@ -1,3 +1,13 @@
+## 1.3.1 — 2026-09-17
+
+Maintenance and maintainability release:
+
+- publishes the finalized post-v1.3.0 maintenance pass as an official Flatpak release;
+- reformats and restructures the C source for readability without changing the frozen feature scope;
+- adds complete function/prototype comment coverage and refreshes project documentation;
+- removes stale mpv/X11 reparenting code and its unnecessary player-library X11 dependency;
+- validates the maintained codebase with static analysis, sanitizers and stress testing.
+
 ## 1.3.0 — 2026-09-17
 
 Visual rendering and interaction overhaul:

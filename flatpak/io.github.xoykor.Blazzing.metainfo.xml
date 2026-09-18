@@ -20,6 +20,11 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.3.1" date="2026-09-17">
+      <description>
+        <p>Maintenance release based on the finalized v1.3 codebase, with readable/formatted C sources, complete function/prototype comments, refreshed documentation, stale mpv reparenting cleanup and additional static, sanitizer and stress validation.</p>
+      </description>
+    </release>
     <release version="1.3.0" date="2026-09-17">
       <description>
         <p>Introduces the shared Cairo/Pango visual renderer, responsive IPTV cards, modernized hub/login/details/player UI, smooth interaction primitives and a matching Pluto TV redesign.</p>

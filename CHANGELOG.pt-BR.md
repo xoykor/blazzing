@@ -1,3 +1,13 @@
+## 1.3.1 — 2026-09-17
+
+Release de manutenção e legibilidade:
+
+- publica oficialmente em Flatpak a revisão final de manutenção feita após a v1.3.0;
+- reformata e reorganiza o código C para facilitar leitura e manutenção, sem ampliar o escopo de recursos congelado;
+- adiciona cobertura completa de comentários em funções/protótipos e atualiza a documentação do projeto;
+- remove código antigo de reparenting mpv/X11 e a dependência X11 desnecessária da biblioteca do player;
+- valida a base mantida com análise estática, sanitizers e testes de estresse.
+
 ## 1.3.0 — 2026-09-17
 
 Revisão ampla da renderização visual e das interações:
