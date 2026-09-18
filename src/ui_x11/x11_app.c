@@ -352,6 +352,8 @@ static void clear_details_view(app_t *a);
 static void switch_content(app_t *a, content_kind_t kind);
 static void return_from_episode_list(app_t *a);
 static void choose_category(app_t *a, int index);
+static void refresh_profiles(app_t *a);
+static int category_visible_rows(app_t *a);
 
 /* Return monotonic time in milliseconds for deadlines and animation timing. */
 static int64_t monotonic_ms(void) {
@@ -4477,6 +4479,7 @@ static void handle_browse_click(app_t *a, int x, int y) {
         for (int k = 0; k < 3; ++k)
             if (point_in(x, y, tab_x[k], 12, tab_w[k], 46)) {
                 switch_content(a, (content_kind_t)k);
+                browse_focus_top(a, k);
                 return;
             }
     }
@@ -4485,15 +4488,18 @@ static void handle_browse_click(app_t *a, int x, int y) {
     if (search_w < 180)
         search_w = 180;
     if (point_in(x, y, SIDEBAR_W + 18, 12, search_w, 46)) {
-        a->input_focus = INPUT_SEARCH;
+        browse_focus_top(a, BROWSE_TOP_SEARCH);
         return;
     }
     if (point_in(x, y, fav_x, 12, fav_w, 46)) {
+        browse_focus_top(a, BROWSE_TOP_FAVORITES);
         a->favorites_only = !a->favorites_only;
         rebuild_filter(a);
+        browse_focus_top(a, BROWSE_TOP_FAVORITES);
         return;
     }
     if (point_in(x, y, list_x, 12, list_w, 46)) {
+        browse_focus_top(a, BROWSE_TOP_LISTS);
         if (a->thumbs)
             vip_thumbnail_scheduler_cancel_pending(a->thumbs);
         clear_details_view(a);
@@ -4506,12 +4512,15 @@ static void handle_browse_click(app_t *a, int x, int y) {
     if (x < SIDEBAR_W && y >= TOPBAR_H) {
         int base = TOPBAR_H + 12;
         if (a->series_episode_mode && point_in(x, y, 8, base, SIDEBAR_W - 16, 38)) {
+            browse_focus_sidebar(a, -2);
             return_from_episode_list(a);
+            browse_focus_sidebar(a, -1);
             return;
         }
         int category_y = browse_sidebar_category_y(a);
         int local = y - category_y;
         if (local >= 0 && local < 36) {
+            browse_focus_sidebar(a, -1);
             choose_category(a, -1);
             return;
         }
@@ -4520,8 +4529,10 @@ static void handle_browse_click(app_t *a, int x, int y) {
             int row = local / 42;
             if (local % 42 < 36) {
                 int idx = a->category_scroll + row;
-                if (idx >= 0 && (size_t)idx < ACTIVE_CATEGORIES(a).len)
+                if (idx >= 0 && (size_t)idx < ACTIVE_CATEGORIES(a).len) {
+                    browse_focus_sidebar(a, idx);
                     choose_category(a, idx);
+                }
             }
         }
         return;
@@ -4553,6 +4564,7 @@ static void handle_browse_click(app_t *a, int x, int y) {
         return;
     size_t fidx = (size_t)row * (size_t)layout.cols + (size_t)col;
     if (fidx < a->filtered_len) {
+        browse_focus_grid(a);
         a->focused_filtered = fidx;
         size_t chidx = a->filtered[fidx];
         int cx = content_x + col * (layout.card_w + GRID_GAP);
