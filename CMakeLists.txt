@@ -69,8 +69,9 @@ add_library(vip_player_mpv src/player_mpv/player_mpv.c)
 target_link_libraries(vip_player_mpv PUBLIC vip_core Threads::Threads PkgConfig::JSONC)
 vip_warnings(vip_player_mpv)
 
-add_library(vip_pairing src/app/pairing_server.c)
-target_link_libraries(vip_pairing PUBLIC vip_core Threads::Threads)
+add_library(vip_pairing src/app/pairing_relay.c)
+target_link_libraries(vip_pairing PUBLIC
+    vip_core Threads::Threads PkgConfig::CURL PkgConfig::JSONC OpenSSL::Crypto)
 vip_warnings(vip_pairing)
 
 add_library(vip_ui_x11
@@ -163,10 +164,10 @@ if(BUILD_TESTING)
     vip_warnings(test_ui_motion)
     add_test(NAME ui_motion COMMAND test_ui_motion)
 
-    add_executable(test_pairing_server tests/test_pairing_server.c)
-    target_link_libraries(test_pairing_server PRIVATE vip_pairing Threads::Threads)
-    vip_warnings(test_pairing_server)
-    add_test(NAME pairing_server COMMAND test_pairing_server)
+    add_executable(test_pairing_relay tests/test_pairing_relay.c)
+    target_link_libraries(test_pairing_relay PRIVATE vip_pairing OpenSSL::Crypto)
+    vip_warnings(test_pairing_relay)
+    add_test(NAME pairing_relay COMMAND test_pairing_relay)
 endif()
 
 install(TARGETS visual-iptv RUNTIME DESTINATION bin)
