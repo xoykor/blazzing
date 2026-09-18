@@ -70,17 +70,18 @@ func securityHeaders(next http.Handler) http.Handler {
 }
 
 func clientIP(r *http.Request) string {
-	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		first := strings.TrimSpace(strings.Split(forwarded, ",")[0])
-		if net.ParseIP(first) != nil {
-			return first
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+
+	peer := net.ParseIP(host)
+	if peer != nil && peer.IsLoopback() {
+		if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); net.ParseIP(realIP) != nil {
+			return realIP
 		}
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err == nil {
-		return host
-	}
-	return r.RemoteAddr
+	return host
 }
 
 func (s *relay) allowSessionCreate(ip string, now time.Time) bool {
