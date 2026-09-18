@@ -154,3 +154,14 @@ VOD and episodes store position, duration, completion state and timestamps. Seri
 - FFmpeg is executed directly without a command shell.
 
 See [Data and privacy](DATA_AND_PRIVACY.md).
+
+## Phone pairing
+
+```text
+Phone browser --HTTPS--> pairing relay <--HTTPS polling-- Blazzing
+      |                    ciphertext only                 |
+      +---- AES-256-GCM key comes from QR #fragment -------+
+```
+
+The old inbound LAN HTTP server is not part of the current architecture.
+Pairing uses outbound HTTPS from both endpoints.
