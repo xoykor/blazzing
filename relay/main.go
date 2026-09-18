@@ -344,15 +344,7 @@ func (s *relay) cleanupLoop() {
 	}
 }
 
-func main() {
-	addr := os.Getenv("BLZ_RELAY_ADDR")
-	if addr == "" {
-		addr = "127.0.0.1:8080"
-	}
-
-	app := newRelay()
-	go app.cleanupLoop()
-
+func relayHandler(app *relay) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -364,10 +356,21 @@ func main() {
 	mux.HandleFunc("/api/v1/sessions/", app.api)
 	mux.HandleFunc("/pair/", pairPage)
 	mux.HandleFunc("/static/pair.js", staticJS)
+	return securityHeaders(mux)
+}
+
+func main() {
+	addr := os.Getenv("BLZ_RELAY_ADDR")
+	if addr == "" {
+		addr = "127.0.0.1:8080"
+	}
+
+	app := newRelay()
+	go app.cleanupLoop()
 
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           securityHeaders(mux),
+		Handler:           relayHandler(app),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
