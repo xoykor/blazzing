@@ -19,6 +19,7 @@
 #include "visual_iptv/ui_motion.h"
 #include "visual_iptv/ui_render.h"
 
+#include <X11/XF86keysym.h>
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -3481,10 +3482,10 @@ static void draw_login(app_t *a) {
             vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 12, list_w, a->pairing_page_url,
                                "Sans 8", 0x91A0B7u, 1.0, true);
             vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 38, list_w,
-                               "Esc cancela o pareamento", "Sans 8", 0x91A0B7u, 1.0, true);
+                               "Back/Esc cancela o pareamento", "Sans 8", 0x91A0B7u, 1.0, true);
         } else {
             draw_centered(a, list_x, qr_y + qr_size + 28, list_w, a->pairing_page_url, a->colors.muted);
-            draw_centered(a, list_x, qr_y + qr_size + 50, list_w, "Esc cancela o pareamento",
+            draw_centered(a, list_x, qr_y + qr_size + 50, list_w, "Back/Esc cancela o pareamento",
                           a->colors.muted);
         }
     }
@@ -4627,6 +4628,11 @@ static void switch_relative_channel(app_t *a, int delta) {
     enter_player(a, a->filtered[(size_t)next]);
 }
 
+/* Treat the desktop/browser Back key from TV remotes as navigation. */
+static bool is_navigation_back(KeySym sym) {
+    return sym == XK_Escape || sym == XF86XK_Back;
+}
+
 /* Handle key. */
 static void handle_key(app_t *a, XKeyEvent *kev) {
     KeySym sym = NoSymbol;
@@ -4644,7 +4650,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
 
     if (a->screen == SCREEN_PLAYER) {
         show_player_hud(a);
-        if (sym == XK_Escape || sym == XK_BackSpace) {
+        if (is_navigation_back(sym) || sym == XK_BackSpace) {
             leave_player(a);
             return;
         }
@@ -4742,7 +4748,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
             activate_item(a, a->filtered[a->focused_filtered]);
             return;
         }
-        if (sym == XK_Escape) {
+        if (is_navigation_back(sym)) {
             if (a->series_episode_mode) {
                 return_from_episode_list(a);
                 return;
@@ -4750,8 +4756,15 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
             if (a->search[0]) {
                 a->search[0] = '\0';
                 rebuild_filter(a);
+                a->input_focus = INPUT_SEARCH;
+                return;
             }
-            a->input_focus = INPUT_SEARCH;
+            if (a->thumbs)
+                vip_thumbnail_scheduler_cancel_pending(a->thumbs);
+            refresh_profiles(a);
+            a->screen = SCREEN_LOGIN;
+            a->input_focus = INPUT_MODE;
+            snprintf(a->status, sizeof(a->status), "Escolha uma lista ou adicione outra");
             return;
         }
         if (ctrl && (sym == XK_v || sym == XK_V)) {
@@ -4786,7 +4799,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
         start_phone_pairing(a);
         return;
     }
-    if (a->pairing_server && sym == XK_Escape) {
+    if (a->pairing_server && is_navigation_back(sym)) {
         stop_phone_pairing(a);
         snprintf(a->status, sizeof(a->status), "Pareamento cancelado");
         a->input_focus = INPUT_PHONE;
@@ -4804,7 +4817,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
         login_select_mode(a, a->login_mode == LOGIN_XTREAM ? LOGIN_M3U : LOGIN_XTREAM);
         return;
     }
-    if (sym == XK_Escape)
+    if (is_navigation_back(sym))
         return;
     if (ctrl && (sym == XK_v || sym == XK_V)) {
         request_paste(a, a->clipboard);
