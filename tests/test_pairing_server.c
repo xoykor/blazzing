@@ -80,6 +80,10 @@ int main(void) {
     TEST_CHECK(exchange(vip_pairing_server_port(server), request, response, sizeof(response)) > 0);
     TEST_CHECK(strstr(response, "200 OK") != NULL);
     TEST_CHECK(strstr(response, "Adicionar playlist ao Blazzing") != NULL);
+    TEST_CHECK(strstr(response, "Cache-Control: no-store") != NULL);
+    TEST_CHECK(strstr(response, "Referrer-Policy: no-referrer") != NULL);
+    TEST_CHECK(strstr(response, "X-Frame-Options: DENY") != NULL);
+    TEST_CHECK(strstr(response, "Content-Security-Policy:") != NULL);
 
     const char *body = "name=Teste&url=https%3A%2F%2Fexample.com%2Flista.m3u8";
     snprintf(request, sizeof(request),
