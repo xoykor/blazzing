@@ -5068,7 +5068,12 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
             }
         }
 
-        if (is_navigation_back(sym)) {
+        if (sym == XK_BackSpace && a->browse_focus == BROWSE_FOCUS_TOP &&
+            a->browse_top_focus == BROWSE_TOP_SEARCH && a->search[0]) {
+            backspace_input(a);
+            return;
+        }
+        if (is_navigation_back(sym) || sym == XK_BackSpace) {
             if (a->series_episode_mode) {
                 return_from_episode_list(a);
                 browse_focus_grid(a);
@@ -5102,11 +5107,6 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
             browse_focus_top(a, BROWSE_TOP_SEARCH);
             return;
         }
-        if (sym == XK_BackSpace && a->browse_focus == BROWSE_FOCUS_TOP &&
-            a->browse_top_focus == BROWSE_TOP_SEARCH) {
-            backspace_input(a);
-            return;
-        }
         if (printable) {
             browse_focus_top(a, BROWSE_TOP_SEARCH);
             append_input(a, buf, (size_t)n);
@@ -5120,7 +5120,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
         start_phone_pairing(a);
         return;
     }
-    if (a->pairing_server && is_navigation_back(sym)) {
+    if (a->pairing_server && (is_navigation_back(sym) || sym == XK_BackSpace)) {
         stop_phone_pairing(a);
         snprintf(a->status, sizeof(a->status), "Pareamento cancelado");
         a->input_focus = INPUT_PHONE;
@@ -5139,7 +5139,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
             login_profile_ensure_visible(a);
             return;
         }
-        if (sym == XK_Left || is_navigation_back(sym)) {
+        if (sym == XK_Left || is_navigation_back(sym) || sym == XK_BackSpace) {
             a->input_focus = INPUT_PROFILE_NAME;
             return;
         }
