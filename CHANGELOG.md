@@ -1,4 +1,4 @@
-## 1.4.0 — Unreleased
+## 1.4.0 — 2026-09-18
 
 Internet pairing replaces LAN pairing:
 

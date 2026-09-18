@@ -20,6 +20,12 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.4.0" date="2026-09-18">
+      <description>
+        <p>Replaces LAN phone pairing with an encrypted Internet pairing flow backed by a Cloudflare Worker and short-lived Durable Objects. Playlist data is encrypted in the phone browser with AES-256-GCM and decrypted locally by Blazzing.</p>
+        <p xml:lang="pt-BR">Substitui o pareamento LAN pelo celular por um fluxo cifrado pela Internet usando Cloudflare Worker e Durable Objects temporários. Os dados da playlist são cifrados no navegador com AES-256-GCM e descriptografados localmente pelo Blazzing.</p>
+      </description>
+    </release>
     <release version="1.3.3" date="2026-09-17">
       <description>
         <p>Fixes phone pairing reachability on LANs by preferring physical Wi-Fi/Ethernet addresses over VPN/container interfaces, using a stable firewall-friendly TCP port when available, and showing the actual port to allow when a host firewall blocks incoming connections.</p>

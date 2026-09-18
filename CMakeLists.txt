@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(visual_iptv_x11 VERSION 1.3.3 LANGUAGES C)
+project(visual_iptv_x11 VERSION 1.4.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -7,7 +7,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(VIPTV_SANITIZE "Enable AddressSanitizer/UBSan" OFF)
-set(VIPTV_PAIRING_DEFAULT_URL "" CACHE STRING
+set(VIPTV_PAIRING_DEFAULT_URL "https://blazzing-pairing.vsxk.workers.dev" CACHE STRING
     "Default HTTPS base URL for the public phone-pairing relay")
 
 find_package(PkgConfig REQUIRED)
