@@ -49,7 +49,8 @@ Blazzing provides:
 - FFmpeg fallback frame capture;
 - responsive catalog cards;
 - antialiased rounded surfaces and UTF-8 proportional text through Cairo/Pango;
-- keyboard and mouse navigation;
+- keyboard, mouse and TV-remote-friendly arrow/OK navigation;
+- phone-assisted M3U/M3U8 entry through a temporary local web page and QR Code;
 - a persistent mpv process controlled over JSON IPC;
 - pause, seek, timeline, volume, fullscreen and live-channel switching;
 - hardware-decoding overrides through environment variables.
@@ -68,16 +69,37 @@ The application itself uses Xlib. mpv receives Blazzing's X11 video container di
 
 | Key | Action |
 | --- | --- |
-| `1` | Live TV |
-| `2` | Movies |
-| `3` | Series |
-| Arrow keys | Move focus |
-| `Enter` | Open or play |
-| `F` | Toggle favorite |
-| `L` | Open saved lists/profiles |
-| `Esc` | Go back or clear the active search |
+| `Ctrl+1` | Live TV |
+| `Ctrl+2` | Movies |
+| `Ctrl+3` | Series |
+| Arrow keys | Move between the top menu, search, sidebar and catalog grid |
+| `Enter` / `Select` | Activate the focused control, open or play |
+| `Ctrl+F` | Focus search |
+| `Ctrl+D` | Toggle favorite on the focused catalog item |
+| `Ctrl+L` | Open saved lists/profiles |
+| `Back` / `Esc` / `Backspace` | Go back; Backspace edits the search while it contains text |
 | `Ctrl+V` | Paste clipboard |
 | `Shift+Insert` | Paste X11 PRIMARY selection |
+
+From the catalog grid, `←` on the first column enters the category sidebar and `↑` on the first row enters the top menu. The top menu exposes TV, Movies, Series, Search, Favorites and Lists without a mouse.
+
+### Home / playlist screen
+
+- `←/→` changes Xtream/M3U while the mode selector is focused.
+- `↑/↓` moves through the form.
+- `→` from the form enters **Saved lists**; `↑/↓` selects a saved profile, `←` returns and `Enter/Select` opens it.
+- On M3U mode, focus **Add with phone** and press `Enter/Select`, or use `F2` during desktop testing.
+- `Back/Esc` cancels an active phone pairing session.
+
+### Add an M3U/M3U8 URL with a phone
+
+1. Open the M3U mode and select **Add with phone**.
+2. Blazzing starts a temporary local HTTP server on an automatically selected free port.
+3. Scan the QR Code from a phone connected to the same LAN.
+4. Paste the playlist name and M3U/M3U8 URL and submit.
+5. Blazzing closes the pairing session and loads the playlist through its normal M3U provider.
+
+The pairing URL contains a one-time random token. If no usable LAN address is detected, Blazzing does not show a phone QR Code and instead displays a localhost URL for testing on the same PC.
 
 ### Player
 
@@ -98,7 +120,7 @@ The historical executable name is still `visual-iptv`; the product name and Flat
 ### CachyOS / Arch Linux
 
 ```sh
-sudo pacman -S --needed git base-devel cmake pkgconf libx11 curl json-c sqlite libjpeg-turbo libpng libwebp openssl cairo pango ffmpeg mpv libsecret
+sudo pacman -S --needed git base-devel cmake pkgconf libx11 curl json-c sqlite libjpeg-turbo libpng libwebp openssl cairo pango qrencode ffmpeg mpv libsecret
 git clone https://github.com/xoykor/blazzing.git
 cd blazzing
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -116,7 +138,7 @@ The repository also contains a Fish helper:
 
 ```sh
 sudo apt update
-sudo apt install git build-essential cmake pkg-config libx11-dev libcurl4-openssl-dev libjson-c-dev libsqlite3-dev libjpeg-dev libpng-dev libwebp-dev libssl-dev libcairo2-dev libpango1.0-dev ffmpeg mpv libsecret-tools
+sudo apt install git build-essential cmake pkg-config libx11-dev libcurl4-openssl-dev libjson-c-dev libsqlite3-dev libjpeg-dev libpng-dev libwebp-dev libssl-dev libcairo2-dev libpango1.0-dev libqrencode-dev ffmpeg mpv libsecret-tools
 
 git clone https://github.com/xoykor/blazzing.git
 cd blazzing
