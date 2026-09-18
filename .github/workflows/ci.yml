@@ -38,3 +38,26 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+
+  relay-test:
+    name: Pairing relay
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: relay/go.mod
+          cache-dependency-path: relay/go.mod
+
+      - name: Test relay
+        working-directory: relay
+        run: go test ./...
+
+      - name: Build relay
+        working-directory: relay
+        run: CGO_ENABLED=0 go build -trimpath -o /tmp/blazzing-pairing-relay .
