@@ -2105,9 +2105,16 @@ static void start_phone_pairing(app_t *a) {
     }
 
     vip_pairing_server_url(a->pairing_server, a->pairing_page_url, sizeof(a->pairing_page_url));
-    a->pairing_qr = QRcode_encodeString8bit(a->pairing_page_url, 0, QR_ECLEVEL_M);
-    snprintf(a->status, sizeof(a->status), "Escaneie o QR ou abra: %s", a->pairing_page_url);
-    fprintf(stderr, "[pairing] aguardando playlist em %s\n", a->pairing_page_url);
+    const char *pairing_host = vip_pairing_server_host(a->pairing_server);
+    bool lan_reachable = pairing_host && pairing_host[0] && strncmp(pairing_host, "127.", 4u) != 0;
+    if (lan_reachable)
+        a->pairing_qr = QRcode_encodeString8bit(a->pairing_page_url, 0, QR_ECLEVEL_M);
+    if (a->pairing_qr)
+        snprintf(a->status, sizeof(a->status), "Escaneie o QR ou abra: %s", a->pairing_page_url);
+    else
+        snprintf(a->status, sizeof(a->status), "Sem IP LAN detectado; abra neste PC: %s", a->pairing_page_url);
+    fprintf(stderr, "[pairing] aguardando playlist em %s%s\n", a->pairing_page_url,
+            lan_reachable ? "" : " (somente local)");
 }
 
 static void login_move_focus(app_t *a, int direction) {
@@ -3615,9 +3622,12 @@ static void draw_login(app_t *a) {
                            ready ? a->colors.bg : a->colors.muted);
     }
 
-    const char *side_title = a->pairing_server ? "Adicionar pelo celular" : "Suas listas";
-    const char *side_subtitle = a->pairing_server ? "Escaneie o QR Code com o celular"
-                                                  : "Acesso rápido aos perfis salvos";
+    const char *side_title =
+        a->pairing_server ? (a->pairing_qr ? "Adicionar pelo celular" : "Pareamento local") : "Suas listas";
+    const char *side_subtitle =
+        a->pairing_server ? (a->pairing_qr ? "Escaneie o QR Code com o celular"
+                                           : "Nenhum IP LAN utilizável foi detectado")
+                          : "Acesso rápido aos perfis salvos";
     if (a->renderer.active) {
         vip_ui_render_round_rect(&a->renderer, list_x - 14, y + 88, list_w + 28, 438, 18, 0x111A28u, 0.98);
         vip_ui_render_round_stroke(&a->renderer, list_x - 14, y + 88, list_w + 28, 438, 18, 0x2B3950u, 1.0,
@@ -3634,21 +3644,39 @@ static void draw_login(app_t *a) {
     }
 
     if (a->pairing_server) {
-        int qr_size = list_w < 290 ? list_w - 20 : 270;
-        if (qr_size < 120)
-            qr_size = 120;
-        int qr_x = list_x + (list_w - qr_size) / 2;
-        int qr_y = y + 158;
-        draw_pairing_qr(a, qr_x, qr_y, qr_size);
-        if (a->renderer.active) {
-            vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 12, list_w, a->pairing_page_url,
-                               "Sans 8", 0x91A0B7u, 1.0, true);
-            vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 38, list_w,
-                               "Back/Esc cancela o pareamento", "Sans 8", 0x91A0B7u, 1.0, true);
+        if (a->pairing_qr) {
+            int qr_size = list_w < 290 ? list_w - 20 : 270;
+            if (qr_size < 120)
+                qr_size = 120;
+            int qr_x = list_x + (list_w - qr_size) / 2;
+            int qr_y = y + 158;
+            draw_pairing_qr(a, qr_x, qr_y, qr_size);
+            if (a->renderer.active) {
+                vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 12, list_w, a->pairing_page_url,
+                                   "Sans 8", 0x91A0B7u, 1.0, true);
+                vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 38, list_w,
+                                   "Back/Esc cancela o pareamento", "Sans 8", 0x91A0B7u, 1.0, true);
+            } else {
+                draw_centered(a, list_x, qr_y + qr_size + 28, list_w, a->pairing_page_url, a->colors.muted);
+                draw_centered(a, list_x, qr_y + qr_size + 50, list_w, "Back/Esc cancela o pareamento",
+                              a->colors.muted);
+            }
         } else {
-            draw_centered(a, list_x, qr_y + qr_size + 28, list_w, a->pairing_page_url, a->colors.muted);
-            draw_centered(a, list_x, qr_y + qr_size + 50, list_w, "Back/Esc cancela o pareamento",
-                          a->colors.muted);
+            const char *local_hint = "Use o navegador deste computador";
+            if (a->renderer.active) {
+                vip_ui_render_text(&a->renderer, list_x, y + 210, list_w, local_hint,
+                                   "Sans Bold 10", 0xF6F8FCu, 1.0, true);
+                vip_ui_render_text(&a->renderer, list_x, y + 250, list_w, a->pairing_page_url,
+                                   "Sans 8", 0x91A0B7u, 1.0, true);
+                vip_ui_render_text(&a->renderer, list_x, y + 300, list_w,
+                                   "Conecte o PC a uma rede LAN para usar o celular",
+                                   "Sans 8", 0x91A0B7u, 1.0, true);
+            } else {
+                draw_centered(a, list_x, y + 230, list_w, local_hint, a->colors.text);
+                draw_centered(a, list_x, y + 270, list_w, a->pairing_page_url, a->colors.muted);
+                draw_centered(a, list_x, y + 320, list_w,
+                              "Conecte o PC a uma rede LAN para usar o celular", a->colors.muted);
+            }
         }
     }
     int row_y = y + 154;
