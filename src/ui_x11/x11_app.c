@@ -3921,12 +3921,15 @@ static void draw_browse(app_t *a) {
     const int tab_w[3] = {74, 80, 88};
     for (int k = 0; k < 3; ++k) {
         bool selected = (int)a->content_kind == k;
+        bool key_focused = a->browse_focus == BROWSE_FOCUS_TOP && a->browse_top_focus == k;
         bool hovered = a->hovered_control == HOVER_TAB_BASE + k;
         float hover_t = hovered ? vip_ui_ease_out_cubic(a->control_motion.value) : 0.0f;
         fill_round_rect(a, tab_x[k], tab_y, tab_w[k], tab_h, 13,
-                        selected ? a->colors.accent2 : (hovered ? a->colors.hover : a->colors.panel2));
+                        selected ? a->colors.accent2
+                                 : ((hovered || key_focused) ? a->colors.hover : a->colors.panel2));
         stroke_round_rect(a, tab_x[k], tab_y, tab_w[k], tab_h, 13,
-                          (selected || hovered) ? a->colors.accent : a->colors.border);
+                          key_focused ? a->colors.text
+                                      : ((selected || hovered) ? a->colors.accent : a->colors.border));
         if (hovered && !selected) {
             int line_w = (int)((float)(tab_w[k] - 24) * hover_t + 0.5f);
             if (line_w > 0)
@@ -3935,11 +3938,11 @@ static void draw_browse(app_t *a) {
         }
         if (a->renderer.active)
             vip_ui_render_text(&a->renderer, tab_x[k], tab_y + 14, tab_w[k], content_label((content_kind_t)k),
-                               selected ? "Sans Bold 10" : "Sans 10",
-                               (selected || hovered) ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+                               (selected || key_focused) ? "Sans Bold 10" : "Sans 10",
+                               (selected || hovered || key_focused) ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
         else
             draw_centered(a, tab_x[k], 42, tab_w[k], content_label((content_kind_t)k),
-                          (selected || hovered) ? a->colors.text : a->colors.muted);
+                          (selected || hovered || key_focused) ? a->colors.text : a->colors.muted);
     }
 
     int list_w = 94, fav_w = 174;
@@ -3953,33 +3956,44 @@ static void draw_browse(app_t *a) {
     draw_input(a, SIDEBAR_W + 18, 12, search_w, 46, a->search, search_hint, INPUT_SEARCH, false);
     if (a->hovered_control == HOVER_SEARCH && a->input_focus != INPUT_SEARCH)
         stroke_round_rect(a, SIDEBAR_W + 18, 12, search_w, 46, 13, a->colors.accent);
+    bool fav_focus = a->browse_focus == BROWSE_FOCUS_TOP && a->browse_top_focus == BROWSE_TOP_FAVORITES;
     bool fav_hover = a->hovered_control == HOVER_FAVORITES;
     fill_round_rect(a, fav_x, 12, fav_w, 46, 13,
-                    a->favorites_only ? a->colors.accent2 : (fav_hover ? a->colors.hover : a->colors.panel2));
+                    a->favorites_only ? a->colors.accent2
+                                      : ((fav_hover || fav_focus) ? a->colors.hover : a->colors.panel2));
     stroke_round_rect(a, fav_x, 12, fav_w, 46, 13,
-                      (a->favorites_only || fav_hover) ? a->colors.accent : a->colors.border);
+                      fav_focus ? a->colors.text
+                                : ((a->favorites_only || fav_hover) ? a->colors.accent : a->colors.border));
     char fav_label[128];
     snprintf(fav_label, sizeof(fav_label), "* Favoritos (%zu)", favorite_count(a));
     if (a->renderer.active)
         vip_ui_render_text(&a->renderer, fav_x, 27, fav_w, fav_label,
-                           a->favorites_only ? "Sans Bold 10" : "Sans 10",
-                           (a->favorites_only || fav_hover) ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+                           (a->favorites_only || fav_focus) ? "Sans Bold 10" : "Sans 10",
+                           (a->favorites_only || fav_hover || fav_focus) ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
     else
-        draw_centered(a, fav_x, 42, fav_w, fav_label, a->favorites_only ? a->colors.text : a->colors.muted);
+        draw_centered(a, fav_x, 42, fav_w, fav_label,
+                      (a->favorites_only || fav_focus) ? a->colors.text : a->colors.muted);
+    bool list_focus = a->browse_focus == BROWSE_FOCUS_TOP && a->browse_top_focus == BROWSE_TOP_LISTS;
     bool list_hover = a->hovered_control == HOVER_LISTS;
-    fill_round_rect(a, list_x, 12, list_w, 46, 13, list_hover ? a->colors.hover : a->colors.panel2);
-    stroke_round_rect(a, list_x, 12, list_w, 46, 13, list_hover ? a->colors.accent : a->colors.border);
+    fill_round_rect(a, list_x, 12, list_w, 46, 13,
+                    (list_hover || list_focus) ? a->colors.hover : a->colors.panel2);
+    stroke_round_rect(a, list_x, 12, list_w, 46, 13,
+                      list_focus ? a->colors.text : (list_hover ? a->colors.accent : a->colors.border));
     if (a->renderer.active)
         vip_ui_render_text(&a->renderer, list_x, 27, list_w, "Listas", "Sans 10",
-                           list_hover ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+                           (list_hover || list_focus) ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
     else
-        draw_centered(a, list_x, 42, list_w, "Listas", list_hover ? a->colors.text : a->colors.muted);
+        draw_centered(a, list_x, 42, list_w, "Listas",
+                      (list_hover || list_focus) ? a->colors.text : a->colors.muted);
 
     int y = TOPBAR_H + 12;
     if (a->series_episode_mode) {
+        bool back_focus = a->browse_focus == BROWSE_FOCUS_SIDEBAR && a->browse_sidebar_focus == -2;
         bool back_hover = a->hovered_control == HOVER_BACK;
-        fill_round_rect(a, 8, y, SIDEBAR_W - 16, 38, 11, back_hover ? a->colors.accent2 : a->colors.panel);
-        stroke_round_rect(a, 8, y, SIDEBAR_W - 16, 38, 11, a->colors.accent);
+        fill_round_rect(a, 8, y, SIDEBAR_W - 16, 38, 11,
+                        (back_hover || back_focus) ? a->colors.accent2 : a->colors.panel);
+        stroke_round_rect(a, 8, y, SIDEBAR_W - 16, 38, 11,
+                          back_focus ? a->colors.text : a->colors.accent);
         if (a->renderer.active)
             vip_ui_render_text(&a->renderer, 18, y + 10, SIDEBAR_W - 36, browse_back_label(a), "Sans Bold 10",
                                0xF6F8FCu, 1.0, false);
@@ -3988,17 +4002,23 @@ static void draw_browse(app_t *a) {
         y += 48;
     }
     bool all_sel = a->selected_category < 0;
+    bool all_focus = a->browse_focus == BROWSE_FOCUS_SIDEBAR && a->browse_sidebar_focus == -1;
     bool all_hover = a->hovered_control == HOVER_CATEGORY_ALL;
     fill_round_rect(a, 8, y, SIDEBAR_W - 16, 36, 11,
-                    all_sel ? a->colors.accent2 : (all_hover ? a->colors.hover : a->colors.panel2));
+                    all_sel ? a->colors.accent2
+                            : ((all_hover || all_focus) ? a->colors.hover : a->colors.panel2));
+    if (all_focus)
+        stroke_round_rect(a, 8, y, SIDEBAR_W - 16, 36, 11, a->colors.text);
     char all_label[128];
     snprintf(all_label, sizeof(all_label), "%s (%zu)", all_content_label(a), ACTIVE_CHANNELS(a).len);
     if (a->renderer.active)
         vip_ui_render_text(&a->renderer, 18, y + 9, SIDEBAR_W - 36, all_label,
-                           all_sel ? "Sans Bold 9" : "Sans 9", (all_sel || all_hover) ? 0xF6F8FCu : 0x91A0B7u,
+                           (all_sel || all_focus) ? "Sans Bold 9" : "Sans 9",
+                           (all_sel || all_hover || all_focus) ? 0xF6F8FCu : 0x91A0B7u,
                            1.0, false);
     else
-        draw_text(a, 18, y + 24, all_label, (all_sel || all_hover) ? a->colors.text : a->colors.muted);
+        draw_text(a, 18, y + 24, all_label,
+                  (all_sel || all_hover || all_focus) ? a->colors.text : a->colors.muted);
     y += 42;
     int rows = category_visible_rows(a) - 1;
     for (int r = 0; r < rows; ++r) {
@@ -4006,9 +4026,13 @@ static void draw_browse(app_t *a) {
         if (idx < 0 || (size_t)idx >= ACTIVE_CATEGORIES(a).len)
             break;
         bool selected = a->selected_category == idx;
+        bool key_focused = a->browse_focus == BROWSE_FOCUS_SIDEBAR && a->browse_sidebar_focus == idx;
         bool hovered = a->hovered_control == HOVER_CATEGORY_BASE + idx;
         fill_round_rect(a, 8, y, SIDEBAR_W - 16, 36, 11,
-                        selected ? a->colors.accent2 : (hovered ? a->colors.hover : a->colors.panel2));
+                        selected ? a->colors.accent2
+                                 : ((hovered || key_focused) ? a->colors.hover : a->colors.panel2));
+        if (key_focused)
+            stroke_round_rect(a, 8, y, SIDEBAR_W - 16, 36, 11, a->colors.text);
         char full_label[512];
         char label[256];
         size_t count = a->category_counts ? a->category_counts[idx] : 0;
@@ -4016,10 +4040,11 @@ static void draw_browse(app_t *a) {
         bounded_text(label, sizeof(label), full_label, 34);
         if (a->renderer.active)
             vip_ui_render_text(&a->renderer, 18, y + 9, SIDEBAR_W - 36, label,
-                               selected ? "Sans Bold 9" : "Sans 9",
-                               (selected || hovered) ? 0xF6F8FCu : 0x91A0B7u, 1.0, false);
+                               (selected || key_focused) ? "Sans Bold 9" : "Sans 9",
+                               (selected || hovered || key_focused) ? 0xF6F8FCu : 0x91A0B7u, 1.0, false);
         else
-            draw_text(a, 18, y + 24, label, (selected || hovered) ? a->colors.text : a->colors.muted);
+            draw_text(a, 18, y + 24, label,
+                      (selected || hovered || key_focused) ? a->colors.text : a->colors.muted);
         y += 42;
     }
 
@@ -4069,7 +4094,7 @@ static void draw_browse(app_t *a) {
             size_t chidx = a->filtered[fidx];
             vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
             int cx = content_x + col * (layout.card_w + GRID_GAP);
-            bool focused = fidx == a->focused_filtered;
+            bool focused = a->browse_focus == BROWSE_FOCUS_GRID && fidx == a->focused_filtered;
             bool hovered =
                 a->hovered_card_valid && fidx == a->hovered_filtered && a->hover_motion.value > 0.001f;
             float hover_eased = hovered ? vip_ui_ease_out_cubic(a->hover_motion.value) : 0.0f;
