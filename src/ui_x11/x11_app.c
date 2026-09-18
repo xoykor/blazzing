@@ -4842,19 +4842,19 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
     }
 
     if (a->screen == SCREEN_BROWSE) {
-        /* Printable keys belong to the search field. Navigation shortcuts use
-           modifiers so typing titles can never switch screens or mutate the
-           playlist/server field left behind by the login screen. */
         if (ctrl && sym == XK_1) {
             switch_content(a, CONTENT_LIVE);
+            browse_focus_top(a, BROWSE_TOP_TV);
             return;
         }
         if (ctrl && sym == XK_2) {
             switch_content(a, CONTENT_VOD);
+            browse_focus_top(a, BROWSE_TOP_MOVIES);
             return;
         }
         if (ctrl && sym == XK_3) {
             switch_content(a, CONTENT_SERIES);
+            browse_focus_top(a, BROWSE_TOP_SERIES);
             return;
         }
         if (ctrl && (sym == XK_l || sym == XK_L)) {
@@ -4862,11 +4862,11 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
                 vip_thumbnail_scheduler_cancel_pending(a->thumbs);
             refresh_profiles(a);
             a->screen = SCREEN_LOGIN;
-            a->input_focus = INPUT_SERVER;
+            a->input_focus = INPUT_MODE;
             return;
         }
         if (ctrl && (sym == XK_f || sym == XK_F)) {
-            a->input_focus = INPUT_SEARCH;
+            browse_focus_top(a, BROWSE_TOP_SEARCH);
             return;
         }
         if (ctrl && (sym == XK_d || sym == XK_D) && a->filtered_len > 0u) {
@@ -4875,37 +4875,104 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
             toggle_favorite(a, a->filtered[a->focused_filtered]);
             return;
         }
-        if (sym == XK_Left) {
-            move_grid_focus(a, -1, 0);
-            return;
+
+        if (a->browse_focus == BROWSE_FOCUS_TOP) {
+            if (sym == XK_Left) {
+                int next = a->browse_top_focus - 1;
+                if (next < BROWSE_TOP_TV)
+                    next = BROWSE_TOP_LISTS;
+                browse_focus_top(a, next);
+                return;
+            }
+            if (sym == XK_Right) {
+                int next = a->browse_top_focus + 1;
+                if (next > BROWSE_TOP_LISTS)
+                    next = BROWSE_TOP_TV;
+                browse_focus_top(a, next);
+                return;
+            }
+            if (sym == XK_Down) {
+                if (a->browse_top_focus <= BROWSE_TOP_SERIES)
+                    browse_focus_sidebar(a, a->selected_category >= 0 ? a->selected_category : -1);
+                else
+                    browse_focus_grid(a);
+                return;
+            }
+            if (sym == XK_Up)
+                return;
+            if (sym == XK_Return || sym == XK_KP_Enter) {
+                browse_activate_top(a);
+                return;
+            }
+        } else if (a->browse_focus == BROWSE_FOCUS_SIDEBAR) {
+            int min_item = a->series_episode_mode ? -2 : -1;
+            int max_item = ACTIVE_CATEGORIES(a).len > 0u ? (int)ACTIVE_CATEGORIES(a).len - 1 : -1;
+            if (sym == XK_Up) {
+                if (a->browse_sidebar_focus <= min_item)
+                    browse_focus_top(a, (int)a->content_kind);
+                else
+                    browse_focus_sidebar(a, a->browse_sidebar_focus - 1);
+                return;
+            }
+            if (sym == XK_Down) {
+                if (a->browse_sidebar_focus < max_item)
+                    browse_focus_sidebar(a, a->browse_sidebar_focus + 1);
+                return;
+            }
+            if (sym == XK_Right) {
+                browse_focus_grid(a);
+                return;
+            }
+            if (sym == XK_Left)
+                return;
+            if (sym == XK_Return || sym == XK_KP_Enter) {
+                browse_activate_sidebar(a);
+                return;
+            }
+        } else {
+            int cols = browse_columns(a);
+            size_t row = cols > 0 ? a->focused_filtered / (size_t)cols : 0u;
+            size_t col = cols > 0 ? a->focused_filtered % (size_t)cols : 0u;
+            if (sym == XK_Left) {
+                if (col == 0u)
+                    browse_focus_sidebar(a, a->selected_category >= 0 ? a->selected_category : -1);
+                else
+                    move_grid_focus(a, -1, 0);
+                return;
+            }
+            if (sym == XK_Right) {
+                move_grid_focus(a, 1, 0);
+                return;
+            }
+            if (sym == XK_Up) {
+                if (row == 0u)
+                    browse_focus_top(a, BROWSE_TOP_SEARCH);
+                else
+                    move_grid_focus(a, 0, -1);
+                return;
+            }
+            if (sym == XK_Down) {
+                move_grid_focus(a, 0, 1);
+                return;
+            }
+            if ((sym == XK_Return || sym == XK_KP_Enter) && a->filtered_len > 0u) {
+                if (a->focused_filtered >= a->filtered_len)
+                    a->focused_filtered = a->filtered_len - 1u;
+                activate_item(a, a->filtered[a->focused_filtered]);
+                return;
+            }
         }
-        if (sym == XK_Right) {
-            move_grid_focus(a, 1, 0);
-            return;
-        }
-        if (sym == XK_Up) {
-            move_grid_focus(a, 0, -1);
-            return;
-        }
-        if (sym == XK_Down) {
-            move_grid_focus(a, 0, 1);
-            return;
-        }
-        if ((sym == XK_Return || sym == XK_KP_Enter) && a->filtered_len > 0u) {
-            if (a->focused_filtered >= a->filtered_len)
-                a->focused_filtered = a->filtered_len - 1u;
-            activate_item(a, a->filtered[a->focused_filtered]);
-            return;
-        }
+
         if (is_navigation_back(sym)) {
             if (a->series_episode_mode) {
                 return_from_episode_list(a);
+                browse_focus_grid(a);
                 return;
             }
             if (a->search[0]) {
                 a->search[0] = '\0';
                 rebuild_filter(a);
-                a->input_focus = INPUT_SEARCH;
+                browse_focus_top(a, BROWSE_TOP_SEARCH);
                 return;
             }
             if (a->thumbs)
@@ -4917,26 +4984,26 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
             return;
         }
         if (ctrl && (sym == XK_v || sym == XK_V)) {
-            a->input_focus = INPUT_SEARCH;
+            browse_focus_top(a, BROWSE_TOP_SEARCH);
             request_paste(a, a->clipboard);
             return;
         }
         if (shift && sym == XK_Insert) {
-            a->input_focus = INPUT_SEARCH;
+            browse_focus_top(a, BROWSE_TOP_SEARCH);
             request_paste(a, XA_PRIMARY);
             return;
         }
         if (sym == XK_Tab) {
-            a->input_focus = INPUT_SEARCH;
+            browse_focus_top(a, BROWSE_TOP_SEARCH);
             return;
         }
-        if (sym == XK_BackSpace) {
-            a->input_focus = INPUT_SEARCH;
+        if (sym == XK_BackSpace && a->browse_focus == BROWSE_FOCUS_TOP &&
+            a->browse_top_focus == BROWSE_TOP_SEARCH) {
             backspace_input(a);
             return;
         }
         if (printable) {
-            a->input_focus = INPUT_SEARCH;
+            browse_focus_top(a, BROWSE_TOP_SEARCH);
             append_input(a, buf, (size_t)n);
             return;
         }
