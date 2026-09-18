@@ -1,3 +1,18 @@
+## 1.4.0 — Unreleased
+
+Internet pairing replaces LAN pairing:
+
+- removes the inbound local HTTP server, LAN IP discovery, dynamic/stable pairing ports and PC firewall requirements;
+- adds a public HTTPS relay protocol using a random 128-bit session ID and a random 256-bit AES key;
+- encrypts playlist name/URL in the phone browser with AES-256-GCM before relay submission;
+- keeps the AES key in the QR URL fragment, removes it from the browser address bar/history after bootstrap, and never stores the key on the relay;
+- stores only short-lived IV/ciphertext payloads in relay RAM, with five-minute session expiry and explicit deletion after successful delivery;
+- adds verified HTTPS polling/decryption to the C client and rejects non-HTTPS relay base URLs;
+- adds a standalone Go relay with rate limiting, response hardening, unit tests, real HTTP lifecycle tests and CI smoke tests;
+- adds hardened systemd/Caddy deployment files and a one-command Oracle Cloud Ubuntu 24.04 installer;
+- supports a compiled production relay through `VIPTV_PAIRING_DEFAULT_URL` and a development override through `VIPTV_PAIRING_URL`;
+- updates current EN/PT-BR documentation to the Internet relay architecture.
+
 ## 1.3.3 — 2026-09-17
 
 Phone-pairing LAN reachability fix:
