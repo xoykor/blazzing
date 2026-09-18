@@ -3654,11 +3654,20 @@ static void draw_login(app_t *a) {
             if (a->renderer.active) {
                 vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 12, list_w, a->pairing_page_url,
                                    "Sans 8", 0x91A0B7u, 1.0, true);
+                char firewall_hint[96];
+                snprintf(firewall_hint, sizeof(firewall_hint), "Se não abrir: libere TCP %u no firewall",
+                         (unsigned)vip_pairing_server_port(a->pairing_server));
                 vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 38, list_w,
+                                   firewall_hint, "Sans 8", 0x91A0B7u, 1.0, true);
+                vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 60, list_w,
                                    "Back/Esc cancela o pareamento", "Sans 8", 0x91A0B7u, 1.0, true);
             } else {
+                char firewall_hint[96];
+                snprintf(firewall_hint, sizeof(firewall_hint), "Se não abrir: libere TCP %u no firewall",
+                         (unsigned)vip_pairing_server_port(a->pairing_server));
                 draw_centered(a, list_x, qr_y + qr_size + 28, list_w, a->pairing_page_url, a->colors.muted);
-                draw_centered(a, list_x, qr_y + qr_size + 50, list_w, "Back/Esc cancela o pareamento",
+                draw_centered(a, list_x, qr_y + qr_size + 50, list_w, firewall_hint, a->colors.muted);
+                draw_centered(a, list_x, qr_y + qr_size + 72, list_w, "Back/Esc cancela o pareamento",
                               a->colors.muted);
             }
         } else {
