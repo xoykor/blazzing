@@ -3663,6 +3663,17 @@ static void draw_login(app_t *a) {
                            status_error ? 0xFF7185u : 0x91A0B7u, 1.0, false);
     else
         draw_text(a, form_x, y + h - 42, status_copy, status_error ? a->colors.danger : a->colors.muted);
+
+    const char *credit = "by Xoykor";
+    if (a->renderer.active) {
+        int credit_w = vip_ui_render_text_width(&a->renderer, credit, "Sans 8");
+        vip_ui_render_text(&a->renderer, a->width - credit_w - 18, a->height - 28, credit_w,
+                           credit, "Sans 8", 0x66758Bu, 0.92, false);
+    } else {
+        int credit_w = text_width(a, credit);
+        draw_text_font(a, a->font_small, a->width - credit_w - 18, a->height - 16,
+                       credit, a->colors.muted);
+    }
 }
 
 /* Draw wrapped text. */
