@@ -35,3 +35,18 @@ A mídia não é passada por `argv` ao mpv; a URL é enviada pelo socket JSON IP
 ## Relatórios de bug
 
 Nunca publique credenciais reais, playlists privadas, URLs autenticadas completas, dumps do Secret Service ou bancos reais da aplicação.
+
+## Relay de pareamento pelo celular
+
+A entrada M3U pelo celular usa um relay público HTTPS de curta duração. O
+Blazzing gera localmente o identificador da sessão e a chave AES-256. O
+navegador cifra nome e URL da playlist com AES-256-GCM antes do envio.
+
+O relay mantém somente IV/ciphertext cifrados em RAM e expira sessões após
+cinco minutos. A chave AES viaja no fragmento `#` do QR e não faz parte das
+requisições HTTP normais. Depois de abrir a página, o JavaScript remove o
+fragmento da URL visível/histórico.
+
+Como o relay entrega esse JavaScript, um frontend de relay malicioso ou
+modificado poderia teoricamente capturar o texto puro. Use o relay oficial do
+Blazzing ou um relay sob seu controle.
