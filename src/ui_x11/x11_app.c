@@ -1530,7 +1530,7 @@ static void return_from_episode_list(app_t *a) {
         a->grid_scroll = 0;
         a->focused_filtered = 0;
         a->search[0] = '\0';
-        a->input_focus = INPUT_SEARCH;
+        browse_focus_grid(a);
         snprintf(a->status, sizeof(a->status), "Escolha uma temporada de %s", a->series_title);
         recalc_category_counts(a);
         load_media_state(a);
@@ -1545,7 +1545,7 @@ static void return_from_episode_list(app_t *a) {
     a->grid_scroll = 0;
     a->focused_filtered = 0;
     a->search[0] = '\0';
-    a->input_focus = INPUT_SEARCH;
+    browse_focus_grid(a);
     recalc_category_counts(a);
     load_media_state(a);
     rebuild_filter(a);
@@ -2598,7 +2598,7 @@ static void select_season(app_t *a, size_t season_channel_index) {
     a->grid_scroll = 0;
     a->focused_filtered = 0;
     a->search[0] = '\0';
-    a->input_focus = INPUT_SEARCH;
+    browse_focus_grid(a);
     snprintf(a->status, sizeof(a->status), "%s • %s", a->series_title,
              a->episode_categories.items[season_index].name);
     recalc_category_counts(a);
@@ -2742,7 +2742,7 @@ static bool start_m3u_series_load(app_t *a, size_t channel_index) {
     a->grid_scroll = 0;
     a->focused_filtered = 0;
     a->search[0] = '\0';
-    a->input_focus = INPUT_SEARCH;
+    browse_focus_grid(a);
     snprintf(a->series_title, sizeof(a->series_title), "%s", series_name);
     snprintf(a->series_parent_id, sizeof(a->series_parent_id), "%s", selected->id ? selected->id : "");
     snprintf(a->status, sizeof(a->status), "%zu temporadas • %zu episódios", cards.len, episodes.len);
