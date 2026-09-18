@@ -83,3 +83,17 @@ VIPTV_NO_AUDIO=1 ./build/visual-iptv
 ## `VIPTV_TEST_*`
 
 Variables prefixed with `VIPTV_TEST_` are used by tests and local automation. They are not part of the stable end-user configuration interface and may change with the test suite.
+
+## `VIPTV_PAIRING_URL`
+
+Overrides the public HTTPS relay used by **Add with phone**.
+
+```fish
+set -lx VIPTV_PAIRING_URL https://pair.example.com
+./build/visual-iptv
+```
+
+Production packages should normally compile the default relay URL with
+`-DVIPTV_PAIRING_DEFAULT_URL=https://...`. The environment variable has
+priority and is intended primarily for testing alternate relay deployments.
+Only `https://` URLs are accepted.
