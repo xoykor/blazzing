@@ -23,6 +23,7 @@
 #include <unistd.h>
 
 #define REQUEST_MAX 16384u
+#define PAIRING_PREFERRED_PORT 47831u
 
 struct vip_pairing_server {
     int listen_fd;
@@ -396,9 +397,27 @@ vip_status_t vip_pairing_server_start(vip_pairing_server_t **out_server,
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons(0);
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 || listen(fd, 4) != 0) {
-        vip_error_set(error, VIP_ERR_IO, "não foi possível abrir uma porta local para pareamento");
+    addr.sin_port = htons((uint16_t)PAIRING_PREFERRED_PORT);
+
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        if (errno != EADDRINUSE) {
+            vip_error_set(error, VIP_ERR_IO, "não foi possível abrir a porta local de pareamento");
+            close(fd);
+            free(server);
+            return VIP_ERR_IO;
+        }
+        /* Keep pairing usable if another program already owns the documented
+         * firewall-friendly port. The UI will display the actual fallback port. */
+        addr.sin_port = htons(0);
+        if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+            vip_error_set(error, VIP_ERR_IO, "não foi possível abrir uma porta local para pareamento");
+            close(fd);
+            free(server);
+            return VIP_ERR_IO;
+        }
+    }
+    if (listen(fd, 4) != 0) {
+        vip_error_set(error, VIP_ERR_IO, "não foi possível escutar a porta local de pareamento");
         close(fd);
         free(server);
         return VIP_ERR_IO;
