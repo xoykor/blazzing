@@ -212,6 +212,7 @@ Veja [Dados e privacidade](docs/DATA_AND_PRIVACY.pt-BR.md).
 Overrides de ambiente destinados ao usuário:
 
 - `VIPTV_MPV_DEBUG=1` — diagnóstico detalhado do player;
+- `VIPTV_INPUT_DEBUG=1` — registra keycodes/keysyms X11 para identificar botões de um controle remoto;
 - `VIPTV_MPV_RENDERER=gpu|gpu-next|x11` — caminho gráfico alternativo do mpv;
 - `VIPTV_MPV_HWDEC=...` — override de hardware decoding;
 - `VIPTV_NO_AUDIO=1` — inicia reprodução sem saída de áudio.
