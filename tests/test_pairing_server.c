@@ -85,6 +85,23 @@ int main(void) {
     TEST_CHECK(strstr(response, "X-Frame-Options: DENY") != NULL);
     TEST_CHECK(strstr(response, "Content-Security-Policy:") != NULL);
 
+    snprintf(request, sizeof(request),
+             "GET /token-invalido HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+    TEST_CHECK(exchange(vip_pairing_server_port(server), request, response, sizeof(response)) > 0);
+    TEST_CHECK(strstr(response, "404 Not Found") != NULL);
+
+    const char *invalid_body = "name=Teste&url=ftp%3A%2F%2Fexample.com%2Flista.m3u8";
+    snprintf(request, sizeof(request),
+             "POST /submit/%s HTTP/1.1\r\n"
+             "Host: localhost\r\n"
+             "Content-Type: application/x-www-form-urlencoded\r\n"
+             "Content-Length: %zu\r\n"
+             "Connection: close\r\n\r\n%s",
+             vip_pairing_server_token(server), strlen(invalid_body), invalid_body);
+    TEST_CHECK(exchange(vip_pairing_server_port(server), request, response, sizeof(response)) > 0);
+    TEST_CHECK(strstr(response, "400 Bad Request") != NULL);
+    TEST_CHECK(!atomic_load(&received));
+
     const char *body = "name=Teste&url=https%3A%2F%2Fexample.com%2Flista.m3u8";
     snprintf(request, sizeof(request),
              "POST /submit/%s HTTP/1.1\r\n"
