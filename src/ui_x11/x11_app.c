@@ -4896,6 +4896,12 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
     bool shift = (kev->state & ShiftMask) != 0;
     bool printable = n > 0 && !ctrl && (unsigned char)buf[0] >= 0x20u;
 
+    if (getenv("VIPTV_INPUT_DEBUG")) {
+        const char *name = XKeysymToString(sym);
+        fprintf(stderr, "[input] keycode=%u keysym=0x%lx name=%s state=0x%x\n",
+                kev->keycode, (unsigned long)sym, name ? name : "?", kev->state);
+    }
+
     if (sym == XK_F11) {
         set_fullscreen(a, !a->fullscreen_requested);
         show_player_hud(a);
