@@ -165,7 +165,11 @@ static void send_response(int fd,
                      "Content-Length: %zu\r\n"
                      "Connection: close\r\n"
                      "Cache-Control: no-store\r\n"
+                     "Referrer-Policy: no-referrer\r\n"
                      "X-Content-Type-Options: nosniff\r\n"
+                     "X-Frame-Options: DENY\r\n"
+                     "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; "
+                     "form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\n"
                      "\r\n",
                      status, content_type, body_len);
     if (n > 0) (void)send(fd, header, (size_t)n, MSG_NOSIGNAL);
