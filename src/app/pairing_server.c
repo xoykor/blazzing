@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: MIT */
+#define _DEFAULT_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #include "visual_iptv/pairing_server.h"
 
@@ -6,6 +7,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <ifaddrs.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -37,6 +39,52 @@ static bool starts_with(const char *text, const char *prefix) {
     return text && prefix && strncmp(text, prefix, strlen(prefix)) == 0;
 }
 
+static bool ipv4_is_private(uint32_t host) {
+    unsigned a = (host >> 24) & 0xffu;
+    unsigned b = (host >> 16) & 0xffu;
+    return a == 10u || (a == 172u && b >= 16u && b <= 31u) || (a == 192u && b == 168u);
+}
+
+static bool interface_name_is_virtual(const char *name) {
+    if (!name)
+        return true;
+    static const char *prefixes[] = {
+        "docker", "br-", "veth", "virbr", "podman", "cni", "tun", "tap",
+        "tailscale", "wg", "zt", "ham", "vmnet", "vboxnet"
+    };
+    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); ++i)
+        if (starts_with(name, prefixes[i]))
+            return true;
+    return false;
+}
+
+static int interface_address_score(const struct ifaddrs *it, uint32_t host) {
+    if (!it || !it->ifa_name)
+        return -1;
+    if ((it->ifa_flags & IFF_UP) == 0 || (it->ifa_flags & IFF_LOOPBACK) != 0)
+        return -1;
+    if (interface_name_is_virtual(it->ifa_name))
+        return -1;
+
+    unsigned a = (host >> 24) & 0xffu;
+    unsigned b = (host >> 16) & 0xffu;
+    int score = 0;
+    if (a == 192u && b == 168u)
+        score += 300;
+    else if (a == 10u)
+        score += 220;
+    else if (a == 172u && b >= 16u && b <= 31u)
+        score += 180;
+    else
+        score += 20;
+
+    if (starts_with(it->ifa_name, "wl") || starts_with(it->ifa_name, "wlan"))
+        score += 80;
+    else if (starts_with(it->ifa_name, "en") || starts_with(it->ifa_name, "eth"))
+        score += 70;
+    return score;
+}
+
 static bool discover_routed_ipv4(char out[INET_ADDRSTRLEN]) {
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0)
@@ -56,32 +104,42 @@ static bool discover_routed_ipv4(char out[INET_ADDRSTRLEN]) {
     bool ok = getsockname(fd, (struct sockaddr *)&local, &local_len) == 0 &&
               inet_ntop(AF_INET, &local.sin_addr, out, INET_ADDRSTRLEN) != NULL;
     close(fd);
-    return ok && !starts_with(out, "127.") && !starts_with(out, "169.254.");
+    uint32_t host = ntohl(local.sin_addr.s_addr);
+    return ok && ipv4_is_private(host);
 }
 
 static void discover_ipv4(char out[INET_ADDRSTRLEN]) {
     snprintf(out, INET_ADDRSTRLEN, "127.0.0.1");
-    if (discover_routed_ipv4(out))
-        return;
 
     struct ifaddrs *ifaddr = NULL;
-    if (getifaddrs(&ifaddr) != 0)
-        return;
+    if (getifaddrs(&ifaddr) == 0) {
+        int best_score = -1;
+        char best[INET_ADDRSTRLEN] = {0};
+        for (struct ifaddrs *it = ifaddr; it; it = it->ifa_next) {
+            if (!it->ifa_addr || it->ifa_addr->sa_family != AF_INET)
+                continue;
+            const struct sockaddr_in *addr = (const struct sockaddr_in *)it->ifa_addr;
+            uint32_t host = ntohl(addr->sin_addr.s_addr);
+            char candidate[INET_ADDRSTRLEN];
+            if (!inet_ntop(AF_INET, &addr->sin_addr, candidate, sizeof(candidate)))
+                continue;
+            if (starts_with(candidate, "127.") || starts_with(candidate, "169.254."))
+                continue;
 
-    for (struct ifaddrs *it = ifaddr; it; it = it->ifa_next) {
-        if (!it->ifa_addr || it->ifa_addr->sa_family != AF_INET)
-            continue;
-        const struct sockaddr_in *addr = (const struct sockaddr_in *)it->ifa_addr;
-        char candidate[INET_ADDRSTRLEN];
-        if (!inet_ntop(AF_INET, &addr->sin_addr, candidate, sizeof(candidate)))
-            continue;
-        if (starts_with(candidate, "127.") || starts_with(candidate, "169.254."))
-            continue;
-        snprintf(out, INET_ADDRSTRLEN, "%s", candidate);
-        break;
+            int score = interface_address_score(it, host);
+            if (score > best_score) {
+                best_score = score;
+                snprintf(best, sizeof(best), "%s", candidate);
+            }
+        }
+        freeifaddrs(ifaddr);
+        if (best_score >= 0) {
+            snprintf(out, INET_ADDRSTRLEN, "%s", best);
+            return;
+        }
     }
 
-    freeifaddrs(ifaddr);
+    (void)discover_routed_ipv4(out);
 }
 
 static void make_token(char out[17]) {
