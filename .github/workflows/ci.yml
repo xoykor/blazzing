@@ -61,3 +61,17 @@ jobs:
       - name: Build relay
         working-directory: relay
         run: CGO_ENABLED=0 go build -trimpath -o /tmp/blazzing-pairing-relay .
+
+      - name: Smoke-test relay binary
+        run: |
+          BLZ_RELAY_ADDR=127.0.0.1:18080 /tmp/blazzing-pairing-relay >/tmp/blazzing-relay.log 2>&1 &
+          relay_pid=$!
+          trap 'kill "$relay_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --output /dev/null http://127.0.0.1:18080/healthz; then
+              exit 0
+            fi
+            sleep 0.25
+          done
+          cat /tmp/blazzing-relay.log
+          exit 1
