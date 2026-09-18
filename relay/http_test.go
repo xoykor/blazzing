@@ -124,3 +124,15 @@ func TestForwardedIPTrustedOnlyFromLoopback(t *testing.T) {
 		t.Fatalf("trusted local proxy IP not used: %q", got)
 	}
 }
+
+func TestHealthEndpointHead(t *testing.T) {
+	app := newRelay()
+	server := httptest.NewServer(relayHandler(app))
+	defer server.Close()
+
+	resp := request(t, server.Client(), http.MethodHead, server.URL+"/healthz", "")
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("HEAD health status = %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
