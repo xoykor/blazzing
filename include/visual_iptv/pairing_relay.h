@@ -4,6 +4,7 @@
 
 #include "visual_iptv/core.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -31,6 +32,9 @@ const char *vip_pairing_relay_page_url(const vip_pairing_relay_t *relay);
 
 /* Random 128-bit session identifier encoded as 32 lowercase hex characters. */
 const char *vip_pairing_relay_session_id(const vip_pairing_relay_t *relay);
+
+/* True after delivery, expiration or terminal relay shutdown. */
+bool vip_pairing_relay_finished(const vip_pairing_relay_t *relay);
 
 /*
  * Decrypt one relay payload. Public for deterministic crypto regression tests;
