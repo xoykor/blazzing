@@ -93,32 +93,25 @@ From the catalog grid, `←` on the first column enters the category sidebar and
 
 ### Add an M3U/M3U8 URL with a phone
 
-1. Open the M3U mode and select **Add with phone**.
-2. Blazzing starts a temporary local HTTP server on TCP port `47831` when available, falling back to another free port only if necessary.
-3. Scan the QR Code from a phone connected to the same LAN.
+1. Open M3U mode and select **Add with phone**.
+2. Blazzing creates a short-lived session on the public HTTPS pairing relay.
+3. Scan the QR Code from the phone. The phone can be on Wi-Fi or mobile data.
 4. Paste the playlist name and M3U/M3U8 URL and submit.
-5. Blazzing closes the pairing session and loads the playlist through its normal M3U provider.
+5. The browser encrypts the data with AES-256-GCM before sending it.
+6. Blazzing receives the encrypted payload over HTTPS, decrypts it locally,
+   deletes the remote session and loads the playlist.
 
-The pairing URL contains a one-time random token. Pairing uses local HTTP rather than TLS, so use it on a trusted LAN, especially when playlist URLs contain embedded credentials. If no usable LAN address is detected, Blazzing does not show a phone QR Code and instead displays a localhost URL for testing on the same PC.
+The QR contains a random 128-bit session ID and a random 256-bit AES key. The
+key is carried after the URL `#` fragment, which is not included in ordinary
+HTTP requests. Sessions expire after five minutes.
 
-#### If the QR/link keeps loading on the phone
+No local HTTP server is opened. Pairing does not require the phone and PC to be
+on the same LAN, does not require a firewall exception on the PC, and is not
+affected by router client isolation or CGNAT.
 
-The phone and PC must be on the same LAN and the router must allow client-to-client traffic. Guest Wi-Fi commonly blocks this.
-
-On CachyOS, UFW is commonly enabled and incoming connections may be blocked. Blazzing shows the actual TCP pairing port under the QR. When the preferred port `47831` is in use, allow it only from the private LAN range that matches the displayed PC address:
-
-```sh
-# For a 192.168.x.x LAN:
-sudo ufw allow from 192.168.0.0/16 to any port 47831 proto tcp
-
-# For a 10.x.x.x LAN:
-sudo ufw allow from 10.0.0.0/8 to any port 47831 proto tcp
-
-# For a 172.16.x.x–172.31.x.x LAN:
-sudo ufw allow from 172.16.0.0/12 to any port 47831 proto tcp
-```
-
-If Blazzing displays a different fallback port, replace `47831` with that displayed port.
+The relay URL can be compiled into production builds with
+`VIPTV_PAIRING_DEFAULT_URL`. During development, `VIPTV_PAIRING_URL` can
+override it.
 
 ### Player
 
