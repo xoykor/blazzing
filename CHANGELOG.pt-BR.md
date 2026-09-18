@@ -1,3 +1,18 @@
+## 1.3.2 — 2026-09-17
+
+Navegação por controle remoto e entrada de listas pelo celular:
+
+- adiciona navegação de foco por setas na tela inicial, perfis salvos, menu superior do catálogo, busca, menu lateral de categorias e grade de mídia;
+- aceita Return/KP Enter/Select do X11 como OK e mapeamentos comuns de Back/Escape/Backspace como retorno contextual;
+- adiciona servidor HTTP local temporário para pareamento, com porta livre automática, detecção do IP LAN roteado e token aleatório de uso temporário;
+- exibe QR Code gerado localmente para colar URLs M3U/M3U8 pelo celular na mesma LAN confiável;
+- usa fallback somente localhost quando nenhum IP LAN utilizável é encontrado, evitando QR Code inalcançável;
+- reforça a página de pareamento com no-store/no-referrer/CSP/nosniff/frame-deny e valida URLs HTTP/HTTPS;
+- adiciona testes de regressão do servidor para envio válido, token inválido, esquema inválido e headers de segurança;
+- adiciona `VIPTV_INPUT_DEBUG=1` para identificar mapeamentos incomuns de botões de controles;
+- adiciona o crédito discreto `by Xoykor` na tela inicial;
+- inclui libqrencode no Flatpak e documenta a dependência e o fluxo por controle remoto.
+
 ## 1.3.1 — 2026-09-17
 
 Release de manutenção e legibilidade:

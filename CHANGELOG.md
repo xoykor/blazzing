@@ -1,3 +1,18 @@
+## 1.3.2 — 2026-09-17
+
+Remote-control navigation and phone-assisted playlist entry:
+
+- adds directional focus navigation across the login screen, saved profiles, top catalog controls, search, category sidebar and media grid;
+- accepts X11 Return/KP Enter/Select as OK and common Back/Escape/Backspace mappings as context-aware return actions;
+- adds a temporary local HTTP pairing server with automatic free-port allocation, routed LAN address discovery and a random one-time token;
+- displays a locally generated QR Code so M3U/M3U8 URLs can be pasted from a phone on the same trusted LAN;
+- falls back to localhost-only pairing when no usable LAN address is available instead of displaying an unreachable QR Code;
+- hardens the pairing page with no-store/no-referrer/CSP/nosniff/frame-deny headers and validates HTTP/HTTPS playlist URLs;
+- adds pairing-server regression tests for successful submission, invalid tokens, invalid schemes and browser-security headers;
+- adds `VIPTV_INPUT_DEBUG=1` to identify unusual TV-remote key mappings;
+- adds a discreet `by Xoykor` credit to the initial screen;
+- bundles libqrencode in the Flatpak and documents the new dependency and remote-control workflow.
+
 ## 1.3.1 — 2026-09-17
 
 Maintenance and maintainability release:

@@ -10,18 +10,18 @@
 
 Blazzing é um player IPTV nativo para Linux escrito em C17. Ele reúne interface X11/XWayland, renderização Cairo/Pango, reprodução persistente com mpv, carregamento assíncrono de imagens, persistência SQLite, Xtream Codes, M3U/M3U8 e Pluto TV em um único aplicativo desktop.
 
-> **Estado do projeto:** a **v1.3.0 é a versão final de recursos**. O conjunto de funcionalidades está congelado. A **v1.3.1 é uma versão de manutenção** com a revisão final de legibilidade, documentação e limpeza do código.
+> **Estado do projeto:** a **v1.3.2** adiciona navegação por controle remoto e entrada M3U/M3U8 pelo celular. Releases futuras continuam focadas em manutenção, compatibilidade e correções.
 
 > Use o Blazzing somente com listas, servidores e conteúdos que você tenha autorização para acessar.
 
 ## Download
 
-A instalação recomendada é o **Flatpak oficial da v1.3.1** disponível na [release do GitHub](https://github.com/xoykor/blazzing/releases/tag/v1.3.1).
+A instalação recomendada é o **Flatpak oficial da v1.3.2** disponível na [release do GitHub](https://github.com/xoykor/blazzing/releases/tag/v1.3.2).
 
-Depois de baixar `Blazzing-v1.3.1-x86_64.flatpak`:
+Depois de baixar `Blazzing-v1.3.2-x86_64.flatpak`:
 
 ```sh
-flatpak install --user ./Blazzing-v1.3.1-x86_64.flatpak
+flatpak install --user ./Blazzing-v1.3.2-x86_64.flatpak
 flatpak run io.github.xoykor.Blazzing
 ```
 
@@ -49,7 +49,8 @@ O Blazzing oferece:
 - captura de frame por FFmpeg como fallback;
 - cards responsivos;
 - superfícies arredondadas antialiasadas e texto UTF-8 proporcional com Cairo/Pango;
-- navegação por teclado e mouse;
+- navegação por teclado, mouse e controle remoto com setas/OK;
+- entrada de M3U/M3U8 pelo celular através de página local temporária e QR Code;
 - processo mpv persistente controlado por JSON IPC;
 - pause, seek, timeline, volume, fullscreen e troca de canais ao vivo;
 - ajustes de hardware decoding por variáveis de ambiente.
@@ -68,16 +69,37 @@ A aplicação usa Xlib. O mpv recebe diretamente o container X11 de vídeo do Bl
 
 | Tecla | Ação |
 | --- | --- |
-| `1` | TV ao vivo |
-| `2` | Filmes |
-| `3` | Séries |
-| Setas | Mover o foco |
-| `Enter` | Abrir ou reproduzir |
-| `F` | Alternar favorito |
-| `L` | Abrir listas/perfis salvos |
-| `Esc` | Voltar ou limpar a pesquisa ativa |
+| `Ctrl+1` | TV ao vivo |
+| `Ctrl+2` | Filmes |
+| `Ctrl+3` | Séries |
+| Setas | Mover entre menu superior, busca, menu lateral e grade do catálogo |
+| `Enter` / `Select` | Ativar o controle focado, abrir ou reproduzir |
+| `Ctrl+F` | Focar a busca |
+| `Ctrl+D` | Alternar favorito do item focado no catálogo |
+| `Ctrl+L` | Abrir listas/perfis salvos |
+| `Back` / `Esc` / `Backspace` | Voltar; Backspace edita a busca enquanto ela contém texto |
 | `Ctrl+V` | Colar clipboard |
 | `Shift+Insert` | Colar seleção PRIMARY do X11 |
+
+Na grade do catálogo, `←` na primeira coluna entra no menu lateral de categorias e `↑` na primeira linha entra no menu superior. O menu superior dá acesso a TV, Filmes, Séries, Busca, Favoritos e Listas sem mouse.
+
+### Tela inicial / listas
+
+- `←/→` alterna Xtream/M3U quando o seletor de modo está focado.
+- `↑/↓` percorre o formulário.
+- `→` a partir do formulário entra em **Suas listas**; `↑/↓` seleciona um perfil salvo, `←` volta e `Enter/Select` abre.
+- No modo M3U, foque **Adicionar pelo celular** e pressione `Enter/Select`, ou use `F2` para testar no desktop.
+- `Back/Esc` cancela um pareamento por celular ativo.
+
+### Adicionar uma URL M3U/M3U8 pelo celular
+
+1. Abra o modo M3U e selecione **Adicionar pelo celular**.
+2. O Blazzing inicia um servidor HTTP local temporário em uma porta livre escolhida automaticamente.
+3. Escaneie o QR Code em um celular conectado à mesma rede local.
+4. Cole o nome da lista e a URL M3U/M3U8 e envie.
+5. O Blazzing encerra o pareamento e carrega a lista usando o provider M3U normal.
+
+A URL de pareamento contém um token aleatório de uso temporário. O pareamento usa HTTP local, não TLS; use-o em uma rede LAN confiável, especialmente se a URL da playlist contiver credenciais embutidas. Se nenhum endereço LAN utilizável for detectado, o Blazzing não mostra um QR para celular e exibe uma URL localhost para teste no próprio PC.
 
 ### Player
 
@@ -98,7 +120,7 @@ O executável ainda mantém o nome histórico `visual-iptv`; o nome do produto �
 ### CachyOS / Arch Linux
 
 ```sh
-sudo pacman -S --needed git base-devel cmake pkgconf libx11 curl json-c sqlite libjpeg-turbo libpng libwebp openssl cairo pango ffmpeg mpv libsecret
+sudo pacman -S --needed git base-devel cmake pkgconf libx11 curl json-c sqlite libjpeg-turbo libpng libwebp openssl cairo pango qrencode ffmpeg mpv libsecret
 git clone https://github.com/xoykor/blazzing.git
 cd blazzing
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -116,7 +138,7 @@ Também existe um helper em Fish:
 
 ```sh
 sudo apt update
-sudo apt install git build-essential cmake pkg-config libx11-dev libcurl4-openssl-dev libjson-c-dev libsqlite3-dev libjpeg-dev libpng-dev libwebp-dev libssl-dev libcairo2-dev libpango1.0-dev ffmpeg mpv libsecret-tools
+sudo apt install git build-essential cmake pkg-config libx11-dev libcurl4-openssl-dev libjson-c-dev libsqlite3-dev libjpeg-dev libpng-dev libwebp-dev libssl-dev libcairo2-dev libpango1.0-dev libqrencode-dev ffmpeg mpv libsecret-tools
 
 git clone https://github.com/xoykor/blazzing.git
 cd blazzing
@@ -190,6 +212,7 @@ Veja [Dados e privacidade](docs/DATA_AND_PRIVACY.pt-BR.md).
 Overrides de ambiente destinados ao usuário:
 
 - `VIPTV_MPV_DEBUG=1` — diagnóstico detalhado do player;
+- `VIPTV_INPUT_DEBUG=1` — registra keycodes/keysyms X11 para identificar botões de um controle remoto;
 - `VIPTV_MPV_RENDERER=gpu|gpu-next|x11` — caminho gráfico alternativo do mpv;
 - `VIPTV_MPV_HWDEC=...` — override de hardware decoding;
 - `VIPTV_NO_AUDIO=1` — inicia reprodução sem saída de áudio.

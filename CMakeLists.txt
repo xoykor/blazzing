@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(visual_iptv_x11 VERSION 1.3.1 LANGUAGES C)
+project(visual_iptv_x11 VERSION 1.3.2 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -20,6 +20,7 @@ pkg_check_modules(PNG REQUIRED IMPORTED_TARGET libpng)
 pkg_check_modules(WEBP REQUIRED IMPORTED_TARGET libwebp)
 pkg_check_modules(CAIRO REQUIRED IMPORTED_TARGET cairo)
 pkg_check_modules(PANGOCAIRO REQUIRED IMPORTED_TARGET pangocairo)
+pkg_check_modules(QRENCODE REQUIRED IMPORTED_TARGET libqrencode)
 find_program(FFMPEG_EXECUTABLE NAMES ffmpeg REQUIRED)
 find_program(MPV_EXECUTABLE NAMES mpv)
 
@@ -68,13 +69,17 @@ add_library(vip_player_mpv src/player_mpv/player_mpv.c)
 target_link_libraries(vip_player_mpv PUBLIC vip_core Threads::Threads PkgConfig::JSONC)
 vip_warnings(vip_player_mpv)
 
+add_library(vip_pairing src/app/pairing_server.c)
+target_link_libraries(vip_pairing PUBLIC vip_core Threads::Threads)
+vip_warnings(vip_pairing)
+
 add_library(vip_ui_x11
     src/ui_x11/x11_app.c
     src/ui_x11/ui_motion.c
     src/ui_x11/ui_render.c)
 target_link_libraries(vip_ui_x11 PUBLIC
-    vip_core vip_provider vip_database vip_decoder vip_thumbnails vip_player_mpv
-    PkgConfig::X11 PkgConfig::JPEG PkgConfig::CURL PkgConfig::CAIRO PkgConfig::PANGOCAIRO Threads::Threads)
+    vip_core vip_provider vip_database vip_decoder vip_thumbnails vip_player_mpv vip_pairing
+    PkgConfig::X11 PkgConfig::JPEG PkgConfig::CURL PkgConfig::CAIRO PkgConfig::PANGOCAIRO PkgConfig::QRENCODE Threads::Threads)
 vip_warnings(vip_ui_x11)
 
 add_executable(visual-iptv
@@ -157,6 +162,11 @@ if(BUILD_TESTING)
     target_include_directories(test_ui_motion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     vip_warnings(test_ui_motion)
     add_test(NAME ui_motion COMMAND test_ui_motion)
+
+    add_executable(test_pairing_server tests/test_pairing_server.c)
+    target_link_libraries(test_pairing_server PRIVATE vip_pairing Threads::Threads)
+    vip_warnings(test_pairing_server)
+    add_test(NAME pairing_server COMMAND test_pairing_server)
 endif()
 
 install(TARGETS visual-iptv RUNTIME DESTINATION bin)
