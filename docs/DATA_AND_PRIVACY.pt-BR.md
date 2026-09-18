@@ -38,15 +38,12 @@ Nunca publique credenciais reais, playlists privadas, URLs autenticadas completa
 
 ## Relay de pareamento pelo celular
 
-A entrada M3U pelo celular usa um relay público HTTPS de curta duração. O
+A entrada M3U pelo celular usa um Cloudflare Worker público HTTPS de curta duração. O
 Blazzing gera localmente o identificador da sessão e a chave AES-256. O
 navegador cifra nome e URL da playlist com AES-256-GCM antes do envio.
 
-O relay mantém somente IV/ciphertext cifrados em RAM e expira sessões após
-cinco minutos. A chave AES viaja no fragmento `#` do QR e não faz parte das
+O Worker mantém somente IV/ciphertext cifrados e o estado de expiração em um Durable Object SQLite. A sessão é apagada após a entrega ou depois de cinco minutos. A chave AES viaja no fragmento `#` do QR e não faz parte das
 requisições HTTP normais. Depois de abrir a página, o JavaScript remove o
 fragmento da URL visível/histórico.
 
-Como o relay entrega esse JavaScript, um frontend de relay malicioso ou
-modificado poderia teoricamente capturar o texto puro. Use o relay oficial do
-Blazzing ou um relay sob seu controle.
+Como o Worker entrega esse JavaScript, uma versão maliciosamente modificada do frontend poderia teoricamente capturar o texto puro antes da cifra. Use o Worker oficial do Blazzing ou uma implantação sob seu controle. A Cloudflare pode reter dados de armazenamento cifrados conforme as políticas da própria infraestrutura/backup; a chave AES não é armazenada junto do ciphertext.

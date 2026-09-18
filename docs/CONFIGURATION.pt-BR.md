@@ -60,10 +60,10 @@ Reservadas para testes e automações; não fazem parte da interface estável de
 
 ## `VIPTV_PAIRING_URL`
 
-Sobrescreve o relay público HTTPS usado por **Adicionar pelo celular**.
+Sobrescreve a URL HTTPS pública do Cloudflare Worker usada por **Adicionar pelo celular**.
 
 ```fish
-set -lx VIPTV_PAIRING_URL https://pair.example.com
+set -lx VIPTV_PAIRING_URL https://blazzing-pairing.example.workers.dev
 ./build/visual-iptv
 ```
 

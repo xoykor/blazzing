@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "blazzing-pairing",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-18",
+  "durable_objects": {
+    "bindings": [
+      { "name": "PAIRING_SESSIONS", "class_name": "PairingSession" },
+      { "name": "PAIRING_RATE_LIMIT", "class_name": "PairingRateLimit" }
+    ]
+  },
+  "exports": {
+    "PairingSession": { "type": "durable-object", "storage": "sqlite" },
+    "PairingRateLimit": { "type": "durable-object", "storage": "sqlite" }
+  },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  }
+}

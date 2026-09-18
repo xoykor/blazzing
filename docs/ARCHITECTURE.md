@@ -158,10 +158,12 @@ See [Data and privacy](DATA_AND_PRIVACY.md).
 ## Phone pairing
 
 ```text
-Phone browser --HTTPS--> pairing relay <--HTTPS polling-- Blazzing
-      |                    ciphertext only                 |
+Phone browser --HTTPS--> Cloudflare Worker <--HTTPS polling-- Blazzing
+      |                       |                             |
+      |                 Durable Object                     |
+      |                 ciphertext only                    |
       +---- AES-256-GCM key comes from QR #fragment -------+
 ```
 
 The old inbound LAN HTTP server is not part of the current architecture.
-Pairing uses outbound HTTPS from both endpoints.
+Pairing uses outbound HTTPS from both endpoints. The Worker owns the temporary encrypted session state; no VPS is part of the architecture.

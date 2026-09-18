@@ -86,10 +86,10 @@ Variables prefixed with `VIPTV_TEST_` are used by tests and local automation. Th
 
 ## `VIPTV_PAIRING_URL`
 
-Overrides the public HTTPS relay used by **Add with phone**.
+Overrides the public Cloudflare Worker HTTPS URL used by **Add with phone**.
 
 ```fish
-set -lx VIPTV_PAIRING_URL https://pair.example.com
+set -lx VIPTV_PAIRING_URL https://blazzing-pairing.example.workers.dev
 ./build/visual-iptv
 ```
 

@@ -158,10 +158,12 @@ Veja [Dados e privacidade](DATA_AND_PRIVACY.pt-BR.md).
 ## Pareamento pelo celular
 
 ```text
-Navegador --HTTPS--> relay de pareamento <--polling HTTPS-- Blazzing
-     |                    apenas ciphertext                 |
+Navegador --HTTPS--> Cloudflare Worker <--polling HTTPS-- Blazzing
+     |                       |                               |
+     |                 Durable Object                       |
+     |                 apenas ciphertext                    |
      +---- chave AES-256 vem do fragmento # do QR ----------+
 ```
 
 O servidor HTTP LAN de entrada antigo não faz parte da arquitetura atual. Os
-dois lados usam somente conexões HTTPS de saída.
+dois lados usam somente conexões HTTPS de saída. O Worker mantém o estado cifrado temporário da sessão; não há VPS nessa arquitetura.

@@ -94,22 +94,24 @@ Na grade do catálogo, `←` na primeira coluna entra no menu lateral de categor
 ### Adicionar uma URL M3U/M3U8 pelo celular
 
 1. Abra o modo M3U e selecione **Adicionar pelo celular**.
-2. O Blazzing cria uma sessão temporária no relay público por HTTPS.
+2. O Blazzing cria uma sessão de cinco minutos no Cloudflare Worker público.
 3. Escaneie o QR Code no celular. O celular pode estar no Wi-Fi ou nos dados móveis.
 4. Cole o nome da lista e a URL M3U/M3U8 e envie.
 5. O navegador cifra os dados com AES-256-GCM antes do envio.
 6. O Blazzing recebe o payload cifrado por HTTPS, descriptografa localmente,
-   apaga a sessão remota e carrega a lista.
+   apaga a sessão e carrega a lista.
 
 O QR contém um identificador aleatório de sessão de 128 bits e uma chave AES
-aleatória de 256 bits. A chave fica após o fragmento `#` da URL, que não é
-incluído nas requisições HTTP normais. A sessão expira após cinco minutos.
+aleatória de 256 bits. A chave fica após o fragmento `#`, não entra nas
+requisições HTTP normais e é removida da barra/histórico do navegador após a
+página iniciar. O Worker mantém somente os dados cifrados da sessão em um
+Durable Object temporário.
 
 Nenhum servidor HTTP local é aberto. O pareamento não exige que celular e PC
 estejam na mesma LAN, não exige exceção no firewall do PC e não depende de
-isolamento de clientes do roteador ou CGNAT.
+isolamento de clientes do roteador ou CGNAT. Não é necessária VPS.
 
-A URL do relay pode ser embutida no build de produção com
+A URL do Worker pode ser embutida no build de produção com
 `VIPTV_PAIRING_DEFAULT_URL`. Em desenvolvimento, `VIPTV_PAIRING_URL` pode
 sobrescrevê-la.
 

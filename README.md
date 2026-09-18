@@ -94,22 +94,23 @@ From the catalog grid, `←` on the first column enters the category sidebar and
 ### Add an M3U/M3U8 URL with a phone
 
 1. Open M3U mode and select **Add with phone**.
-2. Blazzing creates a short-lived session on the public HTTPS pairing relay.
+2. Blazzing creates a five-minute session on the public Cloudflare Worker.
 3. Scan the QR Code from the phone. The phone can be on Wi-Fi or mobile data.
 4. Paste the playlist name and M3U/M3U8 URL and submit.
 5. The browser encrypts the data with AES-256-GCM before sending it.
 6. Blazzing receives the encrypted payload over HTTPS, decrypts it locally,
-   deletes the remote session and loads the playlist.
+   deletes the session and loads the playlist.
 
 The QR contains a random 128-bit session ID and a random 256-bit AES key. The
-key is carried after the URL `#` fragment, which is not included in ordinary
-HTTP requests. Sessions expire after five minutes.
+key is carried after the URL `#` fragment, is not included in ordinary HTTP
+requests, and is removed from the browser address bar/history after bootstrap.
+The Worker stores only encrypted session data in a short-lived Durable Object.
 
 No local HTTP server is opened. Pairing does not require the phone and PC to be
 on the same LAN, does not require a firewall exception on the PC, and is not
-affected by router client isolation or CGNAT.
+affected by router client isolation or CGNAT. No VPS is required.
 
-The relay URL can be compiled into production builds with
+The Worker URL can be compiled into production builds with
 `VIPTV_PAIRING_DEFAULT_URL`. During development, `VIPTV_PAIRING_URL` can
 override it.
 
