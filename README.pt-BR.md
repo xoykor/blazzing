@@ -99,7 +99,7 @@ Na grade do catálogo, `←` na primeira coluna entra no menu lateral de categor
 4. Cole o nome da lista e a URL M3U/M3U8 e envie.
 5. O Blazzing encerra o pareamento e carrega a lista usando o provider M3U normal.
 
-A URL de pareamento contém um token aleatório de uso temporário. Se nenhum endereço LAN utilizável for detectado, o Blazzing não mostra um QR para celular e exibe uma URL localhost para teste no próprio PC.
+A URL de pareamento contém um token aleatório de uso temporário. O pareamento usa HTTP local, não TLS; use-o em uma rede LAN confiável, especialmente se a URL da playlist contiver credenciais embutidas. Se nenhum endereço LAN utilizável for detectado, o Blazzing não mostra um QR para celular e exibe uma URL localhost para teste no próprio PC.
 
 ### Player
 
