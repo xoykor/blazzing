@@ -3658,11 +3658,17 @@ static void draw_login(app_t *a) {
         if (idx < 0 || (size_t)idx >= a->profiles.len)
             break;
         vip_profile_t *p = &a->profiles.items[idx];
+        bool profile_focused = a->input_focus == INPUT_SAVED_PROFILE && a->profile_focus == idx;
         if (a->renderer.active) {
-            vip_ui_render_round_rect(&a->renderer, list_x, row_y, list_w, 52, 12, 0x151E2Du, 1.0);
-            vip_ui_render_round_stroke(&a->renderer, list_x, row_y, list_w, 52, 12, 0x2B3950u, 1.0, 1.0);
+            vip_ui_render_round_rect(&a->renderer, list_x, row_y, list_w, 52, 12,
+                                     profile_focused ? 0x183E6Bu : 0x151E2Du, 1.0);
+            vip_ui_render_round_stroke(&a->renderer, list_x, row_y, list_w, 52, 12,
+                                       profile_focused ? 0xB7D9FFu : 0x2B3950u,
+                                       1.0, profile_focused ? 2.5 : 1.0);
         } else {
-            draw_surface(a, list_x, row_y, list_w, 52, 12, false);
+            draw_surface(a, list_x, row_y, list_w, 52, 12, profile_focused);
+            if (profile_focused)
+                stroke_round_rect(a, list_x - 2, row_y - 2, list_w + 4, 56, 13, a->colors.text);
         }
         char label[220];
         snprintf(label, sizeof(label), "%s  ·  %s", p->name ? p->name : "Lista",
@@ -3671,12 +3677,14 @@ static void draw_login(app_t *a) {
         char sub[220];
         bounded_text(sub, sizeof(sub), p->server ? p->server : "", 46);
         if (a->renderer.active) {
-            vip_ui_render_text(&a->renderer, list_x + 13, row_y + 8, list_w - 26, label, "Sans SemiBold 9",
+            vip_ui_render_text(&a->renderer, list_x + 13, row_y + 8, list_w - 26, label,
+                               profile_focused ? "Sans Bold 9" : "Sans SemiBold 9",
                                0xF6F8FCu, 1.0, false);
             vip_ui_render_text(&a->renderer, list_x + 13, row_y + 29, list_w - 26, sub, "Sans 8", 0x91A0B7u,
                                1.0, false);
         } else {
-            draw_text(a, list_x + 13, row_y + 22, label, a->colors.text);
+            draw_text(a, list_x + 13, row_y + 22, label,
+                      profile_focused ? a->colors.text : a->colors.text);
             draw_text_font(a, a->font_small, list_x + 13, row_y + 42, sub, a->colors.muted);
         }
         row_y += 60;
