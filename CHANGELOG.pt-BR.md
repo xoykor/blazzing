@@ -1,3 +1,14 @@
+## 1.3.3 — 2026-09-17
+
+Correção de acesso ao pareamento pela rede local:
+
+- prioriza endereços IPv4 de Wi-Fi/Ethernet físicos em vez de Docker, Podman, VPN, WireGuard, Tailscale e outras interfaces virtuais ao gerar o QR;
+- usa a porta TCP `47831` como porta preferencial para que a regra de firewall permaneça estável entre sessões;
+- usa automaticamente outra porta livre se a `47831` já estiver ocupada;
+- mostra na interface a porta TCP real que deve ser liberada quando o firewall bloquear conexões de entrada;
+- documenta solução para UFW/CachyOS e limitações de Wi-Fi convidado/isolamento de clientes;
+- adiciona teste de regressão iniciando dois servidores de pareamento ao mesmo tempo e verificando o fallback para outra porta.
+
 ## 1.3.2 — 2026-09-17
 
 Navegação por controle remoto e entrada de listas pelo celular:

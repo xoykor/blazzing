@@ -10,18 +10,18 @@
 
 Blazzing is a native Linux IPTV player written in C17. It combines an X11/XWayland interface, Cairo/Pango rendering, persistent mpv playback, asynchronous artwork loading, SQLite persistence, Xtream Codes, M3U/M3U8 and Pluto TV in one desktop application.
 
-> **Project status:** **v1.3.2** adds TV-remote navigation and phone-assisted M3U/M3U8 entry. Future releases remain focused on maintenance, compatibility and fixes.
+> **Project status:** **v1.3.3** adds TV-remote navigation and phone-assisted M3U/M3U8 entry. Future releases remain focused on maintenance, compatibility and fixes.
 
 > Use Blazzing only with playlists, servers and content that you are authorized to access.
 
 ## Download
 
-The recommended installation is the official **v1.3.2 Flatpak bundle** from the [GitHub release](https://github.com/xoykor/blazzing/releases/tag/v1.3.2).
+The recommended installation is the official **v1.3.3 Flatpak bundle** from the [GitHub release](https://github.com/xoykor/blazzing/releases/tag/v1.3.3).
 
-After downloading `Blazzing-v1.3.2-x86_64.flatpak`:
+After downloading `Blazzing-v1.3.3-x86_64.flatpak`:
 
 ```sh
-flatpak install --user ./Blazzing-v1.3.2-x86_64.flatpak
+flatpak install --user ./Blazzing-v1.3.3-x86_64.flatpak
 flatpak run io.github.xoykor.Blazzing
 ```
 
@@ -94,12 +94,31 @@ From the catalog grid, `←` on the first column enters the category sidebar and
 ### Add an M3U/M3U8 URL with a phone
 
 1. Open the M3U mode and select **Add with phone**.
-2. Blazzing starts a temporary local HTTP server on an automatically selected free port.
+2. Blazzing starts a temporary local HTTP server on TCP port `47831` when available, falling back to another free port only if necessary.
 3. Scan the QR Code from a phone connected to the same LAN.
 4. Paste the playlist name and M3U/M3U8 URL and submit.
 5. Blazzing closes the pairing session and loads the playlist through its normal M3U provider.
 
 The pairing URL contains a one-time random token. Pairing uses local HTTP rather than TLS, so use it on a trusted LAN, especially when playlist URLs contain embedded credentials. If no usable LAN address is detected, Blazzing does not show a phone QR Code and instead displays a localhost URL for testing on the same PC.
+
+#### If the QR/link keeps loading on the phone
+
+The phone and PC must be on the same LAN and the router must allow client-to-client traffic. Guest Wi-Fi commonly blocks this.
+
+On CachyOS, UFW is commonly enabled and incoming connections may be blocked. Blazzing shows the actual TCP pairing port under the QR. When the preferred port `47831` is in use, allow it only from the private LAN range that matches the displayed PC address:
+
+```sh
+# For a 192.168.x.x LAN:
+sudo ufw allow from 192.168.0.0/16 to any port 47831 proto tcp
+
+# For a 10.x.x.x LAN:
+sudo ufw allow from 10.0.0.0/8 to any port 47831 proto tcp
+
+# For a 172.16.x.x–172.31.x.x LAN:
+sudo ufw allow from 172.16.0.0/12 to any port 47831 proto tcp
+```
+
+If Blazzing displays a different fallback port, replace `47831` with that displayed port.
 
 ### Player
 

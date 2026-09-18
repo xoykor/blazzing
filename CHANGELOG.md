@@ -1,3 +1,14 @@
+## 1.3.3 — 2026-09-17
+
+Phone-pairing LAN reachability fix:
+
+- prefers physical Wi-Fi/Ethernet IPv4 addresses over Docker, Podman, VPN, WireGuard, Tailscale and other virtual interfaces when building the QR URL;
+- uses TCP port `47831` as the preferred pairing port so firewall configuration remains stable across sessions;
+- falls back to an automatically selected free port if `47831` is already occupied;
+- shows the actual TCP port in the pairing UI when a firewall exception may be required;
+- documents UFW/CachyOS troubleshooting and guest-Wi-Fi/client-isolation limitations;
+- adds regression coverage that starts two pairing servers simultaneously and verifies the second one falls back to a different port.
+
 ## 1.3.2 — 2026-09-17
 
 Remote-control navigation and phone-assisted playlist entry:

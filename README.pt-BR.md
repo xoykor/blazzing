@@ -10,18 +10,18 @@
 
 Blazzing é um player IPTV nativo para Linux escrito em C17. Ele reúne interface X11/XWayland, renderização Cairo/Pango, reprodução persistente com mpv, carregamento assíncrono de imagens, persistência SQLite, Xtream Codes, M3U/M3U8 e Pluto TV em um único aplicativo desktop.
 
-> **Estado do projeto:** a **v1.3.2** adiciona navegação por controle remoto e entrada M3U/M3U8 pelo celular. Releases futuras continuam focadas em manutenção, compatibilidade e correções.
+> **Estado do projeto:** a **v1.3.3** adiciona navegação por controle remoto e entrada M3U/M3U8 pelo celular. Releases futuras continuam focadas em manutenção, compatibilidade e correções.
 
 > Use o Blazzing somente com listas, servidores e conteúdos que você tenha autorização para acessar.
 
 ## Download
 
-A instalação recomendada é o **Flatpak oficial da v1.3.2** disponível na [release do GitHub](https://github.com/xoykor/blazzing/releases/tag/v1.3.2).
+A instalação recomendada é o **Flatpak oficial da v1.3.3** disponível na [release do GitHub](https://github.com/xoykor/blazzing/releases/tag/v1.3.3).
 
-Depois de baixar `Blazzing-v1.3.2-x86_64.flatpak`:
+Depois de baixar `Blazzing-v1.3.3-x86_64.flatpak`:
 
 ```sh
-flatpak install --user ./Blazzing-v1.3.2-x86_64.flatpak
+flatpak install --user ./Blazzing-v1.3.3-x86_64.flatpak
 flatpak run io.github.xoykor.Blazzing
 ```
 
@@ -94,12 +94,31 @@ Na grade do catálogo, `←` na primeira coluna entra no menu lateral de categor
 ### Adicionar uma URL M3U/M3U8 pelo celular
 
 1. Abra o modo M3U e selecione **Adicionar pelo celular**.
-2. O Blazzing inicia um servidor HTTP local temporário em uma porta livre escolhida automaticamente.
+2. O Blazzing inicia um servidor HTTP local temporário na porta TCP `47831` quando disponível, usando outra porta livre somente se necessário.
 3. Escaneie o QR Code em um celular conectado à mesma rede local.
 4. Cole o nome da lista e a URL M3U/M3U8 e envie.
 5. O Blazzing encerra o pareamento e carrega a lista usando o provider M3U normal.
 
 A URL de pareamento contém um token aleatório de uso temporário. O pareamento usa HTTP local, não TLS; use-o em uma rede LAN confiável, especialmente se a URL da playlist contiver credenciais embutidas. Se nenhum endereço LAN utilizável for detectado, o Blazzing não mostra um QR para celular e exibe uma URL localhost para teste no próprio PC.
+
+#### Se o QR/link ficar carregando no celular
+
+O celular e o PC precisam estar na mesma LAN e o roteador deve permitir tráfego entre dispositivos. Wi-Fi de convidado costuma bloquear esse acesso.
+
+No CachyOS, o UFW costuma estar ativo e pode bloquear conexões de entrada. O Blazzing mostra abaixo do QR a porta TCP real do pareamento. Quando estiver usando a porta preferencial `47831`, libere apenas a faixa privada correspondente ao IP exibido:
+
+```sh
+# Para LAN 192.168.x.x:
+sudo ufw allow from 192.168.0.0/16 to any port 47831 proto tcp
+
+# Para LAN 10.x.x.x:
+sudo ufw allow from 10.0.0.0/8 to any port 47831 proto tcp
+
+# Para LAN 172.16.x.x–172.31.x.x:
+sudo ufw allow from 172.16.0.0/12 to any port 47831 proto tcp
+```
+
+Se o Blazzing mostrar outra porta de fallback, substitua `47831` pela porta exibida.
 
 ### Player
 

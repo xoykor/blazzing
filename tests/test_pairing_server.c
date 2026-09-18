@@ -67,6 +67,13 @@ int main(void) {
     TEST_CHECK(vip_pairing_server_port(server) != 0u);
     TEST_CHECK(vip_pairing_server_token(server)[0] != '\0');
 
+    vip_pairing_server_t *second_server = NULL;
+    TEST_STATUS(vip_pairing_server_start(&second_server, on_submit, NULL, &error), VIP_OK, &error);
+    TEST_CHECK(second_server != NULL);
+    TEST_CHECK(vip_pairing_server_port(second_server) != 0u);
+    TEST_CHECK(vip_pairing_server_port(second_server) != vip_pairing_server_port(server));
+    vip_pairing_server_stop(second_server);
+
     char url[256];
     vip_pairing_server_url(server, url, sizeof(url));
     TEST_CHECK(strncmp(url, "http://", 7) == 0);

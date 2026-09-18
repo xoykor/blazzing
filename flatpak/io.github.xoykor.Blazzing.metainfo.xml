@@ -20,6 +20,11 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.3.3" date="2026-09-17">
+      <description>
+        <p>Fixes phone pairing reachability on LANs by preferring physical Wi-Fi/Ethernet addresses over VPN/container interfaces, using a stable firewall-friendly TCP port when available, and showing the actual port to allow when a host firewall blocks incoming connections.</p>
+      </description>
+    </release>
     <release version="1.3.2" date="2026-09-17">
       <description>
         <p>Adds TV-remote-friendly focus navigation across the home screen, saved playlists, catalog header, search, sidebar and grid, plus phone-assisted M3U/M3U8 entry through a temporary LAN page with a local QR Code and hardened one-time pairing.</p>
