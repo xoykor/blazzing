@@ -5558,6 +5558,11 @@ static void handle_async(app_t *a) {
         snprintf(a->profile_name, sizeof(a->profile_name), "%s", name);
         snprintf(a->status, sizeof(a->status), "Playlist recebida do celular; carregando...");
         start_login(a);
+    } else if (a->pairing_relay && vip_pairing_relay_finished(a->pairing_relay)) {
+        stop_phone_pairing(a);
+        a->input_focus = INPUT_PHONE;
+        snprintf(a->status, sizeof(a->status),
+                 "Sessão de pareamento expirou; gere um novo QR Code");
     }
     if (atomic_exchange(&a->login_done, false)) {
         if (a->login_thread_started) {
