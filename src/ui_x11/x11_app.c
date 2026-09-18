@@ -4977,7 +4977,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
             }
             if (sym == XK_Up)
                 return;
-            if is_activate_key(sym) {
+            if (is_activate_key(sym)) {
                 browse_activate_top(a);
                 return;
             }
@@ -5002,7 +5002,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
             }
             if (sym == XK_Left)
                 return;
-            if is_activate_key(sym) {
+            if (is_activate_key(sym)) {
                 browse_activate_sidebar(a);
                 return;
             }
@@ -5117,7 +5117,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
         }
         if (sym == XK_Right)
             return;
-        if is_activate_key(sym) {
+        if (is_activate_key(sym)) {
             if (a->profiles.len == 0u)
                 return;
             size_t index = (size_t)a->profile_focus;
@@ -5161,7 +5161,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
         login_move_focus(a, shift ? -1 : 1);
         return;
     }
-    if is_activate_key(sym) {
+    if (is_activate_key(sym)) {
         if (a->input_focus == INPUT_PHONE && a->login_mode == LOGIN_M3U)
             start_phone_pairing(a);
         else if (a->input_focus == INPUT_MODE)
