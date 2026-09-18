@@ -4675,6 +4675,7 @@ static void handle_click(app_t *a, int x, int y) {
                 if ((size_t)idx >= a->profiles.len)
                     break;
                 if (point_in(x, y, list_x, row_y, list_w, 52)) {
+                    a->profile_focus = idx;
                     load_profile_into_form(a, (size_t)idx);
                     return;
                 }
@@ -4721,6 +4722,11 @@ static void handle_click(app_t *a, int x, int y) {
 static void handle_wheel(app_t *a, int x, int y, int direction) {
     /* The login screen scrolls saved profiles independently of the catalog. */
     if (a->screen == SCREEN_LOGIN) {
+        if (a->input_focus == INPUT_SAVED_PROFILE && a->profiles.len > 0u) {
+            a->profile_focus += direction;
+            login_profile_ensure_visible(a);
+            return;
+        }
         int max_scroll = (int)a->profiles.len - 7;
         if (max_scroll < 0)
             max_scroll = 0;
@@ -5088,6 +5094,39 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
         a->input_focus = INPUT_PHONE;
         return;
     }
+    if (a->input_focus == INPUT_SAVED_PROFILE) {
+        if (sym == XK_Up) {
+            if (a->profile_focus > 0)
+                --a->profile_focus;
+            login_profile_ensure_visible(a);
+            return;
+        }
+        if (sym == XK_Down) {
+            if ((size_t)(a->profile_focus + 1) < a->profiles.len)
+                ++a->profile_focus;
+            login_profile_ensure_visible(a);
+            return;
+        }
+        if (sym == XK_Left || is_navigation_back(sym)) {
+            a->input_focus = INPUT_PROFILE_NAME;
+            return;
+        }
+        if (sym == XK_Right)
+            return;
+        if (sym == XK_Return || sym == XK_KP_Enter || sym == XK_Select) {
+            if (a->profiles.len == 0u)
+                return;
+            size_t index = (size_t)a->profile_focus;
+            if (index >= a->profiles.len)
+                index = a->profiles.len - 1u;
+            load_profile_into_form(a, index);
+            if (a->server[0] &&
+                (a->login_mode == LOGIN_M3U || (a->username[0] && a->password[0])))
+                start_login(a);
+            return;
+        }
+        return;
+    }
     if (sym == XK_Up) {
         login_move_focus(a, -1);
         return;
@@ -5098,6 +5137,10 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
     }
     if (a->input_focus == INPUT_MODE && (sym == XK_Left || sym == XK_Right)) {
         login_select_mode(a, a->login_mode == LOGIN_XTREAM ? LOGIN_M3U : LOGIN_XTREAM);
+        return;
+    }
+    if (sym == XK_Right && a->profiles.len > 0u && !a->pairing_server) {
+        login_focus_saved_profiles(a);
         return;
     }
     if (is_navigation_back(sym))
@@ -5114,7 +5157,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
         login_move_focus(a, shift ? -1 : 1);
         return;
     }
-    if (sym == XK_Return || sym == XK_KP_Enter) {
+    if (sym == XK_Return || sym == XK_KP_Enter || sym == XK_Select) {
         if (a->input_focus == INPUT_PHONE && a->login_mode == LOGIN_M3U)
             start_phone_pairing(a);
         else if (a->input_focus == INPUT_MODE)
