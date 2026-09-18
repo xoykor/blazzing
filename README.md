@@ -99,7 +99,7 @@ From the catalog grid, `←` on the first column enters the category sidebar and
 4. Paste the playlist name and M3U/M3U8 URL and submit.
 5. Blazzing closes the pairing session and loads the playlist through its normal M3U provider.
 
-The pairing URL contains a one-time random token. If no usable LAN address is detected, Blazzing does not show a phone QR Code and instead displays a localhost URL for testing on the same PC.
+The pairing URL contains a one-time random token. Pairing uses local HTTP rather than TLS, so use it on a trusted LAN, especially when playlist URLs contain embedded credentials. If no usable LAN address is detected, Blazzing does not show a phone QR Code and instead displays a localhost URL for testing on the same PC.
 
 ### Player
 
