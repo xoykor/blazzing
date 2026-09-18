@@ -1,9 +1,16 @@
-# Replace pair.example.com with the DNS name that points to the Oracle VPS.
+# Replace the hostname with the DNS name that points to the Oracle VPS.
+# For a domain-free test deployment, an address such as
+# 203-0-113-10.sslip.io resolves to 203.0.113.10.
 pair.example.com {
     encode zstd gzip
-    reverse_proxy 127.0.0.1:8080
+
+    reverse_proxy 127.0.0.1:8080 {
+        # The Go relay trusts this value only because its direct peer is
+        # loopback/Caddy.
+        header_up X-Real-IP {remote_host}
+    }
 
     header {
-        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        Strict-Transport-Security "max-age=31536000"
     }
 }
