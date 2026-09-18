@@ -57,3 +57,18 @@ Never publish the following in issues, screenshots, logs, or commits:
 - `catalog.db` from a real account.
 
 When reporting problems, use fictional endpoints or a test server you control.
+
+## Phone pairing relay
+
+Phone-assisted M3U entry uses a short-lived public HTTPS relay. Blazzing
+generates the session ID and AES-256 key locally. The browser encrypts the
+playlist name and URL with AES-256-GCM before submitting them.
+
+The relay stores only the encrypted IV/ciphertext in RAM and expires sessions
+after five minutes. The AES key is carried in the QR URL fragment and is not
+included in normal HTTP requests. After the browser loads, its JavaScript
+removes the fragment from the visible URL/history.
+
+The relay serves that JavaScript, so operators of a modified/malicious relay
+frontend could theoretically change the page to capture plaintext. Use the
+official Blazzing relay or a relay you control.
