@@ -68,6 +68,15 @@
 #define INPUT_PHONE 7
 #define INPUT_CONNECT 8
 #define INPUT_MODE 9
+#define BROWSE_FOCUS_GRID 0
+#define BROWSE_FOCUS_SIDEBAR 1
+#define BROWSE_FOCUS_TOP 2
+#define BROWSE_TOP_TV 0
+#define BROWSE_TOP_MOVIES 1
+#define BROWSE_TOP_SERIES 2
+#define BROWSE_TOP_SEARCH 3
+#define BROWSE_TOP_FAVORITES 4
+#define BROWSE_TOP_LISTS 5
 #define HOVER_NONE 0
 #define HOVER_TAB_BASE 10
 #define HOVER_SEARCH 20
@@ -276,6 +285,9 @@ struct app {
     int selected_category;
     int category_scroll;
     int grid_scroll;
+    int browse_focus;
+    int browse_top_focus;
+    int browse_sidebar_focus;
     size_t current_channel;
 
     vip_database_t *db;
@@ -337,6 +349,9 @@ static void layout_video_window(app_t *a);
 static void focus_player_input(app_t *a);
 /* Clear details view. */
 static void clear_details_view(app_t *a);
+static void switch_content(app_t *a, content_kind_t kind);
+static void return_from_episode_list(app_t *a);
+static void choose_category(app_t *a, int index);
 
 /* Return monotonic time in milliseconds for deadlines and animation timing. */
 static int64_t monotonic_ms(void) {
@@ -1367,6 +1382,115 @@ static const char *all_content_label(app_t *a) {
     }
 }
 
+static void browse_sync_input_focus(app_t *a) {
+    if (!a)
+        return;
+    a->input_focus =
+        (a->browse_focus == BROWSE_FOCUS_TOP && a->browse_top_focus == BROWSE_TOP_SEARCH) ? INPUT_SEARCH : 0;
+}
+
+static void browse_focus_top(app_t *a, int item) {
+    if (!a)
+        return;
+    if (item < BROWSE_TOP_TV)
+        item = BROWSE_TOP_TV;
+    if (item > BROWSE_TOP_LISTS)
+        item = BROWSE_TOP_LISTS;
+    a->browse_focus = BROWSE_FOCUS_TOP;
+    a->browse_top_focus = item;
+    browse_sync_input_focus(a);
+}
+
+static void browse_focus_grid(app_t *a) {
+    if (!a)
+        return;
+    a->browse_focus = BROWSE_FOCUS_GRID;
+    browse_sync_input_focus(a);
+}
+
+static void browse_sidebar_ensure_visible(app_t *a) {
+    if (!a || a->browse_sidebar_focus < 0)
+        return;
+    int rows = category_visible_rows(a) - 1;
+    if (rows < 1)
+        rows = 1;
+    if (a->browse_sidebar_focus < a->category_scroll)
+        a->category_scroll = a->browse_sidebar_focus;
+    if (a->browse_sidebar_focus >= a->category_scroll + rows)
+        a->category_scroll = a->browse_sidebar_focus - rows + 1;
+    int max_scroll = (int)ACTIVE_CATEGORIES(a).len - rows;
+    if (max_scroll < 0)
+        max_scroll = 0;
+    if (a->category_scroll > max_scroll)
+        a->category_scroll = max_scroll;
+}
+
+static void browse_focus_sidebar(app_t *a, int item) {
+    if (!a)
+        return;
+    int min_item = a->series_episode_mode ? -2 : -1;
+    int max_item = ACTIVE_CATEGORIES(a).len > 0u ? (int)ACTIVE_CATEGORIES(a).len - 1 : -1;
+    if (item < min_item)
+        item = min_item;
+    if (item > max_item)
+        item = max_item;
+    a->browse_focus = BROWSE_FOCUS_SIDEBAR;
+    a->browse_sidebar_focus = item;
+    browse_sidebar_ensure_visible(a);
+    browse_sync_input_focus(a);
+}
+
+static void browse_activate_top(app_t *a) {
+    if (!a)
+        return;
+    switch (a->browse_top_focus) {
+    case BROWSE_TOP_TV:
+    case BROWSE_TOP_MOVIES:
+    case BROWSE_TOP_SERIES: {
+        int item = a->browse_top_focus;
+        switch_content(a, (content_kind_t)item);
+        browse_focus_top(a, item);
+        break;
+    }
+    case BROWSE_TOP_SEARCH:
+        a->input_focus = INPUT_SEARCH;
+        break;
+    case BROWSE_TOP_FAVORITES:
+        a->favorites_only = !a->favorites_only;
+        rebuild_filter(a);
+        browse_focus_top(a, BROWSE_TOP_FAVORITES);
+        break;
+    case BROWSE_TOP_LISTS:
+        if (a->thumbs)
+            vip_thumbnail_scheduler_cancel_pending(a->thumbs);
+        clear_details_view(a);
+        refresh_profiles(a);
+        a->screen = SCREEN_LOGIN;
+        a->input_focus = INPUT_MODE;
+        snprintf(a->status, sizeof(a->status), "Escolha uma lista salva ou conecte outra");
+        break;
+    default:
+        break;
+    }
+}
+
+static void browse_activate_sidebar(app_t *a) {
+    if (!a)
+        return;
+    if (a->browse_sidebar_focus == -2 && a->series_episode_mode) {
+        return_from_episode_list(a);
+        browse_focus_sidebar(a, -1);
+        return;
+    }
+    if (a->browse_sidebar_focus == -1) {
+        choose_category(a, -1);
+        return;
+    }
+    if (a->browse_sidebar_focus >= 0 &&
+        (size_t)a->browse_sidebar_focus < ACTIVE_CATEGORIES(a).len)
+        choose_category(a, a->browse_sidebar_focus);
+}
+
 /* Switch content. */
 static void switch_content(app_t *a, content_kind_t kind) {
     if (!a || kind < CONTENT_LIVE || kind > CONTENT_SERIES)
@@ -1383,7 +1507,7 @@ static void switch_content(app_t *a, content_kind_t kind) {
     a->grid_scroll = 0;
     a->focused_filtered = 0;
     a->search[0] = '\0';
-    a->input_focus = INPUT_SEARCH;
+    browse_sync_input_focus(a);
     free(a->favorite_flags);
     a->favorite_flags = NULL;
     recalc_category_counts(a);
@@ -3197,7 +3321,7 @@ static void leave_player(app_t *a) {
     if (a->fullscreen_requested || a->fullscreen)
         set_fullscreen(a, false);
     a->screen = SCREEN_BROWSE;
-    a->input_focus = INPUT_SEARCH;
+    browse_focus_grid(a);
     a->timeline_dragging = false;
     rebuild_filter(a);
 }
@@ -5190,7 +5314,9 @@ static void handle_async(app_t *a) {
             a->search[0] = '\0';
             rebuild_filter(a);
             a->screen = SCREEN_BROWSE;
-            a->input_focus = INPUT_SEARCH;
+            a->browse_top_focus = (int)a->content_kind;
+            a->browse_sidebar_focus = -1;
+            browse_focus_grid(a);
             fprintf(stderr, "[catalog] %zu canais, %zu categorias\n", ACTIVE_CHANNELS(a).len,
                     ACTIVE_CATEGORIES(a).len);
             if (a->test_series) {
