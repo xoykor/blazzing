@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blazzing</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <main id="app">
+    <section id="screen-home" class="screen is-active" aria-label="Início">
+      <header class="hero">
+        <div>
+          <div class="eyebrow">Blazzing para LG webOS</div>
+          <h1>Seu conteúdo, direto na TV.</h1>
+          <p>Primeiro protótipo nativo para webOS.</p>
+        </div>
+        <div class="version-badge">webOS alpha 0.1</div>
+      </header>
+
+      <div class="action-grid">
+        <button id="action-pair" class="card focusable" type="button">
+          <span class="card-kicker">Celular</span>
+          <strong>Adicionar pelo celular</strong>
+          <span>Cria uma sessão cifrada pelo Worker do Blazzing.</span>
+        </button>
+
+        <button id="action-manual" class="card focusable" type="button">
+          <span class="card-kicker">Teste</span>
+          <strong>Abrir URL de stream</strong>
+          <span>Reproduz uma URL HTTP/HTTPS diretamente no player da TV.</span>
+        </button>
+
+        <button id="action-about" class="card focusable" type="button">
+          <span class="card-kicker">Projeto</span>
+          <strong>Arquitetura webOS</strong>
+          <span>M3U, Xtream e catálogo entram nas próximas etapas.</span>
+        </button>
+      </div>
+
+      <footer class="hint">Use as setas do controle e OK. Back retorna para a tela anterior.</footer>
+    </section>
+
+    <section id="screen-pair" class="screen" aria-label="Pareamento">
+      <div class="panel">
+        <div class="eyebrow">Pareamento seguro</div>
+        <h2>Adicionar pelo celular</h2>
+        <p id="pair-status">Preparando sessão…</p>
+        <div class="pair-box">
+          <div class="pair-label">URL da sessão</div>
+          <code id="pair-url">—</code>
+          <div class="pair-note">QR Code será adicionado no próximo passo. A sessão expira em 5 minutos.</div>
+        </div>
+        <button id="pair-cancel" class="secondary focusable" type="button">Cancelar</button>
+      </div>
+    </section>
+
+    <section id="screen-manual" class="screen" aria-label="Abrir stream">
+      <div class="panel">
+        <div class="eyebrow">Player</div>
+        <h2>Abrir URL de stream</h2>
+        <label for="manual-url">URL HTTP/HTTPS</label>
+        <input id="manual-url" class="focusable" type="url" inputmode="url"
+               placeholder="https://exemplo/stream.m3u8" autocomplete="off">
+        <div class="row">
+          <button id="manual-play" class="primary focusable" type="button">Reproduzir</button>
+          <button id="manual-back" class="secondary focusable" type="button">Voltar</button>
+        </div>
+        <p id="manual-status" class="status"></p>
+      </div>
+    </section>
+
+    <section id="screen-about" class="screen" aria-label="Sobre">
+      <div class="panel">
+        <div class="eyebrow">Primeiro milestone</div>
+        <h2>Blazzing webOS</h2>
+        <p>Esta base já separa navegação, player e pareamento. O próximo bloco é o catálogo M3U e o serviço de rede para contornar CORS de providers.</p>
+        <button id="about-back" class="secondary focusable" type="button">Voltar</button>
+      </div>
+    </section>
+
+    <section id="screen-player" class="screen player-screen" aria-label="Player">
+      <video id="video" playsinline></video>
+      <div id="player-overlay" class="player-overlay">
+        <div>
+          <div class="eyebrow">Reproduzindo</div>
+          <h2 id="player-title">Stream</h2>
+          <p id="player-status">Carregando…</p>
+        </div>
+        <button id="player-back" class="secondary focusable" type="button">Voltar</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="src/config.js"></script>
+  <script src="src/navigation.js"></script>
+  <script src="src/pairing.js"></script>
+  <script src="src/player.js"></script>
+  <script src="src/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,281 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #070b13;
+  color: #f5f7fb;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+body {
+  font-size: 24px;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.screen {
+  display: none;
+  width: 100vw;
+  height: 100vh;
+  padding: 64px 76px;
+  background:
+    radial-gradient(circle at 78% 12%, rgba(58, 128, 255, 0.18), transparent 34%),
+    linear-gradient(145deg, #070b13 0%, #0c1421 55%, #09111d 100%);
+}
+
+.screen.is-active {
+  display: block;
+}
+
+.hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 54px;
+}
+
+.eyebrow,
+.card-kicker,
+.pair-label {
+  color: #67adff;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  max-width: 980px;
+  margin-bottom: 16px;
+  font-size: 58px;
+  line-height: 1.05;
+}
+
+h2 {
+  margin: 10px 0 18px;
+  font-size: 46px;
+}
+
+.hero p,
+.panel p {
+  color: #9eb0c9;
+  line-height: 1.5;
+}
+
+.version-badge {
+  padding: 12px 18px;
+  border: 1px solid #2f4563;
+  border-radius: 999px;
+  color: #9eb0c9;
+  font-size: 17px;
+}
+
+.action-grid {
+  display: flex;
+  margin: 0 -12px;
+}
+
+.card {
+  width: calc(33.333% - 24px);
+  min-height: 290px;
+  margin: 0 12px;
+  padding: 28px;
+  text-align: left;
+  color: #f5f7fb;
+  background: #101a2a;
+  border: 2px solid #21324a;
+  border-radius: 22px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.23);
+}
+
+.card strong,
+.card span {
+  display: block;
+}
+
+.card strong {
+  margin: 22px 0 14px;
+  font-size: 30px;
+}
+
+.card span:last-child {
+  color: #96a9c1;
+  font-size: 20px;
+  line-height: 1.45;
+}
+
+.focusable {
+  outline: none;
+  transition: transform 110ms ease, border-color 110ms ease, box-shadow 110ms ease;
+}
+
+.focusable.is-focused,
+.focusable:focus {
+  border-color: #6eb4ff;
+  box-shadow: 0 0 0 5px rgba(82, 160, 255, 0.28), 0 28px 70px rgba(0, 0, 0, 0.28);
+  transform: scale(1.025);
+}
+
+.hint {
+  margin-top: 42px;
+  color: #63768e;
+  font-size: 17px;
+}
+
+.panel {
+  width: min(1100px, 100%);
+  margin: 70px auto 0;
+  padding: 42px;
+  background: rgba(14, 23, 37, 0.94);
+  border: 1px solid #243650;
+  border-radius: 24px;
+}
+
+.pair-box {
+  margin: 30px 0;
+  padding: 26px;
+  background: #090f19;
+  border: 1px solid #243650;
+  border-radius: 18px;
+}
+
+#pair-url {
+  display: block;
+  margin-top: 12px;
+  padding: 18px;
+  overflow-wrap: anywhere;
+  color: #d9e8ff;
+  background: #05080e;
+  border-radius: 12px;
+  font-size: 19px;
+  line-height: 1.45;
+}
+
+.pair-note,
+.status {
+  margin-top: 14px;
+  color: #8193aa;
+  font-size: 18px;
+}
+
+label {
+  display: block;
+  margin: 24px 0 10px;
+  color: #a9bad0;
+  font-size: 18px;
+}
+
+input {
+  width: 100%;
+  padding: 18px 20px;
+  color: #fff;
+  background: #080e18;
+  border: 2px solid #2a3d58;
+  border-radius: 14px;
+}
+
+.row {
+  display: flex;
+  margin-top: 24px;
+}
+
+.primary,
+.secondary {
+  min-width: 190px;
+  margin-right: 14px;
+  padding: 16px 22px;
+  border-radius: 13px;
+  border: 2px solid #2a3d58;
+  cursor: pointer;
+}
+
+.primary {
+  color: #06111f;
+  background: #69b1ff;
+  border-color: #69b1ff;
+  font-weight: 700;
+}
+
+.secondary {
+  color: #edf5ff;
+  background: #111c2c;
+}
+
+.player-screen {
+  padding: 0;
+  background: #000;
+}
+
+#video {
+  width: 100vw;
+  height: 100vh;
+  object-fit: contain;
+  background: #000;
+}
+
+.player-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 46px 68px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.88));
+}
+
+.player-overlay h2 {
+  margin-bottom: 6px;
+}
+
+.player-overlay p {
+  margin-bottom: 0;
+  color: #9fb0c4;
+}
+
+@media (max-width: 1366px) {
+  body {
+    font-size: 18px;
+  }
+
+  .screen {
+    padding: 38px 44px;
+  }
+
+  h1 {
+    font-size: 42px;
+  }
+
+  h2 {
+    font-size: 34px;
+  }
+
+  .card {
+    min-height: 220px;
+    padding: 22px;
+  }
+
+  .card strong {
+    font-size: 24px;
+  }
+
+  .card span:last-child {
+    font-size: 16px;
+  }
+}

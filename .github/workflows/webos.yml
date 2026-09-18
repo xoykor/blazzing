@@ -1,0 +1,56 @@
+name: webOS
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'webos/**'
+      - 'docs/WEBOS_ARCHITECTURE.md'
+      - '.github/workflows/webos.yml'
+  pull_request:
+    paths:
+      - 'webos/**'
+      - 'docs/WEBOS_ARCHITECTURE.md'
+      - '.github/workflows/webos.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate JSON metadata
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          appinfo = json.loads(Path("webos/app/appinfo.json").read_text())
+          required = {"id", "version", "vendor", "type", "main", "title", "icon", "requiredACG"}
+          missing = sorted(required - set(appinfo))
+          if missing:
+              raise SystemExit(f"Missing appinfo fields: {missing}")
+          if appinfo["type"] != "web":
+              raise SystemExit("webOS app type must be 'web'")
+          if appinfo["requiredACG"] != []:
+              raise SystemExit("Initial webOS milestone must not request privileged ACG groups")
+          PY
+
+      - name: Validate JavaScript syntax
+        run: |
+          for file in webos/app/src/*.js; do
+            node --check "$file"
+          done
+
+      - name: Validate required package files
+        run: |
+          test -f webos/app/index.html
+          test -f webos/app/icon.png
+          test -f webos/app/css/app.css
+          test -x webos/package.fish

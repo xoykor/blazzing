@@ -1,0 +1,10 @@
+{
+  "id": "io.github.xoykor.blazzing",
+  "version": "0.1.0",
+  "vendor": "xoykor",
+  "type": "web",
+  "main": "index.html",
+  "title": "Blazzing",
+  "icon": "icon.png",
+  "requiredACG": []
+}
