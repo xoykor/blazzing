@@ -192,6 +192,8 @@ static void send_form(vip_pairing_server_t *server, int fd) {
              "small{color:#91a0b7}</style></head><body><div class=\"card\">"
              "<h1>Adicionar playlist ao Blazzing</h1>"
              "<small>Envie uma URL M3U/M3U8 para este computador.</small>"
+             "<p><small>Use uma rede local confiavel. O pareamento usa HTTP local e o token evita envios "
+             "casuais, mas nao criptografa a URL da playlist.</small></p>"
              "<form method=\"post\" action=\"%s\">"
              "<label>Nome da lista (opcional)</label><input name=\"name\" maxlength=\"127\" autocomplete=\"off\">"
              "<label>URL M3U/M3U8</label><input name=\"url\" type=\"url\" maxlength=\"511\" required autofocus placeholder=\"https://.../lista.m3u8\">"
