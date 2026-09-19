@@ -136,6 +136,26 @@ assert.strictEqual(series.items[0].seriesId, "77");
 assert.strictEqual(series.items[0].group, "Drama");
 assert(series.items[0].favoriteKey.endsWith(":series:77"));
 
+const seriesMeta = xtream.buildSeriesMetadata({
+  info: {
+    name: "Show Details",
+    plot: "A test series.",
+    genre: "Sci-Fi",
+    release_date: "2024",
+    rating: "8.8",
+    episode_run_time: "45",
+    cover: "https://img/show-details.jpg"
+  }
+}, series.items[0]);
+
+assert.strictEqual(seriesMeta.title, "Show Details");
+assert.strictEqual(seriesMeta.plot, "A test series.");
+assert.strictEqual(seriesMeta.genre, "Sci-Fi");
+assert.strictEqual(seriesMeta.year, "2024");
+assert.strictEqual(seriesMeta.rating, "8.8");
+assert.strictEqual(seriesMeta.duration, "45");
+assert.strictEqual(seriesMeta.logo, "https://img/show-details.jpg");
+
 const episodes = xtream.buildEpisodeCatalog(
   {
     episodes: {
