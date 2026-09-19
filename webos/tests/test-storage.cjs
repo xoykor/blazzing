@@ -51,6 +51,14 @@ assert.strictEqual(storage.toggle(key, {
 
 assert.strictEqual(storage.isFavorite(key), true);
 assert.strictEqual(storage.count(), 1);
+assert.deepStrictEqual(
+  Array.from(storage.favoriteKeys("m3u:" + fp + ":")),
+  [key]
+);
+assert.strictEqual(
+  storage.favoriteKeys("xtream:").length,
+  0
+);
 
 const serialized = Object.values(data).join("\n");
 assert(serialized.includes("News"));
