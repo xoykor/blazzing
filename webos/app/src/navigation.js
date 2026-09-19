@@ -51,7 +51,13 @@
   }
 
   function dispatchBoundary(dx, dy) {
-    dispatchBoundary(dx, dy);
+    document.dispatchEvent(new CustomEvent("blazzing-navigation-boundary", {
+      detail: {
+        dx: dx,
+        dy: dy,
+        origin: current
+      }
+    }));
   }
 
   function catalogWindowBoundary(dx, dy) {
