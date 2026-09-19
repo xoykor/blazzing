@@ -61,7 +61,9 @@ responsible for the sources they add to the application.
 - Phone pairing uses encrypted payloads and the TV deletes the pairing session
   after successful pickup.
 
-A final privacy policy URL/text should be prepared before store submission.
+A privacy policy draft is available in [PRIVACY.md](PRIVACY.md). Before store
+submission, publish it at a stable public URL and replace the placeholder contact
+section.
 
 ## UX Scenario draft
 
@@ -119,7 +121,8 @@ Before submission, verify/provide:
 - [ ] Required Seller Lounge screenshots/store artwork.
 - [ ] Current LG App Self Checklist completed with real results.
 - [ ] Current LG UX Scenario document completed.
-- [ ] Privacy policy URL/text.
+- [x] Privacy policy text draft.
+- [ ] Stable public privacy policy URL + final support contact.
 - [ ] QA test credentials where a provider requires authentication.
 - [ ] Supported webOS versions based on actual Simulator/TV results.
 - [ ] Final CI-produced IPK.
