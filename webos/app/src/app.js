@@ -12,6 +12,7 @@
   var catalogQuery = "";
   var catalogStack = [];
   var catalogRequestId = 0;
+  var catalogFocusRequest = "";
   var activeProgressKey = "";
   var activePlayback = null;
   var vodEntry = null;
@@ -723,7 +724,22 @@
   }
 
   function focusCatalogLater() {
+    var request = catalogFocusRequest;
+    catalogFocusRequest = "";
+
     setTimeout(function () {
+      var cards;
+
+      if (request) {
+        cards = document.querySelectorAll(".screen.is-active .media-card.focusable:not([disabled])");
+        if (cards.length) {
+          global.BlazzingNavigation.setFocus(
+            request === "last" ? cards[cards.length - 1] : cards[0]
+          );
+          return;
+        }
+      }
+
       global.BlazzingNavigation.focusFirst();
     }, 0);
   }
@@ -1540,6 +1556,49 @@
   });
 
   byId("catalog-back").addEventListener("click", backFromCatalog);
+
+  document.addEventListener("blazzing-navigation-boundary", function (event) {
+    var detail = event && event.detail ? event.detail : {};
+    var origin = detail.origin;
+    var matches;
+    var totalPages;
+
+    if (activeScreen !== "catalog" ||
+        !origin ||
+        !origin.classList ||
+        !origin.classList.contains("media-card")) {
+      return;
+    }
+
+    if (Number(detail.dy || 0) > 0) {
+      if (catalog && catalog.lazyM3U) {
+        if (!catalog.hasMore) {
+          return;
+        }
+
+        catalogPage += 1;
+        catalogFocusRequest = "first";
+        renderCatalogGroup(selectedGroup, true);
+        return;
+      }
+
+      matches = matchingCatalogItems(selectedGroup);
+      totalPages = Math.max(1, Math.ceil(matches.length / catalogPageSize));
+      if (catalogPage < totalPages - 1) {
+        catalogPage += 1;
+        catalogFocusRequest = "first";
+        renderCatalogGroup(selectedGroup, true);
+      }
+      return;
+    }
+
+    if (Number(detail.dy || 0) < 0 && catalogPage > 0) {
+      catalogPage -= 1;
+      catalogFocusRequest = "last";
+      renderCatalogGroup(selectedGroup, true);
+    }
+  });
+
 
   byId("player-retry").addEventListener("click", function () {
     if (!activePlayback) {
