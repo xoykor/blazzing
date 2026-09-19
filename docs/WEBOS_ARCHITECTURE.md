@@ -70,6 +70,8 @@ Large-playlist behavior:
 - catalog pages are queried from disk on demand;
 - only 48 media cards are rendered at a time;
 - temporary playlist sessions expire after 12 hours and are also released when leaving the catalog;
+- if a paged M3U session disappears while the catalog is open, the app re-downloads and reindexes the source automatically;
+- the source URL used for that recovery stays in memory only and is never persisted by the favorites/progress store;
 - Xtream/API JSON responses keep the separate 8 MiB safety cap.
 
 ## Xtream
@@ -117,12 +119,18 @@ playlist and returns only one page. The search value remains part of catalog
 navigation state, so opening an Xtream series and pressing Back restores the
 previous query, category and page.
 
-## Playback progress
+## Playback and failover
 
 Movies and Xtream episodes persist only a playback timestamp keyed by the same
 opaque item identifier used by favorites. Progress is checkpointed approximately
 every 15 seconds and again when leaving the player. Items within 30 seconds of the
 end are treated as completed and their checkpoint is removed.
+
+For Xtream Live/VOD entries that provide a `direct_source`, the catalog also keeps
+the provider-generated stream URL in memory as a fallback. If the direct source
+fails, the player automatically tries the generated Xtream route. If all known
+routes fail, the player exposes a remote-friendly **Tentar novamente** action and
+retries from the saved playback position when applicable.
 
 ## Compatibility
 
@@ -171,7 +179,7 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 - [ ] series/live metadata
 - [ ] artwork cache
 - [ ] Pluto
-- [ ] failover UX
+- [x] failover UX
 
 ### M5 distribution
 - [ ] simulator matrix
