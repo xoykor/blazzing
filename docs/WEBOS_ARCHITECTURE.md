@@ -32,7 +32,7 @@ Cloudflare Worker / Durable Object
      |
 LG webOS app
      |
-     +--> packaged JS network service --> M3U / Xtream API
+     +--> packaged JS network service --> M3U / Xtream / Pluto APIs
      |
      +--> direct media URL -----------> LG media pipeline
 ~~~
@@ -143,6 +143,21 @@ fails, the player automatically tries the generated Xtream route. If all known
 routes fail, the player exposes a remote-friendly **Tentar novamente** action and
 retries from the saved playback position when applicable.
 
+## Pluto TV
+
+Live Pluto TV is integrated directly through the packaged webOS network service.
+The service creates a regional Pluto session using the current boot endpoint,
+loads the regional live-channel catalogue, and keeps the session token only in
+service memory. The UI catalog stores channel IDs and safe display metadata only.
+
+When a channel is opened, the app asks the service for a fresh HLS URL built from
+the stitcher host returned by Pluto boot, the channel ID, the session JWT and the
+required v2 stitcher parameters. The JWT is therefore not persisted in favorites,
+catalog storage or localStorage.
+
+The implementation prefers the current guide-v2 channel API and falls back to
+the legacy channel endpoint when necessary. Pluto VOD is not part of this alpha.
+
 ## Compatibility
 
 The app avoids unnecessary modern syntax because older LG TVs use older browser
@@ -190,7 +205,7 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 - [x] series metadata
 - [x] live metadata
 - [x] artwork cache
-- [ ] Pluto
+- [x] Pluto Live
 - [x] failover UX
 
 ### M5 distribution
