@@ -208,7 +208,7 @@
             rawGroup: rawGroup,
             categoryId: categoryId(group, kind),
             categoryName: group,
-            logo: pending.logo || "",
+            logo: pending.logo ? resolveUrl(source, pending.logo) : "",
             url: resolved,
             episodeInfo: episode
         };
@@ -549,7 +549,7 @@
                         kind: "series",
                         id: id,
                         name: entry.name || "Série",
-                        logo: entry.cover || entry.stream_icon || "",
+                        logo: resolveUrl(self.activeServer, entry.cover || entry.stream_icon || ""),
                         categoryId: categoryValue,
                         categoryName: categoryMap[rawCategoryValue] || "Outros"
                     };
@@ -561,7 +561,7 @@
                         kind: kind,
                         id: id,
                         name: entry.name || "Item",
-                        logo: entry.stream_icon || "",
+                        logo: resolveUrl(self.activeServer, entry.stream_icon || ""),
                         categoryId: categoryValue,
                         categoryName: categoryMap[rawCategoryValue] || "Outros",
                         url: self.streamUrl(kind, id, entry.container_extension)
