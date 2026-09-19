@@ -53,6 +53,9 @@ assert.strictEqual(
   "http://provider.example:8080/live/user%20name/p%40ss/1.ts"
 );
 assert.strictEqual(catalog.items[1].url, "https://cdn.example/direct.m3u8");
+assert(catalog.items[0].favoriteKey.startsWith("xtream:"));
+assert(!catalog.items[0].favoriteKey.includes("user name"));
+assert(!catalog.items[0].favoriteKey.includes("p@ss"));
 
 const vod = xtream.buildVodCatalog(
   [
@@ -90,13 +93,15 @@ const series = xtream.buildSeriesCatalog(
   ],
   [
     { series_id: 77, name: "Show One", category_id: "40", cover: "https://img/show.jpg" }
-  ]
+  ],
+  creds
 );
 
 assert.strictEqual(series.items.length, 1);
 assert.strictEqual(series.items[0].kind, "series");
 assert.strictEqual(series.items[0].seriesId, "77");
 assert.strictEqual(series.items[0].group, "Drama");
+assert(series.items[0].favoriteKey.endsWith(":series:77"));
 
 const episodes = xtream.buildEpisodeCatalog(
   {
