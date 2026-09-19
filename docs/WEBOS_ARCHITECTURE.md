@@ -179,6 +179,7 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 - [x] app metadata
 - [x] remote navigation
 - [x] Back
+- [x] entry-page Back delegates to `webOS.platformBack()`
 - [x] player
 - [x] encrypted pairing
 - [x] local QR
