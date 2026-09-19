@@ -222,7 +222,8 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 ### M5 distribution
 - [ ] simulator matrix executed
 - [ ] real LG TV matrix executed
-- [ ] store artwork
+- [ ] store artwork (400×400 Seller Lounge icon/screenshots)
+- [x] packaged 80×80 + 130×130 app icons
 - [x] Seller Lounge metadata/UX draft
 - [x] privacy policy draft
 - [x] QA checklist authored
