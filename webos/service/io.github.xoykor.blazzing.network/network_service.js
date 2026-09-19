@@ -121,7 +121,8 @@ function fetchText(target, redirectsLeft, callback) {
     path: parsed.path,
     headers: {
       "User-Agent": "Blazzing-webOS/0.9",
-      "Accept": "application/json, application/x-mpegURL, application/vnd.apple.mpegurl, text/plain, */*"
+      "Accept": "application/json, application/x-mpegURL, application/vnd.apple.mpegurl, text/plain, */*",
+      "Accept-Encoding": "identity"
     }
   }, function (response) {
     var chunks = [];
@@ -206,7 +207,8 @@ function downloadM3U(target, redirectsLeft, sessionId, callback) {
     path: parsed.path,
     headers: {
       "User-Agent": "Blazzing-webOS/0.9",
-      "Accept": "application/x-mpegURL, application/vnd.apple.mpegurl, text/plain, */*"
+      "Accept": "application/x-mpegURL, application/vnd.apple.mpegurl, text/plain, */*",
+      "Accept-Encoding": "identity"
     }
   }, function (response) {
     var location;
