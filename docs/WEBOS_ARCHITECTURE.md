@@ -76,6 +76,7 @@ Implemented:
 - `get_live_categories`;
 - `get_live_streams`;
 - VOD categories and streams;
+- VOD detail metadata through `get_vod_info`;
 - series, seasons and episodes;
 - category normalization;
 - `direct_source` preference;
@@ -158,7 +159,7 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 - [x] favorites
 - [x] progress
 - [x] search
-- [ ] metadata
+- [x] VOD metadata\n- [ ] series/live metadata
 - [ ] artwork cache
 - [ ] Pluto
 - [ ] failover UX
