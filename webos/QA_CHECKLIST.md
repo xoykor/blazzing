@@ -10,6 +10,7 @@ Use this checklist before removing the draft status from the webOS pull request.
 - [ ] GitHub Actions **CI** workflow passes.
 - [ ] The workflow publishes a `blazzing-webos-ipk` artifact.
 - [ ] The IPK contains both the app and `io.github.xoykor.blazzing.network`.
+- [ ] Release validation confirms `icon.png` is 80×80 and `largeicon.png` is 130×130.
 
 ## Simulator matrix
 
