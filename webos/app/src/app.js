@@ -15,6 +15,8 @@
   var activeProgressKey = "";
   var activePlayback = null;
   var vodEntry = null;
+  var seriesEntry = null;
+  var seriesPayload = null;
   var FAVORITES_GROUP = "__favorites__";
 
   function byId(id) {
@@ -75,6 +77,8 @@
     activeProgressKey = "";
     activePlayback = null;
     vodEntry = null;
+    seriesEntry = null;
+    seriesPayload = null;
     releaseRemoteCatalog();
     catalog = null;
     catalogStack = [];
@@ -338,6 +342,109 @@
     });
   }
 
+  function showSeriesMetadata(entry, metadata) {
+    var image = byId("series-poster");
+    var details = [];
+    var logo = String(metadata.logo || entry.logo || "");
+
+    seriesEntry = entry;
+    byId("series-title").textContent =
+      metadata.title || entry.title || "Série";
+    byId("series-plot").textContent =
+      metadata.plot || "Sem sinopse fornecida pelo provider.";
+
+    if (metadata.year) {
+      details.push(metadata.year);
+    }
+    if (metadata.genre) {
+      details.push(metadata.genre);
+    }
+    if (metadata.rating) {
+      details.push("Nota " + metadata.rating);
+    }
+    if (metadata.duration) {
+      details.push(metadata.duration + " min");
+    }
+
+    byId("series-meta").textContent =
+      details.join(" • ") || entry.group || "";
+
+    image.removeAttribute("src");
+    image.style.display = "none";
+
+    if (/^https?:\/\//i.test(logo)) {
+      image.onload = function () {
+        image.style.display = "block";
+      };
+      image.onerror = function () {
+        image.style.display = "none";
+      };
+      image.src = logo;
+    }
+
+    showScreen("series");
+  }
+
+  function openSeriesDetails(entry) {
+    var fallback = global.BlazzingXtream.buildSeriesMetadata({}, entry);
+
+    seriesPayload = null;
+    showSeriesMetadata(entry, fallback);
+    byId("series-status").textContent = "Carregando detalhes…";
+    byId("series-episodes").disabled = true;
+
+    if (!xtreamSession || !entry || !entry.seriesId) {
+      byId("series-status").textContent =
+        "Não há detalhes adicionais disponíveis.";
+      return;
+    }
+
+    global.BlazzingNetwork.xtreamRequest(
+      xtreamSession,
+      "get_series_info",
+      { seriesId: entry.seriesId }
+    ).then(function (payload) {
+      seriesPayload = payload;
+      showSeriesMetadata(
+        entry,
+        global.BlazzingXtream.buildSeriesMetadata(payload, entry)
+      );
+      byId("series-status").textContent = "";
+      byId("series-episodes").disabled = false;
+    }).catch(function (error) {
+      byId("series-status").textContent =
+        error && error.message ?
+          error.message :
+          "Falha ao carregar detalhes da série.";
+      byId("series-episodes").disabled = true;
+    });
+  }
+
+  function openSeriesEpisodes() {
+    var parsed;
+
+    if (!seriesEntry || !seriesPayload || !xtreamSession) {
+      return;
+    }
+
+    try {
+      parsed = global.BlazzingXtream.buildEpisodeCatalog(
+        seriesPayload,
+        xtreamSession
+      );
+    } catch (error) {
+      byId("series-status").textContent =
+        error && error.message ?
+          error.message :
+          "Falha ao montar os episódios.";
+      return;
+    }
+
+    pushCatalogState();
+    byId("catalog-provider").textContent = "Xtream • Série";
+    renderCatalog(parsed, seriesEntry.title);
+  }
+
   function returnToCatalog() {
     if (catalog) {
       showScreen("catalog");
@@ -550,7 +657,7 @@
       button.addEventListener("click", (function (entry) {
         return function () {
           if (entry.kind === "series") {
-            openSeries(entry);
+            openSeriesDetails(entry);
           } else if (entry.kind === "vod") {
             openVod(entry);
           } else {
@@ -935,31 +1042,6 @@
     });
   }
 
-  function openSeries(entry) {
-    if (!xtreamSession || !entry || !entry.seriesId) {
-      return;
-    }
-
-    byId("catalog-summary").textContent = "Carregando episódios…";
-
-    global.BlazzingNetwork.xtreamRequest(
-      xtreamSession,
-      "get_series_info",
-      { seriesId: entry.seriesId }
-    ).then(function (payload) {
-      var parsed = global.BlazzingXtream.buildEpisodeCatalog(
-        payload,
-        xtreamSession
-      );
-
-      pushCatalogState();
-      byId("catalog-provider").textContent = "Xtream • Série";
-      renderCatalog(parsed, entry.title);
-    }).catch(function (error) {
-      byId("catalog-summary").textContent =
-        error && error.message ? error.message : "Falha ao carregar episódios.";
-    });
-  }
 
   function startPairing() {
     byId("pair-status").textContent = "Criando sessão segura…";
@@ -1152,6 +1234,8 @@
   });
 
   byId("vod-back").addEventListener("click", returnToCatalog);
+  byId("series-back").addEventListener("click", returnToCatalog);
+  byId("series-episodes").addEventListener("click", openSeriesEpisodes);
 
   byId("catalog-search-apply").addEventListener("click", function () {
     catalogQuery = byId("catalog-search").value.trim().toLowerCase();
@@ -1251,7 +1335,7 @@
       return;
     }
 
-    if (activeScreen === "vod") {
+    if (activeScreen === "vod" || activeScreen === "series") {
       returnToCatalog();
       return;
     }
