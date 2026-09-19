@@ -107,5 +107,19 @@ assert(
   appSource.includes("webOS.platformBack"),
   "Home Back must delegate to webOS.platformBack"
 );
+assert(
+  html.includes('id="player-toggle"') &&
+  appSource.includes('byId("player-toggle").addEventListener("click"'),
+  "player must expose a remote- and pointer-operable Play/Pause control"
+);
+const playerSource = fs.readFileSync(
+  path.join(__dirname, "..", "app", "src", "player.js"),
+  "utf8"
+);
+assert(
+  playerSource.includes("element.onpause") &&
+  playerSource.includes("isPaused: isPaused"),
+  "player must report paused state to the on-screen control"
+);
 
 console.log("UI contract tests passed");
