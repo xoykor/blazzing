@@ -225,3 +225,5 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 - [ ] store artwork
 - [ ] Seller Lounge metadata
 - [ ] QA checklist
+- [x] CI release metadata validation
+- [x] CI-generated installable IPK artifact
