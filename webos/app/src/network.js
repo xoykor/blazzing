@@ -247,6 +247,42 @@
     });
   }
 
+  function plutoLive() {
+    if (!serviceAvailable()) {
+      return Promise.reject(new Error(
+        "Pluto TV requer o serviço webOS empacotado."
+      ));
+    }
+
+    return serviceRequest("plutoLive", {}).then(function (response) {
+      return {
+        channels: Array.isArray(response.channels) ? response.channels : [],
+        categories: Array.isArray(response.categories) ? response.categories : [],
+        mode: String(response.mode || "")
+      };
+    });
+  }
+
+  function plutoStream(channelId) {
+    if (!serviceAvailable()) {
+      return Promise.reject(new Error(
+        "Pluto TV requer o serviço webOS empacotado."
+      ));
+    }
+
+    return serviceRequest("plutoStream", {
+      channelId: String(channelId || "")
+    }).then(function (response) {
+      var url = String(response.url || "");
+
+      if (!/^https?:\/\//i.test(url)) {
+        throw new Error("O serviço webOS retornou stream Pluto inválido.");
+      }
+
+      return url;
+    });
+  }
+
   function xtreamRequest(creds, action, params) {
     if (serviceAvailable()) {
       return serviceRequest("xtreamRequest", {
@@ -290,6 +326,8 @@
     queryM3U: queryM3U,
     releaseM3U: releaseM3U,
     fetchArtwork: fetchArtwork,
+    plutoLive: plutoLive,
+    plutoStream: plutoStream,
     xtreamRequest: xtreamRequest
   };
 }(window));
