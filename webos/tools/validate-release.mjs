@@ -24,6 +24,7 @@ const requiredAppFields = [
   "main",
   "title",
   "icon",
+  "largeIcon",
   "requiredACG"
 ];
 
@@ -70,6 +71,7 @@ if (!semver.test(app.version)) {
 const requiredFiles = [
   "app/index.html",
   "app/icon.png",
+  "app/largeicon.png",
   "app/css/app.css",
   "app/vendor/webOSTV.js",
   "app/vendor/webOSTV-dev.js",
@@ -86,6 +88,42 @@ for (const relativePath of requiredFiles) {
     throw new Error("Missing release input: " + relativePath);
   }
 }
+
+function pngSize(relativePath) {
+  const file = fs.readFileSync(path.join(root, relativePath));
+  const signature = "89504e470d0a1a0a";
+
+  if (file.length < 24 || file.subarray(0, 8).toString("hex") !== signature) {
+    throw new Error("Expected PNG file: " + relativePath);
+  }
+
+  return {
+    width: file.readUInt32BE(16),
+    height: file.readUInt32BE(20)
+  };
+}
+
+function requirePngSize(relativePath, width, height) {
+  const actual = pngSize(relativePath);
+
+  if (actual.width !== width || actual.height !== height) {
+    throw new Error(
+      relativePath + " must be " + width + "x" + height +
+      " PNG, got " + actual.width + "x" + actual.height
+    );
+  }
+}
+
+if (app.icon !== "icon.png") {
+  throw new Error("appinfo icon must reference icon.png");
+}
+
+if (app.largeIcon !== "largeicon.png") {
+  throw new Error("appinfo largeIcon must reference largeicon.png");
+}
+
+requirePngSize("app/icon.png", 80, 80);
+requirePngSize("app/largeicon.png", 130, 130);
 
 console.log(
   "webOS release metadata valid — " +
