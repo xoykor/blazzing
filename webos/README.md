@@ -22,7 +22,7 @@ Implemented:
 - direct browser fallback for Simulator development;
 - Xtream authentication;
 - optional remembered Xtream server + username, never the password;
-- Xtream live categories and channels;
+- Xtream live categories/channels with channel number and catch-up metadata;
 - Xtream VOD plus movie detail metadata;
 - Xtream series detail metadata, seasons and episodes;
 - catalog search by title/category;
