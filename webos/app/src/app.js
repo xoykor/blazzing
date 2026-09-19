@@ -11,6 +11,7 @@
   var catalogPageSize = 48;
   var catalogQuery = "";
   var catalogStack = [];
+  var catalogRequestId = 0;
   var activeProgressKey = "";
   var vodEntry = null;
   var FAVORITES_GROUP = "__favorites__";
@@ -60,13 +61,22 @@
     );
   }
 
+  function releaseRemoteCatalog() {
+    if (catalog && catalog.lazyM3U && catalog.sessionId) {
+      global.BlazzingNetwork.releaseM3U(catalog.sessionId);
+    }
+  }
+
   function showHome() {
     stopPairing();
     savePlayerProgress();
     global.BlazzingPlayer.stop();
     activeProgressKey = "";
     vodEntry = null;
+    releaseRemoteCatalog();
+    catalog = null;
     catalogStack = [];
+    catalogRequestId += 1;
     xtreamSession = null;
     byId("xtream-password").value = "";
     showScreen("home");
@@ -245,6 +255,10 @@
     var item;
     var groupMatches;
 
+    if (catalog && catalog.lazyM3U) {
+      return catalog.currentItems || [];
+    }
+
     for (i = 0; i < catalog.items.length; i += 1) {
       item = catalog.items[i];
       groupMatches = group === FAVORITES_GROUP ?
@@ -257,6 +271,26 @@
     }
 
     return matches;
+  }
+
+  function remoteFavoriteIds() {
+    var prefix;
+    var keys;
+    var ids = [];
+    var i;
+
+    if (!catalog || !catalog.lazyM3U || !catalog.sourceKey) {
+      return ids;
+    }
+
+    prefix = "m3u:" + catalog.sourceKey + ":";
+    keys = global.BlazzingStorage.favoriteKeys(prefix);
+
+    for (i = 0; i < keys.length && i < 5000; i += 1) {
+      ids.push(keys[i].slice(prefix.length));
+    }
+
+    return ids;
   }
 
   function renderArtwork(button, item) {
@@ -335,6 +369,13 @@
 
     updateFavoriteBadge(button, item);
 
+    if (catalog && catalog.lazyM3U) {
+      if (selectedGroup === FAVORITES_GROUP && !favorite) {
+        renderCatalogGroup(FAVORITES_GROUP);
+      }
+      return true;
+    }
+
     if (selectedGroup === FAVORITES_GROUP && !favorite) {
       renderCatalogGroup(FAVORITES_GROUP, true);
     } else {
@@ -347,37 +388,35 @@
     return true;
   }
 
-  function renderCatalogGroup(group, preservePage) {
+  function selectCatalogGroupButton(group) {
+    Array.prototype.forEach.call(
+      document.querySelectorAll(".group-button"),
+      function (node) {
+        if (node.getAttribute("data-group") === group) {
+          node.classList.add("is-selected");
+        } else {
+          node.classList.remove("is-selected");
+        }
+      }
+    );
+  }
+
+  function focusCatalogLater() {
+    setTimeout(function () {
+      global.BlazzingNavigation.focusFirst();
+    }, 0);
+  }
+
+  function renderCatalogCards(items) {
     var container = byId("catalog-items");
-    var matches;
-    var totalPages;
-    var start;
-    var end;
     var i;
     var item;
     var button;
 
-    selectedGroup = group;
-    if (!preservePage) {
-      catalogPage = 0;
-    }
-
-    matches = matchingCatalogItems(group);
-    totalPages = Math.max(1, Math.ceil(matches.length / catalogPageSize));
-
-    if (catalogPage >= totalPages) {
-      catalogPage = totalPages - 1;
-    }
-    if (catalogPage < 0) {
-      catalogPage = 0;
-    }
-
-    start = catalogPage * catalogPageSize;
-    end = Math.min(matches.length, start + catalogPageSize);
     container.innerHTML = "";
 
-    for (i = start; i < end; i += 1) {
-      item = matches[i];
+    for (i = 0; i < items.length; i += 1) {
+      item = items[i];
       button = document.createElement("button");
       button.type = "button";
       button.className = "media-card focusable";
@@ -405,27 +444,141 @@
       }(item)));
       container.appendChild(button);
     }
+  }
+
+  function renderRemoteCatalogGroup(group, preservePage) {
+    var currentCatalog = catalog;
+    var filterChanged;
+    var startOffset;
+    var favoriteIds;
+    var requestId;
+
+    selectedGroup = group;
+    filterChanged =
+      currentCatalog.lastGroup !== group ||
+      currentCatalog.lastQuery !== catalogQuery;
+
+    if (!preservePage || filterChanged) {
+      catalogPage = 0;
+      currentCatalog.pageOffsets = [0];
+    }
+
+    if (!currentCatalog.pageOffsets) {
+      currentCatalog.pageOffsets = [0];
+    }
+
+    startOffset = Number(currentCatalog.pageOffsets[catalogPage] || 0);
+    favoriteIds = group === FAVORITES_GROUP ? remoteFavoriteIds() : [];
+    requestId = ++catalogRequestId;
+
+    byId("catalog-summary").textContent = "Carregando página…";
+    byId("catalog-prev").disabled = true;
+    byId("catalog-next").disabled = true;
+    selectCatalogGroupButton(group);
+
+    global.BlazzingNetwork.queryM3U(currentCatalog.sessionId, {
+      startOffset: startOffset,
+      limit: catalogPageSize,
+      group: group === FAVORITES_GROUP ? "" : group,
+      query: catalogQuery,
+      favoritesOnly: group === FAVORITES_GROUP,
+      favoriteIds: favoriteIds
+    }).then(function (result) {
+      var i;
+      var prefix;
+
+      if (requestId !== catalogRequestId || catalog !== currentCatalog) {
+        return;
+      }
+
+      if (!result.items.length && catalogPage > 0) {
+        catalogPage -= 1;
+        renderRemoteCatalogGroup(group, true);
+        return;
+      }
+
+      prefix = "m3u:" + currentCatalog.sourceKey + ":";
+      for (i = 0; i < result.items.length; i += 1) {
+        result.items[i].favoriteKey = prefix + result.items[i].itemId;
+      }
+
+      currentCatalog.currentItems = result.items;
+      currentCatalog.hasMore = result.hasMore;
+      currentCatalog.lastGroup = group;
+      currentCatalog.lastQuery = catalogQuery;
+
+      if (result.hasMore) {
+        currentCatalog.pageOffsets[catalogPage + 1] = result.nextOffset;
+      }
+
+      renderCatalogCards(result.items);
+
+      if (!group && !catalogQuery) {
+        byId("catalog-summary").textContent =
+          currentCatalog.totalItems + " item(ns) — página " +
+          (catalogPage + 1);
+      } else {
+        byId("catalog-summary").textContent =
+          result.items.length + " item(ns) nesta página — página " +
+          (catalogPage + 1);
+      }
+
+      byId("catalog-prev").disabled = catalogPage <= 0;
+      byId("catalog-next").disabled = !result.hasMore;
+      focusCatalogLater();
+    }).catch(function (error) {
+      if (requestId !== catalogRequestId || catalog !== currentCatalog) {
+        return;
+      }
+
+      byId("catalog-summary").textContent =
+        error && error.message ?
+          error.message :
+          "Falha ao consultar a playlist.";
+      byId("catalog-prev").disabled = catalogPage <= 0;
+      byId("catalog-next").disabled = true;
+    });
+  }
+
+  function renderCatalogGroup(group, preservePage) {
+    var matches;
+    var totalPages;
+    var start;
+    var end;
+
+    if (catalog && catalog.lazyM3U) {
+      renderRemoteCatalogGroup(group, preservePage);
+      return;
+    }
+
+    selectedGroup = group;
+    if (!preservePage) {
+      catalogPage = 0;
+    }
+
+    matches = matchingCatalogItems(group);
+    totalPages = Math.max(1, Math.ceil(matches.length / catalogPageSize));
+
+    if (catalogPage >= totalPages) {
+      catalogPage = totalPages - 1;
+    }
+    if (catalogPage < 0) {
+      catalogPage = 0;
+    }
+
+    start = catalogPage * catalogPageSize;
+    end = Math.min(matches.length, start + catalogPageSize);
+
+    renderCatalogCards(matches.slice(start, end));
 
     byId("catalog-summary").textContent =
-      matches.length + " item(ns) — página " + (catalogPage + 1) + " de " + totalPages;
+      matches.length + " item(ns) — página " +
+      (catalogPage + 1) + " de " + totalPages;
 
     byId("catalog-prev").disabled = catalogPage <= 0;
     byId("catalog-next").disabled = catalogPage >= totalPages - 1;
-
-    Array.prototype.forEach.call(
-      document.querySelectorAll(".group-button"),
-      function (node) {
-        if (node.getAttribute("data-group") === group) {
-          node.classList.add("is-selected");
-        } else {
-          node.classList.remove("is-selected");
-        }
-      }
-    );
-
-    setTimeout(function () {
-      global.BlazzingNavigation.focusFirst();
-    }, 0);
+    selectCatalogGroupButton(group);
+    focusCatalogLater();
   }
 
   function renderCatalog(parsed, name, restoreState) {
@@ -523,31 +676,66 @@
       return Promise.resolve();
     }
 
-    byId("m3u-status").textContent = "Baixando playlist…";
+    byId("m3u-status").textContent =
+      "Baixando e indexando playlist (até 128 MiB)…";
     showScreen("m3u");
 
     return global.BlazzingNetwork.fetchM3U(url).then(function (result) {
       var parsed;
-
-      byId("m3u-status").textContent = "Processando playlist…";
-      parsed = global.BlazzingM3U.parse(result.text, result.finalUrl || url);
-
-      var sourceKey = global.BlazzingStorage.fingerprint(result.finalUrl || url);
+      var sourceKey;
       var itemIndex;
-      for (itemIndex = 0; itemIndex < parsed.items.length; itemIndex += 1) {
-        parsed.items[itemIndex].favoriteKey =
-          "m3u:" + sourceKey + ":" +
-          global.BlazzingStorage.fingerprint(
-            parsed.items[itemIndex].url + "|" + parsed.items[itemIndex].title
-          );
-      }
 
-      if (!parsed.items.length) {
-        throw new Error("A playlist não contém itens reproduzíveis.");
+      sourceKey = global.BlazzingStorage.fingerprint(
+        result.finalUrl || url
+      );
+
+      if (result.mode === "paged-service") {
+        if (!result.itemCount) {
+          global.BlazzingNetwork.releaseM3U(result.sessionId);
+          throw new Error("A playlist não contém itens reproduzíveis.");
+        }
+
+        releaseRemoteCatalog();
+        parsed = {
+          items: [],
+          groups: result.groups,
+          lazyM3U: true,
+          sessionId: result.sessionId,
+          sourceKey: sourceKey,
+          totalItems: result.itemCount,
+          totalBytes: result.totalBytes,
+          pageOffsets: [0],
+          currentItems: [],
+          hasMore: false,
+          lastGroup: null,
+          lastQuery: null
+        };
+      } else {
+        byId("m3u-status").textContent = "Processando playlist…";
+        parsed = global.BlazzingM3U.parse(
+          result.text,
+          result.finalUrl || url
+        );
+
+        for (itemIndex = 0; itemIndex < parsed.items.length; itemIndex += 1) {
+          parsed.items[itemIndex].favoriteKey =
+            "m3u:" + sourceKey + ":" +
+            global.BlazzingStorage.fingerprint(
+              parsed.items[itemIndex].url + "|" +
+              parsed.items[itemIndex].title
+            );
+        }
+
+        if (!parsed.items.length) {
+          throw new Error("A playlist não contém itens reproduzíveis.");
+        }
       }
 
       catalogStack = [];
-      byId("catalog-provider").textContent = "M3U";
+      byId("catalog-provider").textContent =
+        result.mode === "paged-service" ?
+          "M3U • paginado" :
+          "M3U";
       renderCatalog(parsed, name || "Playlist M3U");
     }).catch(function (error) {
       byId("m3u-status").textContent =
@@ -792,8 +980,19 @@
   });
 
   byId("catalog-next").addEventListener("click", function () {
-    var matches = matchingCatalogItems(selectedGroup);
-    var totalPages = Math.max(1, Math.ceil(matches.length / catalogPageSize));
+    var matches;
+    var totalPages;
+
+    if (catalog && catalog.lazyM3U) {
+      if (catalog.hasMore) {
+        catalogPage += 1;
+        renderCatalogGroup(selectedGroup, true);
+      }
+      return;
+    }
+
+    matches = matchingCatalogItems(selectedGroup);
+    totalPages = Math.max(1, Math.ceil(matches.length / catalogPageSize));
 
     if (catalogPage < totalPages - 1) {
       catalogPage += 1;
