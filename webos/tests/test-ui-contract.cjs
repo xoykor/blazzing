@@ -109,6 +109,22 @@ assert.deepStrictEqual(
   "1080p base UI should not use text below the 20px recommendation"
 );
 
+const compactCss = cssSource.slice(
+  cssSource.indexOf("@media (max-width: 1366px)")
+);
+const undersizedCompactFonts = [];
+const compactFontExpression = /font-size:\s*(\d+)px/g;
+while ((fontMatch = compactFontExpression.exec(compactCss)) !== null) {
+  if (Number(fontMatch[1]) < 14) {
+    undersizedCompactFonts.push(Number(fontMatch[1]));
+  }
+}
+assert.deepStrictEqual(
+  undersizedCompactFonts,
+  [],
+  "720p overrides should not use text below the 14px recommendation"
+);
+
 const appInfo = JSON.parse(fs.readFileSync(
   path.join(__dirname, "..", "app", "appinfo.json"),
   "utf8"
