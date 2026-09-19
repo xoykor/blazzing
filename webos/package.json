@@ -9,7 +9,7 @@
     "test": "node tests/test-m3u.cjs && node tests/test-large-m3u.cjs && node tests/test-xtream.cjs && node tests/test-storage.cjs && node tests/test-artwork.cjs && node tests/test-pluto.cjs && node tests/test-ui-contract.cjs"
   },
   "devDependencies": {
-    "@webos-tools/cli": "3.2.4",
+    "@webos-tools/cli": "3.2.6",
     "qrcode-generator": "2.0.4",
     "webostvjs": "1.2.13"
   }
