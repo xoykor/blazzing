@@ -53,6 +53,11 @@ assert.strictEqual(
   "http://provider.example:8080/live/user%20name/p%40ss/1.ts"
 );
 assert.strictEqual(catalog.items[1].url, "https://cdn.example/direct.m3u8");
+assert.strictEqual(
+  catalog.items[1].fallbackUrl,
+  "http://provider.example:8080/live/user%20name/p%40ss/2.ts"
+);
+assert.strictEqual(catalog.items[0].fallbackUrl, "");
 assert(catalog.items[0].favoriteKey.startsWith("xtream:"));
 assert(!catalog.items[0].favoriteKey.includes("user name"));
 assert(!catalog.items[0].favoriteKey.includes("p@ss"));
@@ -86,6 +91,11 @@ assert.strictEqual(
   "http://provider.example:8080/movie/user%20name/p%40ss/9.mkv"
 );
 assert.strictEqual(vod.items[1].url, "https://cdn.example/movie.mp4");
+assert.strictEqual(
+  vod.items[1].fallbackUrl,
+  "http://provider.example:8080/movie/user%20name/p%40ss/10.mp4"
+);
+assert.strictEqual(vod.items[0].fallbackUrl, "");
 assert.strictEqual(vod.items[0].vodId, "9");
 
 const vodMeta = xtream.buildVodMetadata({
