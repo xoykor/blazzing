@@ -10,29 +10,9 @@ const source = fs.readFileSync(
   "utf8"
 );
 
-function createAnchor() {
-  let current = "";
-  return {
-    get href() {
-      return current;
-    },
-    set href(value) {
-      if (/^https?:\/\//i.test(value)) {
-        current = value;
-      } else {
-        current = new URL(value, current).toString();
-      }
-    }
-  };
-}
-
 const sandbox = {
   window: {},
-  document: {
-    createElement: function () {
-      return createAnchor();
-    }
-  }
+  URL: URL
 };
 
 vm.runInNewContext(source, sandbox, { filename: "m3u.js" });

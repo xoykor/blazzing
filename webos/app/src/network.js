@@ -64,6 +64,14 @@
           finalUrl: response.finalUrl || url,
           transport: "service"
         };
+      }).catch(function () {
+        return fetchInBrowser(url).then(function (text) {
+          return {
+            text: text,
+            finalUrl: url,
+            transport: "browser-fallback"
+          };
+        });
       });
     }
 
@@ -93,6 +101,14 @@
         } catch (error) {
           throw new Error("Provider Xtream retornou JSON inválido.");
         }
+      }).catch(function () {
+        return fetchInBrowser(global.BlazzingXtream.apiUrl(creds, action)).then(function (text) {
+          try {
+            return JSON.parse(text);
+          } catch (error) {
+            throw new Error("Provider Xtream retornou JSON inválido.");
+          }
+        });
       });
     }
 

@@ -14,8 +14,6 @@
   }
 
   function resolveUrl(value, baseUrl) {
-    var anchor;
-
     if (/^https?:\/\//i.test(value)) {
       return value;
     }
@@ -24,10 +22,11 @@
       return value;
     }
 
-    anchor = document.createElement("a");
-    anchor.href = baseUrl;
-    anchor.href = value;
-    return anchor.href;
+    try {
+      return new URL(value, baseUrl).href;
+    } catch (error) {
+      return value;
+    }
   }
 
   function parse(text, baseUrl) {
