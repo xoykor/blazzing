@@ -510,3 +510,69 @@ input {
   transform: none;
   box-shadow: none;
 }
+
+.vod-detail {
+  display: flex;
+  width: min(1500px, 100%);
+  margin: 38px auto 0;
+  padding: 34px;
+  background: rgba(14, 23, 37, 0.94);
+  border: 1px solid #243650;
+  border-radius: 24px;
+}
+
+.vod-poster-shell {
+  flex: 0 0 300px;
+  width: 300px;
+  height: 450px;
+  margin-right: 34px;
+  overflow: hidden;
+  background: #0a111c;
+  border: 1px solid #263a55;
+  border-radius: 18px;
+}
+
+#vod-poster {
+  display: none;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.vod-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.vod-meta {
+  color: #8ea4bf;
+  font-size: 18px;
+}
+
+.vod-plot {
+  max-width: 900px;
+  max-height: 260px;
+  overflow: auto;
+  color: #c4d1e0;
+  font-size: 20px;
+  line-height: 1.55;
+}
+
+@media (max-width: 1366px) {
+  .vod-detail {
+    margin-top: 18px;
+    padding: 24px;
+  }
+
+  .vod-poster-shell {
+    flex-basis: 220px;
+    width: 220px;
+    height: 330px;
+    margin-right: 24px;
+  }
+
+  .vod-plot {
+    max-height: 210px;
+    font-size: 16px;
+  }
+}
