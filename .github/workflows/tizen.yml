@@ -7,10 +7,12 @@ on:
       - feature/tizen-web-port
     paths:
       - "tizen/**"
+      - "worker/**"
       - ".github/workflows/tizen.yml"
   pull_request:
     paths:
       - "tizen/**"
+      - "worker/**"
       - ".github/workflows/tizen.yml"
 
 jobs:
@@ -27,8 +29,16 @@ jobs:
             node --check "$file"
           done
 
-      - name: Run provider tests
-        run: node tizen/tests/providers.test.js
+      - name: Run Tizen tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in tizen/tests/*.test.js; do
+            node "$file"
+          done
+
+      - name: Validate Worker JavaScript syntax
+        run: node --check worker/src/index.js && node --check worker/public/pair.js
 
       - name: Validate config.xml
         shell: bash
@@ -49,6 +59,8 @@ jobs:
           test -s tizen/js/player.js
           test -s tizen/js/providers.js
           test -s tizen/js/net-storage.js
+          test -s tizen/js/pairing.js
+          test -s tizen/.tproject
 
       - name: Package unsigned WGT
         shell: bash
