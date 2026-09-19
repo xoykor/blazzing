@@ -145,18 +145,26 @@ retries from the saved playback position when applicable.
 
 ## Pluto TV
 
-Live Pluto TV is integrated directly through the packaged webOS network service.
-The service creates a regional Pluto session using the current boot endpoint,
-loads the regional live-channel catalogue, and keeps the session token only in
-service memory. The UI catalog stores channel IDs and safe display metadata only.
+Pluto TV is integrated directly through the packaged webOS network service. The
+service creates a regional session using the current `boot.pluto.tv/v4/start`
+flow and keeps the session JWT only in service memory.
 
-When a channel is opened, the app asks the service for a fresh HLS URL built from
-the stitcher host returned by Pluto boot, the channel ID, the session JWT and the
-required v2 stitcher parameters. The JWT is therefore not persisted in favorites,
-catalog storage or localStorage.
+Live channels prefer the current guide-v2 channel/category APIs and fall back to
+the legacy channel endpoint when needed. The UI catalog stores only channel IDs
+and safe display metadata; the signed HLS URL is created only when playback starts.
 
-The implementation prefers the current guide-v2 channel API and falls back to
-the legacy channel endpoint when necessary. Pluto VOD is not part of this alpha.
+VOD uses the current `/v3/vod/categories?includeItems=true&deviceType=web`
+catalog with a category-page size of 1000. Duplicate films/series appearing in
+multiple categories are collapsed by Pluto content ID. Series details are loaded
+from `/v3/vod/series/<id>/seasons?includeItems=true&deviceType=web`.
+
+Movie and episode catalogue entries retain only a sanitized stitcher path such as
+`/stitch/hls/...`. Old host names, query strings and JWTs returned in catalogue
+metadata are discarded. At playback time the service converts that path to the
+current v2 stitcher URL and attaches the current in-memory session JWT.
+
+Favorites and playback progress use opaque Pluto content IDs; no Pluto JWT or
+signed media URL is persisted.
 
 ## Compatibility
 
@@ -205,7 +213,7 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 - [x] series metadata
 - [x] live metadata
 - [x] artwork cache
-- [x] Pluto Live
+- [x] Pluto Live/VOD
 - [x] failover UX
 
 ### M5 distribution
