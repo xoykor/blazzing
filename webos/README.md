@@ -19,14 +19,16 @@ Implemented:
 - direct browser fallback for Simulator development;
 - Xtream authentication;
 - Xtream live categories and channels;
-- regression tests for M3U and Xtream.
+- Xtream VOD;
+- Xtream series, seasons and episodes;
+- persistent favorites without storing credentials or media URLs;
+- regression tests for M3U, Xtream and persistence.
 
 Still planned:
 
-- Xtream VOD and series;
-- catalog pagination/virtualization;
+- catalog virtualization beyond the current page window;
 - large-playlist handling beyond the temporary 8 MiB alpha limit;
-- persistence and favorites;
+- playback progress/resume;
 - artwork cache;
 - store submission and real-TV media validation.
 
