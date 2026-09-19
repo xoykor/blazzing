@@ -43,6 +43,25 @@
     return url;
   }
 
+  function stableHash(value) {
+    var text = String(value || "");
+    var hash = 2166136261;
+    var i;
+
+    for (i = 0; i < text.length; i += 1) {
+      hash ^= text.charCodeAt(i);
+      hash += (hash << 1) + (hash << 4) + (hash << 7) +
+        (hash << 8) + (hash << 24);
+    }
+
+    return ("00000000" + (hash >>> 0).toString(16)).slice(-8);
+  }
+
+  function favoriteKey(creds, kind, id) {
+    return "xtream:" + stableHash(creds.server) + ":" +
+      String(kind || "item") + ":" + String(id);
+  }
+
   function authAccepted(payload) {
     var user;
     var auth;
@@ -180,7 +199,8 @@
         group: group,
         logo: String(row.stream_icon || ""),
         url: liveUrl(creds, id, row.direct_source),
-        kind: "live"
+        kind: "live",
+        favoriteKey: favoriteKey(creds, "live", id)
       });
 
       addGroup(groups, seenGroups, group);
@@ -228,7 +248,8 @@
           row.container_extension || "mp4",
           row.direct_source
         ),
-        kind: "vod"
+        kind: "vod",
+        favoriteKey: favoriteKey(creds, "vod", id)
       });
 
       addGroup(groups, seenGroups, group);
@@ -237,7 +258,7 @@
     return finishCatalog(items, groups);
   }
 
-  function buildSeriesCatalog(categories, series) {
+  function buildSeriesCatalog(categories, series, creds) {
     var categoryNames = makeCategoryMap(categories);
     var groups = [];
     var seenGroups = {};
@@ -272,7 +293,8 @@
         logo: String(row.cover || row.stream_icon || ""),
         url: "",
         kind: "series",
-        seriesId: String(id)
+        seriesId: String(id),
+        favoriteKey: favoriteKey(creds, "series", id)
       });
 
       addGroup(groups, seenGroups, group);
@@ -323,7 +345,8 @@
         id,
         episode.container_extension || "mp4"
       ),
-      kind: "episode"
+      kind: "episode",
+      favoriteKey: favoriteKey(creds, "episode", id)
     });
 
     addGroup(groups, seenGroups, seasonName);
