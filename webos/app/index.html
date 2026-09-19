@@ -13,9 +13,9 @@
         <div>
           <div class="eyebrow">Blazzing para LG webOS</div>
           <h1>Seu conteúdo, direto na TV.</h1>
-          <p>Protótipo nativo para webOS com pareamento, M3U e player.</p>
+          <p>Cliente webOS com pareamento, M3U, Xtream, favoritos e player.</p>
         </div>
-        <div class="version-badge">webOS alpha 0.3</div>
+        <div class="version-badge">webOS alpha 0.4</div>
       </header>
 
       <div class="action-grid">
@@ -46,7 +46,7 @@
         <button id="action-about" class="card focusable" type="button">
           <span class="card-kicker">Projeto</span>
           <strong>Arquitetura webOS</strong>
-          <span>M3U já está no alpha; Xtream e persistência vêm depois.</span>
+          <span>M3U, Xtream Live/VOD/séries e favoritos persistentes já fazem parte do alpha.</span>
         </button>
       </div>
 
@@ -93,6 +93,7 @@
           <div id="catalog-provider" class="eyebrow">M3U</div>
           <h2 id="catalog-title">Playlist</h2>
           <p id="catalog-summary" class="status"></p>
+          <p class="catalog-hint">Tecla amarela do controle ou F no Simulator alterna favorito.</p>
         </div>
         <div class="catalog-actions">
           <button id="catalog-prev" class="secondary focusable" type="button">Página anterior</button>
@@ -148,7 +149,7 @@
       <div class="panel">
         <div class="eyebrow">Alpha webOS</div>
         <h2>Blazzing webOS</h2>
-        <p>A base já separa navegação, player, pareamento, M3U e Xtream. TV ao vivo e filmes compartilham o mesmo catálogo; séries e persistência vêm depois.</p>
+        <p>A base já inclui navegação, player, pareamento, M3U, Xtream Live/VOD/séries e favoritos persistentes sem salvar credenciais.</p>
         <button id="about-back" class="secondary focusable" type="button">Voltar</button>
       </div>
     </section>
@@ -176,6 +177,7 @@
   <script src="src/xtream.js"></script>
   <script src="src/network.js"></script>
   <script src="src/m3u.js"></script>
+  <script src="src/storage.js"></script>
   <script src="src/player.js"></script>
   <script src="src/app.js"></script>
 </body>
