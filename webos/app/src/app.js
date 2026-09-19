@@ -562,6 +562,74 @@
     }
   }
 
+  function remoteSessionExpired(error) {
+    var message = error && error.message ? String(error.message) : "";
+
+    return /session expired|does not exist/i.test(message);
+  }
+
+  function recoverRemoteCatalog(currentCatalog, group) {
+    var restoreQuery = catalogQuery;
+    var title = currentCatalog.sourceName || byId("catalog-title").textContent;
+
+    if (!currentCatalog || currentCatalog.recovering || !currentCatalog.sourceUrl) {
+      return;
+    }
+
+    currentCatalog.recovering = true;
+    byId("catalog-summary").textContent =
+      "Sessão da playlist expirou. Reindexando…";
+    byId("catalog-prev").disabled = true;
+    byId("catalog-next").disabled = true;
+
+    global.BlazzingNetwork.fetchM3U(currentCatalog.sourceUrl)
+      .then(function (result) {
+        if (catalog !== currentCatalog) {
+          if (result.mode === "paged-service" && result.sessionId) {
+            global.BlazzingNetwork.releaseM3U(result.sessionId);
+          }
+          return;
+        }
+
+        if (result.mode !== "paged-service" || !result.sessionId) {
+          throw new Error(
+            "A playlist não pôde ser reaberta no serviço paginado webOS."
+          );
+        }
+
+        currentCatalog.sessionId = result.sessionId;
+        currentCatalog.groups = result.groups;
+        currentCatalog.totalItems = result.itemCount;
+        currentCatalog.totalBytes = result.totalBytes;
+        currentCatalog.pageOffsets = [0];
+        currentCatalog.currentItems = [];
+        currentCatalog.hasMore = false;
+        currentCatalog.lastGroup = null;
+        currentCatalog.lastQuery = null;
+        currentCatalog.recovering = false;
+        catalogPage = 0;
+
+        renderCatalog(currentCatalog, title, {
+          group: group,
+          page: 0,
+          query: restoreQuery
+        });
+      })
+      .catch(function (error) {
+        if (catalog !== currentCatalog) {
+          return;
+        }
+
+        currentCatalog.recovering = false;
+        byId("catalog-summary").textContent =
+          error && error.message ?
+            error.message :
+            "Falha ao reabrir a playlist.";
+        byId("catalog-prev").disabled = catalogPage <= 0;
+        byId("catalog-next").disabled = true;
+      });
+  }
+
   function renderRemoteCatalogGroup(group, preservePage) {
     var currentCatalog = catalog;
     var filterChanged;
@@ -644,6 +712,11 @@
       focusCatalogLater();
     }).catch(function (error) {
       if (requestId !== catalogRequestId || catalog !== currentCatalog) {
+        return;
+      }
+
+      if (remoteSessionExpired(error)) {
+        recoverRemoteCatalog(currentCatalog, group);
         return;
       }
 
@@ -817,12 +890,15 @@
           groups: result.groups,
           lazyM3U: true,
           sessionId: result.sessionId,
+          sourceUrl: url,
+          sourceName: name || "Playlist M3U",
           sourceKey: sourceKey,
           totalItems: result.itemCount,
           totalBytes: result.totalBytes,
           pageOffsets: [0],
           currentItems: [],
           hasMore: false,
+          recovering: false,
           lastGroup: null,
           lastQuery: null
         };
