@@ -305,6 +305,26 @@ input {
   background: #101a2a;
   border: 2px solid #21324a;
   border-radius: 16px;
+  position: relative;
+}
+
+.media-card.is-favorite {
+  border-color: #4f97e7;
+}
+
+.favorite-badge {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  color: #ffd86b !important;
+  font-size: 24px !important;
+  line-height: 1;
+}
+
+.catalog-hint {
+  margin: 8px 0 0;
+  color: #63768e;
+  font-size: 15px;
 }
 
 .media-card strong {
