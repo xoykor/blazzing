@@ -8,7 +8,7 @@ Lounge forms, UX Scenario template, or App Self Checklist.
 - App title: **Blazzing**
 - Suggested category: **Entertainment**
 - App ID: `io.github.xoykor.blazzing`
-- Current alpha package version: `0.13.0`
+- Current alpha package version: `0.14.0`
 - Vendor: `xoykor`
 
 ## Short description — pt-BR
@@ -119,7 +119,8 @@ Before submission, verify/provide:
 - [x] Packaged large icon: 130×130 PNG, referenced by `largeIcon`.
 - [ ] Seller Lounge icon: 400×400 PNG.
 - [ ] Required Seller Lounge screenshots/store artwork.
-- [ ] Current LG App Self Checklist completed with real results.
+- [x] Project-side LG self-check preparation matrix.
+- [ ] Current official LG App Self Checklist completed with real results.
 - [ ] Current LG UX Scenario document completed.
 - [x] Privacy policy text draft.
 - [ ] Stable public privacy policy URL + final support contact.
