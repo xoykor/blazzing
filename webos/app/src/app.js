@@ -12,6 +12,7 @@
   var catalogQuery = "";
   var catalogStack = [];
   var activeProgressKey = "";
+  var vodEntry = null;
   var FAVORITES_GROUP = "__favorites__";
 
   function byId(id) {
@@ -64,6 +65,7 @@
     savePlayerProgress();
     global.BlazzingPlayer.stop();
     activeProgressKey = "";
+    vodEntry = null;
     catalogStack = [];
     xtreamSession = null;
     byId("xtream-password").value = "";
@@ -141,6 +143,82 @@
         byId("player-status").textContent = message;
       }
     });
+  }
+
+  function showVodMetadata(entry, metadata) {
+    var image = byId("vod-poster");
+    var details = [];
+    var logo = String(metadata.logo || entry.logo || "");
+
+    vodEntry = entry;
+    byId("vod-title").textContent = metadata.title || entry.title || "Filme";
+    byId("vod-plot").textContent =
+      metadata.plot || "Sem sinopse fornecida pelo provider.";
+
+    if (metadata.year) {
+      details.push(metadata.year);
+    }
+    if (metadata.genre) {
+      details.push(metadata.genre);
+    }
+    if (metadata.rating) {
+      details.push("Nota " + metadata.rating);
+    }
+    if (metadata.duration) {
+      details.push(metadata.duration);
+    }
+
+    byId("vod-meta").textContent = details.join(" • ") || entry.group || "";
+    image.removeAttribute("src");
+    image.style.display = "none";
+
+    if (/^https?:\/\//i.test(logo)) {
+      image.onload = function () {
+        image.style.display = "block";
+      };
+      image.onerror = function () {
+        image.style.display = "none";
+      };
+      image.src = logo;
+    }
+
+    showScreen("vod");
+  }
+
+  function openVod(entry) {
+    var fallback = global.BlazzingXtream.buildVodMetadata({}, entry);
+
+    showVodMetadata(entry, fallback);
+    byId("vod-status").textContent = "Carregando detalhes…";
+
+    if (!xtreamSession || !entry || !entry.vodId) {
+      byId("vod-status").textContent = "";
+      return;
+    }
+
+    global.BlazzingNetwork.xtreamRequest(
+      xtreamSession,
+      "get_vod_info",
+      { vodId: entry.vodId }
+    ).then(function (payload) {
+      showVodMetadata(
+        entry,
+        global.BlazzingXtream.buildVodMetadata(payload, entry)
+      );
+      byId("vod-status").textContent = "";
+    }).catch(function () {
+      byId("vod-status").textContent =
+        "Provider não retornou detalhes; a reprodução continua disponível.";
+    });
+  }
+
+  function returnToCatalog() {
+    if (catalog) {
+      showScreen("catalog");
+      renderCatalogGroup(selectedGroup, true);
+    } else {
+      showHome();
+    }
   }
 
   function isFavorite(item) {
@@ -318,6 +396,8 @@
         return function () {
           if (entry.kind === "series") {
             openSeries(entry);
+          } else if (entry.kind === "vod") {
+            openVod(entry);
           } else {
             playUrl(entry.url, entry.title, "catalog", entry);
           }
@@ -685,6 +765,14 @@
   byId("manual-back").addEventListener("click", showHome);
   byId("about-back").addEventListener("click", showHome);
   byId("pair-cancel").addEventListener("click", showHome);
+  byId("vod-play").addEventListener("click", function () {
+    if (vodEntry) {
+      playUrl(vodEntry.url, vodEntry.title, "vod", vodEntry);
+    }
+  });
+
+  byId("vod-back").addEventListener("click", returnToCatalog);
+
   byId("catalog-search-apply").addEventListener("click", function () {
     catalogQuery = byId("catalog-search").value.trim().toLowerCase();
     renderCatalogGroup(selectedGroup);
@@ -718,7 +806,9 @@
     savePlayerProgress();
     global.BlazzingPlayer.stop();
     activeProgressKey = "";
-    if (playerReturnScreen === "catalog" && catalog) {
+    if (playerReturnScreen === "vod" && vodEntry) {
+      showScreen("vod");
+    } else if (playerReturnScreen === "catalog" && catalog) {
       showScreen("catalog");
       renderCatalogGroup(selectedGroup, true);
     } else {
@@ -731,12 +821,25 @@
       return;
     }
 
+    if (activeScreen === "player" && playerReturnScreen === "vod" && vodEntry) {
+      savePlayerProgress();
+      global.BlazzingPlayer.stop();
+      activeProgressKey = "";
+      showScreen("vod");
+      return;
+    }
+
     if (activeScreen === "player" && playerReturnScreen === "catalog" && catalog) {
       savePlayerProgress();
       global.BlazzingPlayer.stop();
       activeProgressKey = "";
       showScreen("catalog");
       renderCatalogGroup(selectedGroup, true);
+      return;
+    }
+
+    if (activeScreen === "vod") {
+      returnToCatalog();
       return;
     }
 
