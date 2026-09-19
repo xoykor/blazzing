@@ -15,7 +15,7 @@
           <h1>Seu conteúdo, direto na TV.</h1>
           <p>Cliente webOS com M3U, Xtream, favoritos e retomada de reprodução.</p>
         </div>
-        <div class="version-badge">webOS alpha 0.5</div>
+        <div class="version-badge">webOS alpha 0.6</div>
       </header>
 
       <div class="action-grid">
@@ -46,7 +46,7 @@
         <button id="action-about" class="card focusable" type="button">
           <span class="card-kicker">Projeto</span>
           <strong>Arquitetura webOS</strong>
-          <span>M3U, Xtream Live/VOD/séries, favoritos e retomada já fazem parte do alpha.</span>
+          <span>M3U, Xtream Live/VOD/séries, busca, favoritos e retomada já fazem parte do alpha.</span>
         </button>
       </div>
 
@@ -93,6 +93,13 @@
           <div id="catalog-provider" class="eyebrow">M3U</div>
           <h2 id="catalog-title">Playlist</h2>
           <p id="catalog-summary" class="status"></p>
+          <div class="catalog-search-row">
+            <input id="catalog-search" class="focusable catalog-search-input"
+                   type="search" placeholder="Buscar por título ou categoria"
+                   autocomplete="off">
+            <button id="catalog-search-apply" class="secondary focusable" type="button">Buscar</button>
+            <button id="catalog-search-clear" class="secondary focusable" type="button">Limpar</button>
+          </div>
           <p class="catalog-hint">Tecla amarela do controle ou F no Simulator alterna favorito.</p>
         </div>
         <div class="catalog-actions">
@@ -149,7 +156,7 @@
       <div class="panel">
         <div class="eyebrow">Alpha webOS</div>
         <h2>Blazzing webOS</h2>
-        <p>A base já inclui M3U, Xtream Live/VOD/séries, favoritos e retomada de filmes/episódios sem salvar credenciais.</p>
+        <p>A base já inclui M3U, Xtream Live/VOD/séries, busca, favoritos e retomada de filmes/episódios sem salvar credenciais.</p>
         <button id="about-back" class="secondary focusable" type="button">Voltar</button>
       </div>
     </section>
