@@ -78,7 +78,8 @@ Large-playlist behavior:
 
 Implemented:
 
-- credentials kept only in memory;
+- passwords kept only in memory;
+- optional local profile persistence stores only server URL + username after a successful login;
 - authentication through `player_api.php`;
 - `get_live_categories`;
 - `get_live_streams`;
@@ -170,7 +171,7 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 - [x] tests
 - [x] VOD
 - [x] series/seasons/episodes
-- [ ] profile persistence
+- [x] profile persistence without password storage
 
 ### M4 parity
 - [x] favorites
