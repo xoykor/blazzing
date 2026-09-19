@@ -31,3 +31,10 @@ or exit $status
 echo
 echo "IPK gerado em:"
 find "$out_dir" -maxdepth 1 -type f -name '*.ipk' -print
+
+npm run verify-package
+or exit $status
+
+echo
+echo "Checksum:"
+cat "$out_dir/SHA256SUMS.txt"
