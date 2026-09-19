@@ -128,8 +128,6 @@ function fetchText(target, redirectsLeft, callback) {
     var total = 0;
     var location;
 
-    responseFail = fail;
-
     if (response.statusCode >= 300 && response.statusCode < 400 &&
         response.headers.location) {
       response.resume();
@@ -242,6 +240,8 @@ function downloadM3U(target, redirectsLeft, sessionId, callback) {
       safeUnlink(filePath);
       done(error);
     }
+
+    responseFail = fail;
 
     if (response.statusCode >= 300 && response.statusCode < 400 &&
         response.headers.location) {
