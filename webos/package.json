@@ -7,7 +7,8 @@
     "validate-release": "node tools/validate-release.mjs",
     "package-ci": "mkdir -p dist && node_modules/.bin/ares-package -o dist app service/io.github.xoykor.blazzing.network",
     "test": "node tests/test-m3u.cjs && node tests/test-large-m3u.cjs && node tests/test-xtream.cjs && node tests/test-storage.cjs && node tests/test-artwork.cjs && node tests/test-pluto.cjs && node tests/test-ui-contract.cjs",
-    "validate-compat": "node tools/validate-legacy-js.mjs"
+    "validate-compat": "node tools/validate-legacy-js.mjs",
+    "validate-sensitive": "node tools/validate-sensitive-data.mjs"
   },
   "devDependencies": {
     "@webos-tools/cli": "3.2.6",
