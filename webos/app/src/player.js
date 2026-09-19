@@ -15,11 +15,21 @@
     var options = callbacks || {};
     var resumeAt = Number(options.resumeAt || 0);
     var lastProgressSecond = -1;
+    var errorReported = false;
+
+    function reportError(message) {
+      if (errorReported) {
+        return;
+      }
+      errorReported = true;
+
+      if (callbacks && callbacks.onError) {
+        callbacks.onError(message);
+      }
+    }
 
     element.onerror = function () {
-      if (callbacks && callbacks.onError) {
-        callbacks.onError("A TV não conseguiu reproduzir este stream.");
-      }
+      reportError("A TV não conseguiu reproduzir este stream.");
     };
 
     element.onloadedmetadata = function () {
@@ -71,15 +81,11 @@
       var promise = element.play();
       if (promise && promise.catch) {
         promise.catch(function () {
-          if (callbacks && callbacks.onError) {
-            callbacks.onError("A reprodução foi bloqueada ou o stream é incompatível.");
-          }
+          reportError("A reprodução foi bloqueada ou o stream é incompatível.");
         });
       }
     } catch (error) {
-      if (callbacks && callbacks.onError) {
-        callbacks.onError(error.message || "Falha ao iniciar reprodução.");
-      }
+      reportError(error.message || "Falha ao iniciar reprodução.");
     }
   }
 
