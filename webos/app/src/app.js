@@ -88,6 +88,19 @@
     showScreen("home");
   }
 
+  function restoreXtreamProfile() {
+    var profile = global.BlazzingStorage.getXtreamProfile();
+
+    if (!profile) {
+      byId("xtream-remember").checked = false;
+      return;
+    }
+
+    byId("xtream-server").value = profile.server;
+    byId("xtream-username").value = profile.username;
+    byId("xtream-remember").checked = true;
+  }
+
   function validHttpUrl(value) {
     return /^https?:\/\//i.test(value);
   }
@@ -1090,6 +1103,7 @@
   byId("action-xtream").addEventListener("click", function () {
     byId("xtream-status").textContent = "";
     byId("xtream-password").value = "";
+    restoreXtreamProfile();
     showScreen("xtream");
   });
 
@@ -1142,6 +1156,15 @@
     global.BlazzingNetwork.xtreamRequest(creds, "").then(function (auth) {
       if (!global.BlazzingXtream.authAccepted(auth)) {
         throw new Error("Provider rejeitou as credenciais.");
+      }
+
+      if (byId("xtream-remember").checked) {
+        global.BlazzingStorage.setXtreamProfile(
+          creds.server,
+          creds.username
+        );
+      } else {
+        global.BlazzingStorage.clearXtreamProfile();
       }
 
       byId("xtream-status").textContent = "Carregando " + loadingLabel + "…";
@@ -1211,6 +1234,12 @@
 
   byId("xtream-series").addEventListener("click", function () {
     loadXtreamCatalog("series");
+  });
+
+  byId("xtream-remember").addEventListener("change", function () {
+    if (!byId("xtream-remember").checked) {
+      global.BlazzingStorage.clearXtreamProfile();
+    }
   });
 
   byId("manual-play").addEventListener("click", function () {
@@ -1373,5 +1402,6 @@
     }
   });
 
+  restoreXtreamProfile();
   showScreen("home");
 }(window));
