@@ -321,6 +321,26 @@ input {
   line-height: 1;
 }
 
+.catalog-search-row {
+  display: flex;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.catalog-search-input {
+  width: 420px;
+  margin-right: 10px;
+  padding: 11px 14px;
+  font-size: 17px;
+}
+
+.catalog-search-row .secondary {
+  min-width: 0;
+  margin-top: 0;
+  padding: 10px 16px;
+  font-size: 16px;
+}
+
 .catalog-hint {
   margin: 8px 0 0;
   color: #63768e;
