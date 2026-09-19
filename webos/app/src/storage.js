@@ -119,6 +119,22 @@
     return Object.keys(load().favorites).length;
   }
 
+  function favoriteKeys(prefix) {
+    var favorites = load().favorites;
+    var keys = Object.keys(favorites);
+    var wanted = String(prefix || "");
+    var result = [];
+    var i;
+
+    for (i = 0; i < keys.length; i += 1) {
+      if (!wanted || keys[i].indexOf(wanted) === 0) {
+        result.push(keys[i]);
+      }
+    }
+
+    return result;
+  }
+
   function loadProgress() {
     var raw;
     var parsed;
@@ -243,6 +259,7 @@
     isFavorite: isFavorite,
     toggle: toggle,
     count: count,
+    favoriteKeys: favoriteKeys,
     getProgress: getProgress,
     setProgress: setProgress,
     clearProgress: clearProgress,
