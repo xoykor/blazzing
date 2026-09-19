@@ -49,3 +49,21 @@ jobs:
           test -s tizen/js/player.js
           test -s tizen/js/providers.js
           test -s tizen/js/net-storage.js
+
+      - name: Package unsigned WGT
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          (
+            cd tizen
+            zip -r ../dist/Blazzing-Tizen-unsigned.wgt \
+              config.xml index.html icon.png css js
+          )
+
+      - name: Upload unsigned WGT
+        uses: actions/upload-artifact@v4
+        with:
+          name: blazzing-tizen-unsigned
+          path: dist/Blazzing-Tizen-unsigned.wgt
+          if-no-files-found: error
