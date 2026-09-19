@@ -16,6 +16,23 @@
         onState(text);
     }
 
+    function setScreenSaver(enabled) {
+        var api;
+        var state;
+
+        if (!window.webapis || !window.webapis.appcommon) {
+            return;
+        }
+
+        try {
+            api = window.webapis.appcommon;
+            state = enabled ?
+                api.AppCommonScreenSaverState.SCREEN_SAVER_ON :
+                api.AppCommonScreenSaverState.SCREEN_SAVER_OFF;
+            api.setScreenSaver(state, function () {}, function () {});
+        } catch (ignoreScreenSaver) {}
+    }
+
     function closeAvPlay() {
         if (!avPlayAvailable()) { return; }
         try {
@@ -37,6 +54,7 @@
     function stop() {
         closeAvPlay();
         stopHtml5();
+        setScreenSaver(true);
         currentItem = null;
         usingAvPlay = false;
     }
@@ -47,7 +65,10 @@
             onbufferingprogress: function (percent) { emitState("Buffering " + percent + "%"); },
             onbufferingcomplete: function () { emitState("Reproduzindo"); },
             oncurrentplaytime: function (milliseconds) { onTime(milliseconds || 0); },
-            onstreamcompleted: function () { emitState("Concluído"); },
+            onstreamcompleted: function () {
+                setScreenSaver(true);
+                emitState("Concluído");
+            },
             onerror: function (eventType) { emitState("Erro de reprodução: " + eventType); },
             onevent: function () {},
             ondrmevent: function () {},
@@ -67,6 +88,7 @@
             }
             try {
                 window.webapis.avplay.play();
+                setScreenSaver(false);
                 emitState("Reproduzindo");
             } catch (error) {
                 emitState("Falha ao iniciar a reprodução.");
@@ -120,9 +142,11 @@
                 state = window.webapis.avplay.getState();
                 if (state === "PLAYING") {
                     window.webapis.avplay.pause();
+                    setScreenSaver(true);
                     emitState("Pausado");
                 } else if (state === "PAUSED" || state === "READY") {
                     window.webapis.avplay.play();
+                    setScreenSaver(false);
                     emitState("Reproduzindo");
                 }
             } catch (error) {
@@ -130,8 +154,10 @@
             }
         } else if (video.paused) {
             video.play();
+            setScreenSaver(false);
         } else {
             video.pause();
+            setScreenSaver(true);
         }
     }
 
@@ -165,7 +191,19 @@
         if (!usingAvPlay) { emitState("Buffering…"); }
     });
     video.addEventListener("playing", function () {
-        if (!usingAvPlay) { emitState("Reproduzindo"); }
+        if (!usingAvPlay) {
+            setScreenSaver(false);
+            emitState("Reproduzindo");
+        }
+    });
+    video.addEventListener("pause", function () {
+        if (!usingAvPlay) { setScreenSaver(true); }
+    });
+    video.addEventListener("ended", function () {
+        if (!usingAvPlay) {
+            setScreenSaver(true);
+            emitState("Concluído");
+        }
     });
 
     window.BlazzingPlayer = {
