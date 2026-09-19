@@ -61,8 +61,21 @@ assert(
   "navigation must emit catalog boundary events"
 );
 assert(
+  navigationSource.includes("focusableAncestor"),
+  "pointer hover must focus nested content through its focusable ancestor"
+);
+assert(
+  navigationSource.includes("data-has-prev-window") &&
+  navigationSource.includes("data-has-next-window"),
+  "remote navigation must honor explicit catalog window boundaries"
+);
+assert(
   appSource.includes("catalogFocusRequest"),
   "catalog must preserve focus across paged navigation"
+);
+assert(
+  appSource.includes("updateCatalogWindowBoundary"),
+  "catalog renderer must publish previous/next window availability"
 );
 
 const cssSource = fs.readFileSync(
