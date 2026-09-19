@@ -16,7 +16,8 @@
         category: "all",
         favoritesOnly: false,
         visibleCount: 0,
-        batchSize: 48,
+        batchSize: 30,
+        renderGeneration: 0,
         series: null,
         currentSeason: "all",
         playerReturnView: "catalog",
@@ -31,6 +32,13 @@
     var toastTimer = 0;
     var hudTimer = 0;
     var supportedKeys = {};
+    var searchTimer = 0;
+    var gridAppendScheduled = false;
+    var imageObserver = null;
+    var imageQueue = [];
+    var activeImageLoads = 0;
+    var MAX_IMAGE_LOADS = 6;
+
 
     function showToast(message) {
         clearTimeout(toastTimer);
@@ -68,7 +76,18 @@
 
         return all.filter(function (element) {
             var rect = element.getBoundingClientRect();
-            return !element.disabled && rect.width > 0 && rect.height > 0;
+            if (element.disabled || rect.width <= 0 || rect.height <= 0) {
+                return false;
+            }
+
+            /* Huge IPTV catalogs can contain thousands of focusable nodes.
+             * Navigation only needs elements near the current viewport. */
+            if (state.view === "catalog" &&
+                    element.hasAttribute("data-card-index")) {
+                return rect.bottom >= -500 && rect.top <= 1580;
+            }
+
+            return true;
         });
     }
 
@@ -614,7 +633,10 @@
         renderSavedProfiles();
     });
 
-    byId("catalog-search").addEventListener("input", applyFilters);
+    byId("catalog-search").addEventListener("input", function () {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(applyFilters, 180);
+    });
 
     function focusCategoryButton(id) {
         var buttons = byId("categories").querySelectorAll("[data-category-id]");
@@ -624,6 +646,17 @@
                 buttons[i].focus();
                 return;
             }
+        }
+    }
+
+    function updateCategorySelection() {
+        var buttons = byId("categories").querySelectorAll("[data-category-id]");
+        var i;
+        for (i = 0; i < buttons.length; i += 1) {
+            buttons[i].classList.toggle(
+                "active",
+                buttons[i].getAttribute("data-category-id") === state.category
+            );
         }
     }
 
@@ -644,6 +677,7 @@
         all.className = state.category === "all" ? "active" : "";
         all.addEventListener("click", function () {
             state.category = "all";
+            updateCategorySelection();
             applyFilters();
             setTimeout(function () { focusCategoryButton("all"); }, 0);
         });
@@ -659,6 +693,7 @@
             button.className = state.category === category.id ? "active" : "";
             button.addEventListener("click", function () {
                 state.category = category.id;
+                updateCategorySelection();
                 applyFilters();
                 setTimeout(function () {
                     focusCategoryButton(category.id);
@@ -666,6 +701,16 @@
             });
             root.appendChild(button);
         });
+    }
+
+    function searchableText(item, normalize) {
+        if (!item._searchText) {
+            item._searchText = normalize(
+                String(item.name || "") + " " +
+                String(item.categoryName || item.group || "")
+            );
+        }
+        return item._searchText;
     }
 
     function applyFilters() {
@@ -678,17 +723,13 @@
         state.filtered = state.catalog.items.filter(function (item) {
             var categoryOk = state.category === "all" ||
                 item.categoryId === state.category;
-            var searchable = normalize(
-                String(item.name || "") + " " +
-                String(item.categoryName || item.group || "")
-            );
-            var queryOk = !query || searchable.indexOf(query) !== -1;
+            var queryOk = !query ||
+                searchableText(item, normalize).indexOf(query) !== -1;
             var favoriteOk = !state.favoritesOnly || favorites[item.uid];
 
             return categoryOk && queryOk && favoriteOk;
         });
 
-        renderCategories();
         renderGrid(true);
         byId("item-count").textContent = state.filtered.length + " itens";
     }
@@ -709,6 +750,8 @@
             state.profile.name : "Catálogo";
         byId("catalog-search").value = "";
 
+        renderCategories();
+        updateCategorySelection();
         applyFilters();
     }
 
@@ -720,7 +763,123 @@
     }
 
     function safeImageUrl(url) {
-        return /^https?:\/\//i.test(url || "") ? url : "";
+        url = String(url || "").replace(/^\s+|\s+$/g, "");
+        if (/^https?:\/\//i.test(url)) { return url; }
+        if (/^\/\//.test(url)) { return "https:" + url; }
+        return "";
+    }
+
+    function posterFallback(name) {
+        var span = document.createElement("span");
+        span.className = "poster-fallback";
+        span.textContent = String(name || "?").charAt(0).toUpperCase();
+        return span;
+    }
+
+    function pumpImageQueue() {
+        while (activeImageLoads < MAX_IMAGE_LOADS && imageQueue.length) {
+            (function (task) {
+                var image = task.image;
+                var finished = false;
+
+                if (!image || !image.parentNode ||
+                        task.generation !== state.renderGeneration) {
+                    return;
+                }
+
+                activeImageLoads += 1;
+
+                function done(success) {
+                    if (finished) { return; }
+                    finished = true;
+                    activeImageLoads = Math.max(0, activeImageLoads - 1);
+
+                    if (image && image.parentNode &&
+                            task.generation === state.renderGeneration) {
+                        image.classList.toggle("loaded", !!success);
+                        image.classList.toggle("failed", !success);
+                        if (!success) {
+                            try { image.parentNode.removeChild(image); }
+                            catch (ignoreRemove) {}
+                        }
+                    }
+
+                    setTimeout(pumpImageQueue, 0);
+                }
+
+                image.onload = function () { done(true); };
+                image.onerror = function () { done(false); };
+
+                /* Avoid keeping broken remote image requests alive forever. */
+                task.timeout = setTimeout(function () {
+                    if (!finished) {
+                        try { image.src = ""; } catch (ignoreAbort) {}
+                        done(false);
+                    }
+                }, 12000);
+
+                var originalDone = done;
+                done = function (success) {
+                    clearTimeout(task.timeout);
+                    originalDone(success);
+                };
+
+                image.src = task.url;
+            }(imageQueue.shift()));
+        }
+    }
+
+    function enqueueImage(image, url) {
+        if (!image || !url || image.getAttribute("data-image-queued") === "1") {
+            return;
+        }
+        image.setAttribute("data-image-queued", "1");
+        imageQueue.push({
+            image: image,
+            url: url,
+            generation: state.renderGeneration,
+            timeout: 0
+        });
+        pumpImageQueue();
+    }
+
+    function observeImage(image, url) {
+        image.setAttribute("data-src", url);
+
+        if (imageObserver) {
+            imageObserver.observe(image);
+        } else {
+            enqueueImage(image, url);
+        }
+    }
+
+    function resetImagePipeline() {
+        imageQueue = [];
+        activeImageLoads = 0;
+
+        if (imageObserver) {
+            try { imageObserver.disconnect(); } catch (ignoreDisconnect) {}
+        }
+
+        if (window.IntersectionObserver) {
+            imageObserver = new IntersectionObserver(function (entries) {
+                entries.forEach(function (entry) {
+                    var image;
+                    var url;
+                    if (!entry.isIntersecting) { return; }
+                    image = entry.target;
+                    url = image.getAttribute("data-src") || "";
+                    try { imageObserver.unobserve(image); } catch (ignoreUnobserve) {}
+                    enqueueImage(image, url);
+                });
+            }, {
+                root: byId("catalog-grid").parentNode,
+                rootMargin: "650px 0px",
+                threshold: 0.01
+            });
+        } else {
+            imageObserver = null;
+        }
     }
 
     function makeCard(item, index) {
@@ -732,6 +891,7 @@
         var meta = document.createElement("small");
         var favorite = document.createElement("button");
         var imageUrl = safeImageUrl(item.logo);
+        var fallback = posterFallback(item.name);
 
         card.className = "media-card";
         card.setAttribute("data-item-uid", item.uid);
@@ -742,22 +902,15 @@
         main.setAttribute("data-card-index", String(index));
 
         poster.className = "poster";
+        poster.appendChild(fallback);
 
         if (imageUrl) {
             var image = document.createElement("img");
-            image.src = imageUrl;
             image.alt = "";
-            image.addEventListener("error", function () {
-                if (image.parentNode) {
-                    image.parentNode.removeChild(image);
-                }
-                if (!poster.firstChild) {
-                    poster.appendChild(posterFallback(item.name));
-                }
-            });
+            image.className = "poster-image";
+            image.setAttribute("draggable", "false");
             poster.appendChild(image);
-        } else {
-            poster.appendChild(posterFallback(item.name));
+            observeImage(image, imageUrl);
         }
 
         copy.className = "card-copy";
@@ -806,24 +959,62 @@
         var grid = byId("catalog-grid");
         var start = state.visibleCount;
         var end = Math.min(state.filtered.length, start + state.batchSize);
+        var fragment;
         var i;
 
+        if (start >= end) { return; }
+
+        fragment = document.createDocumentFragment();
         for (i = start; i < end; i += 1) {
-            grid.appendChild(makeCard(state.filtered[i], i));
+            fragment.appendChild(makeCard(state.filtered[i], i));
         }
 
+        grid.appendChild(fragment);
         state.visibleCount = end;
+    }
+
+    function ensureGridFilled() {
+        var content = byId("catalog-grid").parentNode;
+        var guard = 0;
+
+        while (state.visibleCount < state.filtered.length &&
+                content.scrollHeight <= content.clientHeight + 500 &&
+                guard < 3) {
+            appendGridBatch();
+            guard += 1;
+        }
+    }
+
+    function scheduleGridAppend() {
+        if (gridAppendScheduled) { return; }
+        gridAppendScheduled = true;
+
+        (window.requestAnimationFrame || window.setTimeout)(function () {
+            var content = byId("catalog-grid").parentNode;
+            gridAppendScheduled = false;
+
+            if (state.view !== "catalog") { return; }
+
+            if (content.scrollTop + content.clientHeight >=
+                    content.scrollHeight - 900) {
+                appendGridBatch();
+            }
+        }, 16);
     }
 
     function renderGrid(reset) {
         var grid = byId("catalog-grid");
 
         if (reset) {
+            state.renderGeneration += 1;
             grid.innerHTML = "";
             state.visibleCount = 0;
+            resetImagePipeline();
         }
 
         appendGridBatch();
+        setTimeout(ensureGridFilled, 0);
+
         byId("catalog-empty").classList.toggle(
             "hidden",
             state.filtered.length !== 0
@@ -835,10 +1026,11 @@
 
         if (!isNaN(index) &&
                 state.visibleCount < state.filtered.length &&
-                index >= state.visibleCount - 8) {
+                index >= state.visibleCount - 10) {
             appendGridBatch();
         }
     }
+
 
     function openSeries(series) {
         setBusy(true, "Carregando episódios…");
@@ -1085,6 +1277,8 @@
             window.BlazzingStorage.setProgress(item.uid, milliseconds);
         }
     });
+
+    byId("catalog-grid").parentNode.addEventListener("scroll", scheduleGridAppend);
 
     document.addEventListener("mousemove", function () {
         if (state.view === "player") {
