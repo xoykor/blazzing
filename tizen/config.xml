@@ -7,7 +7,7 @@
     <tizen:application id="Blazzing01.Blazzing"
                        package="Blazzing01"
                        required_version="2.3"/>
-    <content src="index.html"/>
+    <content src="index.html"/>\n    <icon src="icon.png"/>
     <feature name="http://tizen.org/feature/screen.size.normal.1080.1920"/>
     <name>Blazzing</name>
     <tizen:profile name="tv-samsung"/>
