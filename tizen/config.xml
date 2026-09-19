@@ -6,7 +6,7 @@
         viewmodes="maximized">
     <tizen:application id="Blazzing01.Blazzing"
                        package="Blazzing01"
-                       required_version="2.3"/>
+                       required_version="9.0"/>
     <content src="index.html"/>
     <icon src="icon.png"/>
     <feature name="http://tizen.org/feature/screen.size.normal.1080.1920"/>
@@ -16,7 +16,7 @@
     <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
     <access origin="*" subdomains="true"/>
     <tizen:metadata key="http://samsung.com/tv/metadata/devel.api.version"
-                    value="2.4"/>
+                    value="9.0"/>
     <tizen:setting screen-orientation="landscape"
                    context-menu="disable"
                    background-support="disable"
