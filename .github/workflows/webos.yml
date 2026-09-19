@@ -50,12 +50,17 @@ jobs:
           node --check webos/tools/prepare.mjs
           node --check webos/tools/validate-release.mjs
           node --check webos/tools/validate-legacy-js.mjs
+          node --check webos/tools/validate-sensitive-data.mjs
 
       - name: Validate legacy webOS compatibility
         working-directory: webos
         run: npm run validate-compat
 
-      - name: Test M3U parser
+      - name: Validate runtime sensitive data
+        working-directory: webos
+        run: npm run validate-sensitive
+
+      - name: Run webOS regression tests
         working-directory: webos
         run: npm test
 
