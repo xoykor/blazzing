@@ -13,6 +13,10 @@ var CHANNELS_URL =
 var CATEGORIES_URL =
   "https://service-channels.clusters.pluto.tv/v2/guide/categories";
 var LEGACY_CHANNELS_URL = "https://api.pluto.tv/v2/channels.json";
+var VOD_URL =
+  "https://api.pluto.tv/v3/vod/categories" +
+  "?includeItems=true&deviceType=web&offset=1000";
+var SERIES_URL = "https://api.pluto.tv/v3/vod/series/";
 var USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/120.0 Safari/537.36";
@@ -338,6 +342,160 @@ function live(callback) {
   });
 }
 
+function validContentId(value) {
+  return /^[A-Za-z0-9_-]{4,128}$/.test(String(value || ""));
+}
+
+function vod(callback) {
+  boot(function (bootError, session) {
+    if (bootError) {
+      callback(bootError);
+      return;
+    }
+
+    requestJson(
+      VOD_URL,
+      authHeaders(session.sessionToken),
+      MAX_REDIRECTS,
+      function (error, payload) {
+        if (error) {
+          callback(error);
+          return;
+        }
+
+        if (!payload || !Array.isArray(payload.categories)) {
+          callback(new Error("Pluto VOD response is invalid."));
+          return;
+        }
+
+        callback(null, payload);
+      }
+    );
+  });
+}
+
+function series(seriesId, callback) {
+  if (!validContentId(seriesId)) {
+    callback(new Error("Invalid Pluto series ID."));
+    return;
+  }
+
+  boot(function (bootError, session) {
+    var target;
+
+    if (bootError) {
+      callback(bootError);
+      return;
+    }
+
+    target = SERIES_URL +
+      encodeURIComponent(String(seriesId)) +
+      "/seasons?includeItems=true&deviceType=web";
+
+    requestJson(
+      target,
+      authHeaders(session.sessionToken),
+      MAX_REDIRECTS,
+      callback
+    );
+  });
+}
+
+function sanitizeVodPath(value) {
+  var text = String(value || "").trim();
+  var parsed;
+  var path;
+
+  if (!text) {
+    return "";
+  }
+
+  if (/^https?:\/\//i.test(text)) {
+    try {
+      parsed = urlModule.parse(text);
+      path = String(parsed.pathname || "");
+    } catch (error) {
+      return "";
+    }
+  } else {
+    path = text.split("?")[0];
+  }
+
+  if (path.indexOf("/v2/stitch/") === 0) {
+    return path;
+  }
+
+  if (path.indexOf("/v1/stitch/") === 0) {
+    return "/v2" + path.slice(3);
+  }
+
+  if (path.indexOf("/stitch/") === 0) {
+    return "/v2" + path;
+  }
+
+  return "";
+}
+
+function buildVodStreamUrl(session, value) {
+  var path = sanitizeVodPath(value);
+  var params;
+  var extra;
+
+  if (!session ||
+      !session.sessionToken ||
+      !/^https?:\/\//i.test(String(session.stitcher || "")) ||
+      !path) {
+    return "";
+  }
+
+  params = [
+    "jwt=" + encodeURIComponent(session.sessionToken),
+    "masterJWTPassthrough=true",
+    "includeExtendedEvents=true"
+  ];
+
+  extra = String(session.stitcherParams || "")
+    .replace(/^[?&]+/, "")
+    .trim();
+
+  if (extra) {
+    params.push(extra);
+  }
+
+  return String(session.stitcher).replace(/\/+$/, "") +
+    path +
+    "?" +
+    params.join("&");
+}
+
+function vodStream(value, callback) {
+  var path = sanitizeVodPath(value);
+
+  if (!path) {
+    callback(new Error("Invalid Pluto VOD path."));
+    return;
+  }
+
+  boot(function (error, session) {
+    var url;
+
+    if (error) {
+      callback(error);
+      return;
+    }
+
+    url = buildVodStreamUrl(session, path);
+    if (!url) {
+      callback(new Error("Could not build Pluto VOD stream URL."));
+      return;
+    }
+
+    callback(null, {
+      url: url
+    });
+  });
+}
+
 function buildStreamUrl(session, channelId) {
   var params;
   var extra;
@@ -399,7 +557,12 @@ function stream(channelId, callback) {
 module.exports = {
   live: live,
   stream: stream,
+  vod: vod,
+  series: series,
+  vodStream: vodStream,
   buildStreamUrl: buildStreamUrl,
+  buildVodStreamUrl: buildVodStreamUrl,
+  sanitizeVodPath: sanitizeVodPath,
   tokenExpiryMs: tokenExpiryMs,
   validChannelId: validChannelId
 };
