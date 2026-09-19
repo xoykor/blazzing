@@ -1029,6 +1029,8 @@
     setMode("m3u");
     focusFirst();
 
+    if (window.BlazzingBoot) { window.BlazzingBoot.markReady(); }
+
     if (window.webapis && window.webapis.avplay) {
         byId("platform-badge").textContent = "Tizen · AVPlay";
     } else {
