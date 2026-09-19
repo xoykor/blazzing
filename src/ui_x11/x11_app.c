@@ -2669,8 +2669,7 @@ static bool start_m3u_series_load(app_t *a, size_t channel_index) {
         vip_channel_t *ch = &a->catalogs[CONTENT_SERIES].channels.items[i];
         char candidate[256];
         int season = 0, episode = 0;
-        if (!same_category(ch->category_id, selected->category_id) ||
-            !vip_m3u_parse_episode_label(ch->name, candidate, sizeof(candidate), &season, &episode) ||
+        if (!vip_m3u_parse_episode_label(ch->name, candidate, sizeof(candidate), &season, &episode) ||
             !same_text_case(candidate, series_name))
             continue;
         bool exists = false;
@@ -2740,8 +2739,7 @@ static bool start_m3u_series_load(app_t *a, size_t channel_index) {
             vip_channel_t *ch = &a->catalogs[CONTENT_SERIES].channels.items[i];
             char candidate[256];
             int season = 0, episode = 0;
-            if (!same_category(ch->category_id, selected->category_id) ||
-                !vip_m3u_parse_episode_label(ch->name, candidate, sizeof(candidate), &season, &episode) ||
+            if (!vip_m3u_parse_episode_label(ch->name, candidate, sizeof(candidate), &season, &episode) ||
                 season != seasons[si] || !same_text_case(candidate, series_name))
                 continue;
             vip_channel_t copy = *ch;
