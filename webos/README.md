@@ -20,7 +20,7 @@ Implemented:
 - direct browser fallback for Simulator development;
 - Xtream authentication;
 - Xtream live categories and channels;
-- Xtream VOD;
+- Xtream VOD plus movie detail metadata;
 - Xtream series, seasons and episodes;
 - catalog search by title/category;
 - persistent favorites without storing credentials or media URLs;
