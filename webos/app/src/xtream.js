@@ -205,6 +205,10 @@
         url: liveUrl(creds, id, row.direct_source),
         fallbackUrl: /^https?:\/\//i.test(String(row.direct_source || "")) ?
           liveUrl(creds, id, "") : "",
+        channelNumber: row.num == null ? "" : String(row.num),
+        epgChannelId: String(row.epg_channel_id || ""),
+        archiveDays: row.tv_archive === 1 || row.tv_archive === "1" ?
+          String(row.tv_archive_duration || "") : "",
         kind: "live",
         favoriteKey: favoriteKey(creds, "live", id)
       });
