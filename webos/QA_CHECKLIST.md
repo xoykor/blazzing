@@ -16,14 +16,16 @@ Use this checklist before removing the draft status from the webOS pull request.
 Record every installed Simulator version that is actually tested. Do not mark a
 version as supported only because the app packages successfully.
 
-| Simulator | Boot/UI | Remote navigation | M3U | Xtream | Pluto | Player | Artwork cache | Result |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| ____ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
+| Simulator | Resolution | Boot/UI | Remote navigation | M3U | Xtream | Pluto | Player | Artwork cache | Result |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ____ | 1280×720 | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
+| ____ | 1920×1080 | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | ____ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | ____ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 
 For each tested Simulator:
 
+- [ ] Home screen renders without clipping at 1280×720.
 - [ ] Home screen renders without clipping at 1920×1080.
 - [ ] Directional navigation never loses focus.
 - [ ] OK activates buttons and checkboxes.
