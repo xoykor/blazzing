@@ -12,6 +12,7 @@ var m3uCatalog = require("./m3u_catalog");
 var service = new Service("io.github.xoykor.blazzing.network");
 var MAX_TEXT_BYTES = 8 * 1024 * 1024;
 var MAX_M3U_BYTES = 128 * 1024 * 1024;
+var MAX_ARTWORK_BYTES = 1024 * 1024;
 var MAX_REDIRECTS = 5;
 var TIMEOUT_MS = 15000;
 var M3U_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -170,6 +171,118 @@ function fetchText(target, redirectsLeft, callback) {
   request.setTimeout(TIMEOUT_MS, function () {
     request.abort();
     done(new Error("Provider request timed out."));
+  });
+
+  request.on("error", function (error) {
+    done(error);
+  });
+}
+
+function fetchArtworkBinary(target, redirectsLeft, callback) {
+  var parsed;
+  var transport;
+  var request;
+  var completed = false;
+
+  function done(error, result) {
+    if (completed) {
+      return;
+    }
+    completed = true;
+    callback(error, result);
+  }
+
+  if (!validUrl(target)) {
+    done(new Error("Only HTTP/HTTPS artwork URLs are accepted."));
+    return;
+  }
+
+  parsed = urlModule.parse(target);
+  transport = parsed.protocol === "https:" ? https : http;
+
+  request = transport.get({
+    protocol: parsed.protocol,
+    hostname: parsed.hostname,
+    port: parsed.port,
+    path: parsed.path,
+    headers: {
+      "User-Agent": "Blazzing-webOS/0.14",
+      "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+      "Accept-Encoding": "identity"
+    }
+  }, function (response) {
+    var chunks = [];
+    var total = 0;
+    var location;
+    var contentLength;
+    var contentType = String(response.headers["content-type"] || "")
+      .split(";")[0]
+      .trim()
+      .toLowerCase();
+
+    if (response.statusCode >= 300 && response.statusCode < 400 &&
+        response.headers.location) {
+      response.resume();
+      if (redirectsLeft <= 0) {
+        done(new Error("Too many artwork redirects."));
+        return;
+      }
+
+      location = urlModule.resolve(target, response.headers.location);
+      completed = true;
+      fetchArtworkBinary(location, redirectsLeft - 1, callback);
+      return;
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      response.resume();
+      done(new Error("Artwork provider returned HTTP " + response.statusCode + "."));
+      return;
+    }
+
+    if (contentType &&
+        contentType.indexOf("image/") !== 0 &&
+        contentType !== "application/octet-stream") {
+      response.resume();
+      done(new Error("Artwork response is not an image."));
+      return;
+    }
+
+    contentLength = Number(response.headers["content-length"] || 0);
+    if (contentLength > MAX_ARTWORK_BYTES) {
+      response.resume();
+      done(new Error("Artwork exceeds the 1 MiB cache limit."));
+      return;
+    }
+
+    response.on("data", function (chunk) {
+      total += chunk.length;
+      if (total > MAX_ARTWORK_BYTES) {
+        request.abort();
+        done(new Error("Artwork exceeds the 1 MiB cache limit."));
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    response.on("end", function () {
+      var data = Buffer.concat(chunks);
+
+      done(null, {
+        mime: contentType || "application/octet-stream",
+        size: data.length,
+        base64: data.toString("base64")
+      });
+    });
+
+    response.on("error", function (error) {
+      done(error);
+    });
+  });
+
+  request.setTimeout(TIMEOUT_MS, function () {
+    request.abort();
+    done(new Error("Artwork request timed out."));
   });
 
   request.on("error", function (error) {
@@ -395,6 +508,36 @@ service.register("fetchM3U", function (message) {
       returnValue: true,
       text: text,
       finalUrl: finalUrl
+    });
+  });
+});
+
+service.register("fetchArtwork", function (message) {
+  var target = message.payload && message.payload.url;
+
+  if (!validUrl(target)) {
+    message.respond({
+      returnValue: false,
+      errorText: "Invalid artwork URL."
+    });
+    return;
+  }
+
+  fetchArtworkBinary(target, MAX_REDIRECTS, function (error, result) {
+    if (error) {
+      message.respond({
+        returnValue: false,
+        errorText: error.message || "Artwork request failed."
+      });
+      return;
+    }
+
+    message.respond({
+      returnValue: true,
+      mime: result.mime,
+      size: result.size,
+      base64: result.base64,
+      maxBytes: MAX_ARTWORK_BYTES
     });
   });
 });
