@@ -202,6 +202,59 @@ static bool episode_marker_at(const char *name, size_t len, size_t pos, size_t *
     return false;
 }
 
+/* Remove a trailing release-year token from the inferred series title.
+ * IPTV lists frequently encode episodes as "Loki 2021 S01E01" in one
+ * season and "Loki S02E01" in another. Treating the year as part of the
+ * title splits one show into multiple series cards.
+ *
+ * Plain years and the common "(2021)" / "[2021]" forms are accepted. */
+static size_t strip_trailing_release_year(const char *name, size_t title_end) {
+    if (!name || title_end == 0u)
+        return title_end;
+
+    size_t token_end = title_end;
+    size_t digit_end = token_end;
+    char closing = '\0';
+
+    if (digit_end > 0u && (name[digit_end - 1u] == ')' || name[digit_end - 1u] == ']')) {
+        closing = name[digit_end - 1u];
+        --digit_end;
+    }
+
+    size_t digit_start = digit_end;
+    while (digit_start > 0u && isdigit((unsigned char)name[digit_start - 1u]))
+        --digit_start;
+
+    if (digit_end - digit_start != 4u)
+        return title_end;
+
+    size_t token_start = digit_start;
+    if (closing) {
+        char opening = closing == ')' ? '(' : '[';
+        if (digit_start == 0u || name[digit_start - 1u] != opening)
+            return title_end;
+        token_start = digit_start - 1u;
+    }
+
+    int year = 0;
+    for (size_t i = digit_start; i < digit_end; ++i)
+        year = year * 10 + (name[i] - '0');
+
+    if (year < 1900 || year > 2099 || token_start == 0u)
+        return title_end;
+
+    size_t trimmed = token_start;
+    while (trimmed > 0u) {
+        unsigned char ch = (unsigned char)name[trimmed - 1u];
+        if (isspace(ch) || ch == '-' || ch == '_' || ch == '|' || ch == '.' || ch == ':')
+            --trimmed;
+        else
+            break;
+    }
+
+    return trimmed > 0u ? trimmed : title_end;
+}
+
 /* Parse episode label using the M3U provider. */
 bool vip_m3u_parse_episode_label(const char *name, char *series_out, size_t series_cap, int *season_out,
                                  int *episode_out) {
@@ -237,6 +290,11 @@ bool vip_m3u_parse_episode_label(const char *name, char *series_out, size_t seri
     }
     if (title_end == 0u)
         return false;
+
+    title_end = strip_trailing_release_year(name, title_end);
+    if (title_end == 0u)
+        return false;
+
     size_t copy = title_end < series_cap - 1u ? title_end : series_cap - 1u;
     memcpy(series_out, name, copy);
     series_out[copy] = '\0';
@@ -295,26 +353,38 @@ vip_status_t vip_m3u_split_catalog(const vip_category_list_t *source_categories,
         const vip_channel_t *ch = &source_channels->items[i];
         const vip_category_t *cat = find_category(source_categories, ch->category_id);
         vip_m3u_content_kind_t kind = cat ? vip_m3u_classify_group(cat->name) : VIP_M3U_CONTENT_LIVE;
-        if (!cat) {
-            char series_name[256];
-            if (vip_m3u_parse_episode_label(ch->name, series_name, sizeof(series_name), NULL, NULL))
-                kind = VIP_M3U_CONTENT_SERIES;
-        }
+
+        /* Episode syntax is stronger evidence than group-title. Public M3U
+         * lists often keep VOD episodes inside broad groups such as
+         * "Canais | Disney +" or "Canais | Globo". */
+        char series_name[256];
+        if (vip_m3u_parse_episode_label(ch->name, series_name, sizeof(series_name), NULL, NULL))
+            kind = VIP_M3U_CONTENT_SERIES;
         st = push_channel_for_kind(kind, ch, live_channels, vod_channels, series_channels, error);
         if (st != VIP_OK)
             goto fail;
     }
     for (size_t i = 0u; i < source_categories->len; ++i) {
         const vip_category_t *cat = &source_categories->items[i];
-        vip_m3u_content_kind_t kind = vip_m3u_classify_group(cat->name);
-        if (kind == VIP_M3U_CONTENT_SERIES && category_is_used(series_channels, cat->id))
-            st = vip_category_list_push(series_categories, cat, error);
-        else if (kind == VIP_M3U_CONTENT_VOD && category_is_used(vod_channels, cat->id))
-            st = vip_category_list_push(vod_categories, cat, error);
-        else if (kind == VIP_M3U_CONTENT_LIVE && category_is_used(live_channels, cat->id))
+
+        /* One upstream group may contain a mixture of live channels and
+         * episodes. Copy the category into every destination that actually
+         * uses it instead of forcing the whole group into a single tab. */
+        if (category_is_used(live_channels, cat->id)) {
             st = vip_category_list_push(live_categories, cat, error);
-        if (st != VIP_OK)
-            goto fail;
+            if (st != VIP_OK)
+                goto fail;
+        }
+        if (category_is_used(vod_channels, cat->id)) {
+            st = vip_category_list_push(vod_categories, cat, error);
+            if (st != VIP_OK)
+                goto fail;
+        }
+        if (category_is_used(series_channels, cat->id)) {
+            st = vip_category_list_push(series_categories, cat, error);
+            if (st != VIP_OK)
+                goto fail;
+        }
     }
     vip_error_clear(error);
     return VIP_OK;

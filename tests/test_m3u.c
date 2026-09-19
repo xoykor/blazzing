@@ -31,7 +31,11 @@ int main(void) {
         "https://stream/dbs-s01e01.ts\n"
         "#EXTINF:-1 tvg-logo=\"https://img/dragon.jpg\" group-title=\"Series | Crunchyroll\",Dragon Ball "
         "Super S01 E02\n"
-        "https://stream/dbs-s01e02.ts\n",
+        "https://stream/dbs-s01e02.ts\n"
+        "#EXTINF:-1 tvg-logo=\"https://img/loki.jpg\" group-title=\"Canais | Disney +\",Loki 2021 S01E06\n"
+        "https://stream/loki-s01e06.ts\n"
+        "#EXTINF:-1 tvg-logo=\"https://img/loki.jpg\" group-title=\"Canais | Disney +\",Loki S02E06\n"
+        "https://stream/loki-s02e06.ts\n",
         fp);
     TEST_CHECK(fclose(fp) == 0);
 
@@ -43,8 +47,8 @@ int main(void) {
     vip_error_t error = {0};
     TEST_STATUS(vip_m3u_load(path, &cats, &channels, provider_id, &error), VIP_OK, &error);
     TEST_CHECK(strlen(provider_id) == 16);
-    TEST_CHECK(cats.len == 3);
-    TEST_CHECK(channels.len == 4);
+    TEST_CHECK(cats.len == 4);
+    TEST_CHECK(channels.len == 6);
     TEST_CHECK(strcmp(channels.items[0].name, "Canal A, HD") == 0);
     TEST_CHECK(strcmp(channels.items[0].logo_url, "https://img/a.jpg") == 0);
 
@@ -64,6 +68,15 @@ int main(void) {
     TEST_CHECK(strcmp(series_name, "The Show") == 0);
     TEST_CHECK(season == 2 && episode == 3);
 
+    TEST_CHECK(vip_m3u_parse_episode_label("Loki 2021 S01E06", series_name, sizeof(series_name),
+                                           &season, &episode));
+    TEST_CHECK(strcmp(series_name, "Loki") == 0);
+    TEST_CHECK(season == 1 && episode == 6);
+    TEST_CHECK(vip_m3u_parse_episode_label("Loki S02E06", series_name, sizeof(series_name),
+                                           &season, &episode));
+    TEST_CHECK(strcmp(series_name, "Loki") == 0);
+    TEST_CHECK(season == 2 && episode == 6);
+
     vip_category_list_t live_cats, vod_cats, series_cats;
     vip_channel_list_t live_channels, vod_channels, series_channels;
     vip_category_list_init(&live_cats);
@@ -77,8 +90,19 @@ int main(void) {
                 VIP_OK, &error);
     TEST_CHECK(live_channels.len == 1 && live_cats.len == 1);
     TEST_CHECK(vod_channels.len == 1 && vod_cats.len == 1);
-    TEST_CHECK(series_channels.len == 2 && series_cats.len == 1);
+    TEST_CHECK(series_channels.len == 4 && series_cats.len == 2);
     TEST_CHECK(strcmp(series_channels.items[0].name, "Dragon Ball Super S01 E01") == 0);
+
+    /* Episode markers override a generic live-TV group. */
+    bool found_loki_s1 = false;
+    bool found_loki_s2 = false;
+    for (size_t i = 0u; i < series_channels.len; ++i) {
+        if (strcmp(series_channels.items[i].name, "Loki 2021 S01E06") == 0)
+            found_loki_s1 = true;
+        if (strcmp(series_channels.items[i].name, "Loki S02E06") == 0)
+            found_loki_s2 = true;
+    }
+    TEST_CHECK(found_loki_s1 && found_loki_s2);
 
     char first_id[32];
     snprintf(first_id, sizeof(first_id), "%s", channels.items[0].id);
