@@ -203,6 +203,8 @@
         group: group,
         logo: String(row.stream_icon || ""),
         url: liveUrl(creds, id, row.direct_source),
+        fallbackUrl: /^https?:\/\//i.test(String(row.direct_source || "")) ?
+          liveUrl(creds, id, "") : "",
         kind: "live",
         favoriteKey: favoriteKey(creds, "live", id)
       });
@@ -252,6 +254,13 @@
           row.container_extension || "mp4",
           row.direct_source
         ),
+        fallbackUrl: /^https?:\/\//i.test(String(row.direct_source || "")) ?
+          vodUrl(
+            creds,
+            id,
+            row.container_extension || "mp4",
+            ""
+          ) : "",
         kind: "vod",
         vodId: String(id),
         favoriteKey: favoriteKey(creds, "vod", id)
