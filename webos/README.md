@@ -73,6 +73,10 @@ cd webos
 The generated IPK in `webos/dist` contains both the app and
 `io.github.xoykor.blazzing.network`.
 
+Pull-request CI also builds the installable IPK and exposes it as the
+`blazzing-webos-ipk` workflow artifact. App, service and development package
+versions are kept aligned and validated before packaging.
+
 ## Install on a configured TV
 
 ~~~fish
