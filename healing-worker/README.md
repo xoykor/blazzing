@@ -65,19 +65,26 @@ Ramys:
 - `CanaisBR02.m3u8`
 - `CanaisBR03.m3u8`
 - `CanaisBR04.m3u8`
+- `Filmes-Series.m3u8` (VOD)
 
 A arquitetura aceita novas fontes sem mudar o cliente.
 
 ## Próxima camada
 
-O índice gerado terá várias fontes por canal:
+O índice gerado terá múltiplas fontes por item, separando Live e VOD:
 
 ```
+Live:
 Canal
   fonte 1  <- preferida
   fonte 2
   fonte 3
-  fonte 4
+
+VOD:
+Filme/Série
+  fonte 1
+  fonte 2
+  fonte 3
 ```
 
 A política de reprodução seguirá o comportamento observado no Saimo:
