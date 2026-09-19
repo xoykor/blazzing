@@ -299,9 +299,11 @@ input {
   width: calc(33.333% - 16px);
   min-height: 118px;
   margin: 0 8px 16px;
-  padding: 18px;
+  padding: 14px;
   text-align: left;
   color: #f5f7fb;
+  display: flex;
+  align-items: center;
   background: #101a2a;
   border: 2px solid #21324a;
   border-radius: 16px;
@@ -347,8 +349,45 @@ input {
   font-size: 15px;
 }
 
+.media-artwork {
+  position: relative;
+  flex: 0 0 84px;
+  width: 84px;
+  height: 84px;
+  margin-right: 14px;
+  overflow: hidden;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  color: #7e91aa !important;
+  background: #0a111c;
+  border: 1px solid #263a55;
+  border-radius: 12px;
+  font-size: 30px !important;
+  font-weight: 700;
+}
+
+.media-artwork img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.media-artwork.has-image {
+  color: transparent !important;
+}
+
+.media-copy {
+  min-width: 0;
+  flex: 1;
+  display: block !important;
+}
+
 .media-card strong {
   display: block;
+  padding-right: 26px;
   font-size: 21px;
   line-height: 1.25;
 }
@@ -437,7 +476,15 @@ input {
     width: calc(33.333% - 12px);
     margin: 0 6px 12px;
     min-height: 92px;
-    padding: 14px;
+    padding: 10px;
+  }
+
+  .media-artwork {
+    flex-basis: 64px;
+    width: 64px;
+    height: 64px;
+    margin-right: 10px;
+    font-size: 24px !important;
   }
 
   .media-card strong {
