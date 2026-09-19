@@ -12,7 +12,9 @@ var TIMEOUT_MS = 15000;
 var XTREAM_ACTIONS = {
   "": true,
   "get_live_categories": true,
-  "get_live_streams": true
+  "get_live_streams": true,
+  "get_vod_categories": true,
+  "get_vod_streams": true
 };
 
 function validUrl(value) {

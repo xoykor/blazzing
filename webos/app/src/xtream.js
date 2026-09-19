@@ -70,8 +70,67 @@
       encodeURIComponent(String(streamId)) + ".ts";
   }
 
+  function vodUrl(creds, streamId, extension, directSource) {
+    var ext = String(extension || "mp4").replace(/^\.+/, "");
+
+    if (/^https?:\/\//i.test(String(directSource || ""))) {
+      return directSource;
+    }
+
+    if (!ext) {
+      ext = "mp4";
+    }
+
+    return creds.server + "movie/" +
+      encodeURIComponent(creds.username) + "/" +
+      encodeURIComponent(creds.password) + "/" +
+      encodeURIComponent(String(streamId)) + "." +
+      encodeURIComponent(ext);
+  }
+
+  function makeCategoryMap(categories) {
+    var names = {};
+    var i;
+    var row;
+    var id;
+    var name;
+
+    if (!Array.isArray(categories)) {
+      throw new Error("Provider Xtream retornou categorias inválidas.");
+    }
+
+    for (i = 0; i < categories.length; i += 1) {
+      row = categories[i] || {};
+      id = String(row.category_id == null ? "" : row.category_id);
+      name = String(row.category_name || "").trim();
+      if (id && name) {
+        names[id] = name;
+      }
+    }
+
+    return names;
+  }
+
+  function addGroup(groups, seenGroups, group) {
+    if (!seenGroups[group]) {
+      seenGroups[group] = true;
+      groups.push(group);
+    }
+  }
+
+  function finishCatalog(items, groups) {
+    groups.sort(function (a, b) {
+      return a.toLowerCase().localeCompare(b.toLowerCase());
+    });
+
+    return {
+      items: items,
+      groups: groups
+    };
+  }
+
   function buildLiveCatalog(categories, streams, creds) {
-    var categoryNames = {};
+    var categoryNames = makeCategoryMap(categories);
     var groups = [];
     var seenGroups = {};
     var items = [];
@@ -82,17 +141,8 @@
     var categoryId;
     var group;
 
-    if (!Array.isArray(categories) || !Array.isArray(streams)) {
-      throw new Error("Provider Xtream retornou um catálogo inválido.");
-    }
-
-    for (i = 0; i < categories.length; i += 1) {
-      row = categories[i] || {};
-      id = String(row.category_id == null ? "" : row.category_id);
-      name = String(row.category_name || "").trim();
-      if (id && name) {
-        categoryNames[id] = name;
-      }
+    if (!Array.isArray(streams)) {
+      throw new Error("Provider Xtream retornou canais inválidos.");
     }
 
     for (i = 0; i < streams.length; i += 1) {
@@ -117,29 +167,69 @@
         title: name,
         group: group,
         logo: String(row.stream_icon || ""),
-        url: liveUrl(creds, id, row.direct_source)
+        url: liveUrl(creds, id, row.direct_source),
+        kind: "live"
       });
 
-      if (!seenGroups[group]) {
-        seenGroups[group] = true;
-        groups.push(group);
-      }
+      addGroup(groups, seenGroups, group);
     }
 
-    groups.sort(function (a, b) {
-      return a.toLowerCase().localeCompare(b.toLowerCase());
-    });
+    return finishCatalog(items, groups);
+  }
 
-    return {
-      items: items,
-      groups: groups
-    };
+  function buildVodCatalog(categories, streams, creds) {
+    var categoryNames = makeCategoryMap(categories);
+    var groups = [];
+    var seenGroups = {};
+    var items = [];
+    var i;
+    var row;
+    var id;
+    var name;
+    var categoryId;
+    var group;
+
+    if (!Array.isArray(streams)) {
+      throw new Error("Provider Xtream retornou filmes inválidos.");
+    }
+
+    for (i = 0; i < streams.length; i += 1) {
+      row = streams[i] || {};
+      id = row.stream_id;
+      name = String(row.name || row.title || "").trim();
+
+      if ((id == null || id === "") || !name) {
+        continue;
+      }
+
+      categoryId = String(row.category_id == null ? "" : row.category_id);
+      group = categoryNames[categoryId] || "Sem categoria";
+
+      items.push({
+        index: items.length,
+        title: name,
+        group: group,
+        logo: String(row.stream_icon || row.cover || ""),
+        url: vodUrl(
+          creds,
+          id,
+          row.container_extension || "mp4",
+          row.direct_source
+        ),
+        kind: "vod"
+      });
+
+      addGroup(groups, seenGroups, group);
+    }
+
+    return finishCatalog(items, groups);
   }
 
   global.BlazzingXtream = {
     credentials: credentials,
     apiUrl: apiUrl,
     authAccepted: authAccepted,
-    buildLiveCatalog: buildLiveCatalog
+    buildLiveCatalog: buildLiveCatalog,
+    buildVodCatalog: buildVodCatalog
   };
 }(window));

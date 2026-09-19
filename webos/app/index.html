@@ -15,7 +15,7 @@
           <h1>Seu conteúdo, direto na TV.</h1>
           <p>Protótipo nativo para webOS com pareamento, M3U e player.</p>
         </div>
-        <div class="version-badge">webOS alpha 0.2</div>
+        <div class="version-badge">webOS alpha 0.3</div>
       </header>
 
       <div class="action-grid">
@@ -34,7 +34,7 @@
         <button id="action-xtream" class="card focusable" type="button">
           <span class="card-kicker">Xtream</span>
           <strong>Entrar no provider</strong>
-          <span>Autentica e carrega categorias e canais de TV ao vivo.</span>
+          <span>Autentica e carrega TV ao vivo ou filmes do provider.</span>
         </button>
 
         <button id="action-manual" class="card focusable" type="button">
@@ -116,7 +116,8 @@
         <input id="xtream-password" class="focusable" type="password"
                autocomplete="off">
         <div class="row">
-          <button id="xtream-login" class="primary focusable" type="button">Entrar</button>
+          <button id="xtream-live" class="primary focusable" type="button">TV ao vivo</button>
+          <button id="xtream-vod" class="primary focusable" type="button">Filmes</button>
           <button id="xtream-back" class="secondary focusable" type="button">Voltar</button>
         </div>
         <p id="xtream-status" class="status"></p>
@@ -142,7 +143,7 @@
       <div class="panel">
         <div class="eyebrow">Alpha webOS</div>
         <h2>Blazzing webOS</h2>
-        <p>A base já separa navegação, player, pareamento, rede e parser M3U. O próximo bloco é Xtream, persistência e catálogo virtualizado.</p>
+        <p>A base já separa navegação, player, pareamento, M3U e Xtream. TV ao vivo e filmes compartilham o mesmo catálogo; séries e persistência vêm depois.</p>
         <button id="about-back" class="secondary focusable" type="button">Voltar</button>
       </div>
     </section>

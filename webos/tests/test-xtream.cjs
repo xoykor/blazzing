@@ -54,4 +54,34 @@ assert.strictEqual(
 );
 assert.strictEqual(catalog.items[1].url, "https://cdn.example/direct.m3u8");
 
+const vod = xtream.buildVodCatalog(
+  [
+    { category_id: "30", category_name: "Action" }
+  ],
+  [
+    {
+      stream_id: 9,
+      name: "Movie One",
+      category_id: "30",
+      container_extension: "mkv"
+    },
+    {
+      stream_id: 10,
+      title: "Direct Movie",
+      category_id: "30",
+      direct_source: "https://cdn.example/movie.mp4"
+    }
+  ],
+  creds
+);
+
+assert.strictEqual(vod.items.length, 2);
+assert.deepStrictEqual(Array.from(vod.groups), ["Action"]);
+assert.strictEqual(vod.items[0].kind, "vod");
+assert.strictEqual(
+  vod.items[0].url,
+  "http://provider.example:8080/movie/user%20name/p%40ss/9.mkv"
+);
+assert.strictEqual(vod.items[1].url, "https://cdn.example/movie.mp4");
+
 console.log("Xtream parser tests passed");

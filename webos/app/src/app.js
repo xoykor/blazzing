@@ -250,8 +250,11 @@
     loadPlaylist(byId("m3u-url").value.trim(), "Playlist M3U");
   });
 
-  byId("xtream-login").addEventListener("click", function () {
+  function loadXtreamCatalog(kind) {
     var creds;
+    var categoryAction;
+    var streamAction;
+    var loadingLabel;
 
     try {
       creds = global.BlazzingXtream.credentials(
@@ -264,6 +267,16 @@
       return;
     }
 
+    if (kind === "vod") {
+      categoryAction = "get_vod_categories";
+      streamAction = "get_vod_streams";
+      loadingLabel = "filmes";
+    } else {
+      categoryAction = "get_live_categories";
+      streamAction = "get_live_streams";
+      loadingLabel = "canais";
+    }
+
     byId("xtream-status").textContent = "Autenticando…";
 
     global.BlazzingNetwork.xtreamRequest(creds, "").then(function (auth) {
@@ -271,31 +284,54 @@
         throw new Error("Provider rejeitou as credenciais.");
       }
 
-      byId("xtream-status").textContent = "Carregando canais…";
+      byId("xtream-status").textContent = "Carregando " + loadingLabel + "…";
       return Promise.all([
-        global.BlazzingNetwork.xtreamRequest(creds, "get_live_categories"),
-        global.BlazzingNetwork.xtreamRequest(creds, "get_live_streams")
+        global.BlazzingNetwork.xtreamRequest(creds, categoryAction),
+        global.BlazzingNetwork.xtreamRequest(creds, streamAction)
       ]);
     }).then(function (responses) {
-      var parsed = global.BlazzingXtream.buildLiveCatalog(
-        responses[0],
-        responses[1],
-        creds
-      );
+      var parsed;
+
+      if (kind === "vod") {
+        parsed = global.BlazzingXtream.buildVodCatalog(
+          responses[0],
+          responses[1],
+          creds
+        );
+      } else {
+        parsed = global.BlazzingXtream.buildLiveCatalog(
+          responses[0],
+          responses[1],
+          creds
+        );
+      }
 
       byId("xtream-password").value = "";
 
       if (!parsed.items.length) {
-        throw new Error("Provider não retornou canais live.");
+        throw new Error(
+          kind === "vod" ?
+            "Provider não retornou filmes." :
+            "Provider não retornou canais live."
+        );
       }
 
-      byId("catalog-provider").textContent = "Xtream";
-      renderCatalog(parsed, "TV ao vivo");
+      byId("catalog-provider").textContent =
+        kind === "vod" ? "Xtream • Filmes" : "Xtream • TV";
+      renderCatalog(parsed, kind === "vod" ? "Filmes" : "TV ao vivo");
     }).catch(function (error) {
       byId("xtream-password").value = "";
       byId("xtream-status").textContent =
         error && error.message ? error.message : "Falha ao carregar Xtream.";
     });
+  }
+
+  byId("xtream-live").addEventListener("click", function () {
+    loadXtreamCatalog("live");
+  });
+
+  byId("xtream-vod").addEventListener("click", function () {
+    loadXtreamCatalog("vod");
   });
 
   byId("manual-play").addEventListener("click", function () {
