@@ -3,7 +3,8 @@
   "private": true,
   "version": "0.2.0",
   "scripts": {
-    "prepare-app": "node tools/prepare.mjs"
+    "prepare-app": "node tools/prepare.mjs",
+    "test": "node tests/test-m3u.cjs"
   },
   "devDependencies": {
     "@webos-tools/cli": "3.2.4",

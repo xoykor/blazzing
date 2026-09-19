@@ -70,6 +70,10 @@ jobs:
           done
           node --check webos/tools/prepare.mjs
 
+      - name: Test M3U parser
+        working-directory: webos
+        run: npm test
+
       - name: Validate prepared package inputs
         run: |
           test -f webos/app/index.html
