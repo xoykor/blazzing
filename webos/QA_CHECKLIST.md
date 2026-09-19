@@ -9,7 +9,9 @@ Use this checklist before removing the draft status from the webOS pull request.
 - [ ] GitHub Actions **webOS** workflow passes.
 - [ ] GitHub Actions **CI** workflow passes.
 - [ ] The workflow publishes a `blazzing-webos-ipk` artifact.
-- [ ] The IPK contains both the app and `io.github.xoykor.blazzing.network`.
+- [ ] CI inspection confirms the IPK contains both the app and `io.github.xoykor.blazzing.network`.
+- [ ] CI inspection confirms app metadata, both packaged icons, service entrypoint and `services.json` are inside the IPK.
+- [ ] The artifact includes `SHA256SUMS.txt` for the generated IPK.
 - [ ] Release validation confirms `icon.png` is 80×80 and `largeicon.png` is 130×130.
 
 ## Simulator matrix
