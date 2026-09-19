@@ -3,6 +3,7 @@
     "use strict";
 
     var video = document.getElementById("html5-player");
+    var avSurface = document.getElementById("av-player-object");
     var currentItem = null;
     var usingAvPlay = false;
     var onState = function () {};
@@ -14,6 +15,13 @@
 
     function emitState(text) {
         onState(text);
+    }
+
+    function setAvSurfaceActive(active) {
+        document.body.classList.toggle("avplay-active", !!active);
+        if (avSurface) {
+            avSurface.setAttribute("aria-hidden", active ? "false" : "true");
+        }
     }
 
     function setScreenSaver(enabled) {
@@ -54,6 +62,7 @@
     function stop() {
         closeAvPlay();
         stopHtml5();
+        setAvSurfaceActive(false);
         setScreenSaver(true);
         currentItem = null;
         usingAvPlay = false;
@@ -77,9 +86,15 @@
 
         usingAvPlay = true;
         video.classList.add("hidden");
+        setAvSurfaceActive(true);
         window.webapis.avplay.open(item.url);
         window.webapis.avplay.setListener(listener);
         window.webapis.avplay.setDisplayRect(0, 0, 1920, 1080);
+        try {
+            window.webapis.avplay.setDisplayMethod(
+                "PLAYER_DISPLAY_MODE_LETTER_BOX"
+            );
+        } catch (ignoreDisplayMethod) {}
         emitState("Preparando…");
 
         window.webapis.avplay.prepareAsync(function () {
@@ -94,13 +109,18 @@
                 emitState("Falha ao iniciar a reprodução.");
             }
         }, function (error) {
-            emitState("Falha ao preparar a mídia.");
+            closeAvPlay();
+            usingAvPlay = false;
+            setAvSurfaceActive(false);
+            emitState("AVPlay falhou; tentando player alternativo…");
+            openHtml5(item, resumeMs || 0);
         });
     }
 
     function openHtml5(item, resumeMs) {
         var promise;
         usingAvPlay = false;
+        setAvSurfaceActive(false);
         video.classList.remove("hidden");
         video.src = item.url;
         emitState("Preparando…");
@@ -128,6 +148,7 @@
             } catch (error) {
                 closeAvPlay();
                 usingAvPlay = false;
+                setAvSurfaceActive(false);
             }
         }
         openHtml5(item, resumeMs || 0);
