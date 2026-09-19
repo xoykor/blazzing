@@ -13,7 +13,8 @@ Implemented:
 - HTML5 video wrapper;
 - encrypted phone pairing using the production Blazzing Worker;
 - local QR rendering;
-- M3U/M3U8 URL loading;
+- M3U/M3U8 URL loading up to 128 MiB on the packaged webOS service;
+- disk-backed M3U catalog paging so large playlists do not live entirely in UI RAM;
 - M3U parser, categories and catalog grid;
 - provider artwork with lightweight fallback tiles;
 - packaged Node.js network service for providers blocked by browser CORS;
@@ -30,7 +31,6 @@ Implemented:
 Still planned:
 
 - full catalog virtualization beyond the current 48-item page window;
-- large-playlist handling beyond the temporary 8 MiB alpha limit;
 - artwork cache;
 - store submission and real-TV media validation.
 
@@ -55,7 +55,9 @@ To choose another installed Simulator version:
 ~~~
 
 The Simulator validates UI, navigation, pairing, QR, parsers and most JavaScript behavior.
-Actual codec/HLS compatibility still requires real LG hardware.
+The 128 MiB low-memory path is specifically implemented by the packaged webOS
+network service; direct browser fallback may use more RAM. Actual codec/HLS
+compatibility still requires real LG hardware.
 
 ## Package
 
