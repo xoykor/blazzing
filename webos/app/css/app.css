@@ -432,6 +432,16 @@ input {
   color: #9fb0c4;
 }
 
+.player-actions {
+  display: flex;
+  align-items: center;
+}
+
+.player-actions button {
+  min-width: 0;
+  margin: 0 0 0 12px;
+}
+
 @media (max-width: 1366px) {
   body {
     font-size: 18px;
