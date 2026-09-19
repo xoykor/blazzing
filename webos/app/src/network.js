@@ -92,7 +92,8 @@
         username: creds.username,
         password: creds.password,
         action: action || "",
-        seriesId: params && params.seriesId != null ? String(params.seriesId) : ""
+        seriesId: params && params.seriesId != null ? String(params.seriesId) : "",
+        vodId: params && params.vodId != null ? String(params.vodId) : ""
       }).then(function (response) {
         if (typeof response.text !== "string") {
           throw new Error("O serviço webOS não retornou JSON Xtream.");
