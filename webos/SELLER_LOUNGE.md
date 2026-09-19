@@ -8,7 +8,7 @@ Lounge forms, UX Scenario template, or App Self Checklist.
 - App title: **Blazzing**
 - Suggested category: **Entertainment**
 - App ID: `io.github.xoykor.blazzing`
-- Current alpha package version: `0.12.0`
+- Current alpha package version: `0.13.0`
 - Vendor: `xoykor`
 
 ## Short description — pt-BR
