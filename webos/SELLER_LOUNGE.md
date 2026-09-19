@@ -115,8 +115,8 @@ Availability varies by region and current Pluto TV catalog.
 
 Before submission, verify/provide:
 
-- [ ] Packaged small icon: 80×80 PNG, referenced by `icon`.
-- [ ] Packaged large icon: 130×130 PNG, referenced by `largeIcon`.
+- [x] Packaged small icon: 80×80 PNG, referenced by `icon`.
+- [x] Packaged large icon: 130×130 PNG, referenced by `largeIcon`.
 - [ ] Seller Lounge icon: 400×400 PNG.
 - [ ] Required Seller Lounge screenshots/store artwork.
 - [ ] Current LG App Self Checklist completed with real results.
