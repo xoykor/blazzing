@@ -86,6 +86,29 @@ assert.strictEqual(
   "http://provider.example:8080/movie/user%20name/p%40ss/9.mkv"
 );
 assert.strictEqual(vod.items[1].url, "https://cdn.example/movie.mp4");
+assert.strictEqual(vod.items[0].vodId, "9");
+
+const vodMeta = xtream.buildVodMetadata({
+  info: {
+    plot: "A test movie.",
+    genre: "Drama",
+    releasedate: "2025",
+    rating: "8.4",
+    duration: "01:45:00",
+    movie_image: "https://img/movie.jpg"
+  },
+  movie_data: {
+    name: "Movie Details"
+  }
+}, vod.items[0]);
+
+assert.strictEqual(vodMeta.title, "Movie Details");
+assert.strictEqual(vodMeta.plot, "A test movie.");
+assert.strictEqual(vodMeta.genre, "Drama");
+assert.strictEqual(vodMeta.year, "2025");
+assert.strictEqual(vodMeta.rating, "8.4");
+assert.strictEqual(vodMeta.duration, "01:45:00");
+assert.strictEqual(vodMeta.logo, "https://img/movie.jpg");
 
 const series = xtream.buildSeriesCatalog(
   [
@@ -131,6 +154,10 @@ assert.strictEqual(episodes.items[1].logo, "https://img/ep.jpg");
 assert(
   xtream.apiUrl(creds, "get_series_info", { seriesId: 77 })
     .includes("&series_id=77")
+);
+assert(
+  xtream.apiUrl(creds, "get_vod_info", { vodId: 9 })
+    .includes("&vod_id=9")
 );
 
 console.log("Xtream parser tests passed");
