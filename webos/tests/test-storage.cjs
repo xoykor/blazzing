@@ -79,6 +79,28 @@ assert(!progressSerialized.includes("http://"));
 assert(!progressSerialized.includes("user"));
 assert(!progressSerialized.includes("password"));
 
+assert.strictEqual(storage.getXtreamProfile(), null);
+assert.strictEqual(
+  storage.setXtreamProfile("https://provider.example/", "viewer"),
+  true
+);
+assert.deepStrictEqual(
+  Object.assign({}, storage.getXtreamProfile()),
+  {
+    server: "https://provider.example/",
+    username: "viewer"
+  }
+);
+
+let profileSerialized = Object.values(data).join("\n");
+assert(profileSerialized.includes("provider.example"));
+assert(profileSerialized.includes("viewer"));
+assert(!profileSerialized.includes("p@ss"));
+assert(!profileSerialized.includes("password"));
+
+storage.clearXtreamProfile();
+assert.strictEqual(storage.getXtreamProfile(), null);
+
 storage.setProgress(mediaKey, 3590, 3600);
 assert.strictEqual(storage.getProgress(mediaKey), 0);
 
