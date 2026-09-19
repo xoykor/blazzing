@@ -70,8 +70,14 @@
     }
   }
 
+  function releaseDetailArtwork() {
+    global.BlazzingArtwork.releaseImage(byId("vod-poster"));
+    global.BlazzingArtwork.releaseImage(byId("series-poster"));
+  }
+
   function showHome() {
     stopPairing();
+    releaseDetailArtwork();
     savePlayerProgress();
     global.BlazzingPlayer.stop();
     activeProgressKey = "";
@@ -465,6 +471,8 @@
   }
 
   function returnToCatalog() {
+    releaseDetailArtwork();
+
     if (catalog) {
       showScreen("catalog");
       renderCatalogGroup(selectedGroup, true);
