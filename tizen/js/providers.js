@@ -39,17 +39,70 @@
                 hasWord(norm, "seriados") || hasWord(norm, "seriado") ||
                 hasWord(norm, "anime") || hasWord(norm, "animes") ||
                 hasWord(norm, "novela") || hasWord(norm, "novelas") ||
-                hasWord(norm, "dorama") || hasWord(norm, "doramas")) {
+                hasWord(norm, "dorama") || hasWord(norm, "doramas") ||
+                hasWord(norm, "temporada") || hasWord(norm, "temporadas")) {
             return "series";
         }
 
         if (hasWord(norm, "filmes") || hasWord(norm, "filme") ||
                 hasWord(norm, "movies") || hasWord(norm, "movie") ||
-                hasWord(norm, "vod") || hasWord(norm, "cinema")) {
+                hasWord(norm, "vod") || hasWord(norm, "cinema") ||
+                hasWord(norm, "lancamentos") || hasWord(norm, "lancamento")) {
             return "vod";
         }
 
         return "live";
+    }
+
+    function inferKind(group, name, mediaUrl, episode) {
+        var groupKind = classifyGroup(group);
+        var norm = normalizeWords(group);
+        var url = String(mediaUrl || "").toLowerCase().split("?")[0];
+        var vodExtension = /\.(mp4|mkv|avi|mov|m4v|webm)$/.test(url);
+
+        if (episode) {
+            return "series";
+        }
+
+        if (groupKind !== "live") {
+            return groupKind;
+        }
+
+        if (vodExtension &&
+                !hasWord(norm, "tv") &&
+                !hasWord(norm, "canais") &&
+                !hasWord(norm, "canal") &&
+                !hasWord(norm, "ao vivo") &&
+                !hasWord(norm, "live")) {
+            return "vod";
+        }
+
+        return "live";
+    }
+
+    function cleanCategoryName(group, kind) {
+        var value = String(group || "")
+            .replace(/^\s+|\s+$/g, "")
+            .replace(/\s+/g, " ");
+
+        if (!value || normalizeWords(value) === "sem grupo") {
+            return "Outros";
+        }
+
+        value = value
+            .replace(/^\s*(?:\[[^\]]+\]\s*)+/g, "")
+            .replace(/^\s*(?:BR\s*[-|:]\s*)/i, "")
+            .replace(/^\s*(?:CANAIS?|TV|AO\s*VIVO|LIVE)\s*[-|:»>]\s*/i, "")
+            .replace(/^\s*(?:FILMES?|MOVIES?|VOD|CINEMA)\s*[-|:»>]\s*/i, "")
+            .replace(/^\s*(?:S[ÉE]RIES?|SERIADOS?|ANIMES?|NOVELAS?|DORAMAS?)\s*[-|:»>]\s*/i, "")
+            .replace(/^\s+|\s+$/g, "");
+
+        if (!value) {
+            return kind === "vod" ? "Filmes" :
+                (kind === "series" ? "Séries" : "TV");
+        }
+
+        return value;
     }
 
     function parseEpisodeLabel(name) {
@@ -134,16 +187,17 @@
         return (slash >= 8 ? source.slice(0, slash + 1) : origin + "/") + media;
     }
 
-    function categoryId(group) {
-        return "m3ug:" + hashText(group || "Sem grupo");
+    function categoryId(group, kind) {
+        return "m3ug:" + hashText((kind || "") + "|" + normalizeWords(group || "Outros"));
     }
 
     function makeM3uItem(source, pending, mediaUrl) {
         var name = pending.name || "Canal";
-        var group = pending.group || "Sem grupo";
+        var rawGroup = pending.group || "Sem grupo";
         var episode = parseEpisodeLabel(name);
-        var kind = episode ? "series" : classifyGroup(group);
         var resolved = resolveUrl(source, mediaUrl);
+        var kind = inferKind(rawGroup, name, resolved, episode);
+        var group = cleanCategoryName(rawGroup, kind);
 
         return {
             uid: "m3u:" + hashText(name + "|" + resolved),
@@ -151,7 +205,8 @@
             kind: kind,
             name: name,
             group: group,
-            categoryId: categoryId(group),
+            rawGroup: rawGroup,
+            categoryId: categoryId(group, kind),
             categoryName: group,
             logo: pending.logo || "",
             url: resolved,
@@ -172,8 +227,8 @@
         var next;
 
         function ensureCategory(kind, group) {
-            var safeGroup = group || "Sem grupo";
-            var id = categoryId(safeGroup);
+            var safeGroup = cleanCategoryName(group, kind);
+            var id = categoryId(safeGroup, kind);
             if (!categoryMaps[kind][id]) {
                 categoryMaps[kind][id] = true;
                 catalogs[kind].categories.push({ id: id, name: safeGroup });
@@ -238,7 +293,7 @@
                     kind: "series",
                     name: info.title,
                     group: item.group,
-                    categoryId: categoryId(item.group),
+                    categoryId: categoryId(item.group, "series"),
                     categoryName: item.group,
                     logo: item.logo,
                     episodes: []
@@ -283,6 +338,32 @@
                     return a.season - b.season;
                 }
                 return a.episode - b.episode;
+            });
+        });
+
+        ["live", "vod", "series"].forEach(function (kind) {
+            catalogs[kind].categories.sort(function (a, b) {
+                return String(a.name || "").localeCompare(
+                    String(b.name || ""),
+                    "pt-BR",
+                    { sensitivity: "base", numeric: true }
+                );
+            });
+
+            catalogs[kind].items.sort(function (a, b) {
+                var categoryCompare = String(a.categoryName || "").localeCompare(
+                    String(b.categoryName || ""),
+                    "pt-BR",
+                    { sensitivity: "base", numeric: true }
+                );
+                if (categoryCompare !== 0) {
+                    return categoryCompare;
+                }
+                return String(a.name || "").localeCompare(
+                    String(b.name || ""),
+                    "pt-BR",
+                    { sensitivity: "base", numeric: true }
+                );
             });
         });
 
@@ -546,6 +627,8 @@
     window.BlazzingProviders = {
         hashText: hashText,
         classifyGroup: classifyGroup,
+        cleanCategoryName: cleanCategoryName,
+        inferKind: inferKind,
         parseEpisodeLabel: parseEpisodeLabel,
         loadM3u: loadM3u,
         parseM3u: parseM3u,
