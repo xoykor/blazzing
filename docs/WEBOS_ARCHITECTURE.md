@@ -95,6 +95,12 @@ Xtream passwords. M3U URLs are fingerprinted before an item key is persisted.
 The catalog always exposes a **Favoritos** group. The yellow remote key toggles the
 focused item; the Simulator also accepts **F**.
 
+## Search
+
+The catalog can filter the currently loaded source by title or category. The
+search value is part of the in-memory catalog navigation state, so opening an
+Xtream series and pressing Back restores the previous query, category and page.
+
 ## Playback progress
 
 Movies and Xtream episodes persist only a playback timestamp keyed by the same
@@ -143,7 +149,7 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 ### M4 parity
 - [x] favorites
 - [x] progress
-- [ ] search
+- [x] search
 - [ ] metadata
 - [ ] artwork cache
 - [ ] Pluto
