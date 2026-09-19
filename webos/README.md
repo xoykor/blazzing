@@ -77,7 +77,8 @@ cd webos
 ~~~
 
 The generated IPK in `webos/dist` contains both the app and
-`io.github.xoykor.blazzing.network`.
+`io.github.xoykor.blazzing.network`. `package.fish` now verifies the actual
+IPK payload and writes `dist/SHA256SUMS.txt` before returning success.
 
 Pull-request CI also builds the installable IPK and exposes it as the
 `blazzing-webos-ipk` workflow artifact. App, service and development package
