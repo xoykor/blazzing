@@ -9,6 +9,7 @@
   var xtreamSession = null;
   var catalogPage = 0;
   var catalogPageSize = 120;
+  var FAVORITES_GROUP = "__favorites__";
 
   function byId(id) {
     return document.getElementById(id);
@@ -72,6 +73,11 @@
     });
   }
 
+  function isFavorite(item) {
+    return !!(item && item.favoriteKey &&
+      global.BlazzingStorage.isFavorite(item.favoriteKey));
+  }
+
   function matchingCatalogItems(group) {
     var matches = [];
     var i;
@@ -79,12 +85,71 @@
 
     for (i = 0; i < catalog.items.length; i += 1) {
       item = catalog.items[i];
-      if (!group || item.group === group) {
+
+      if (group === FAVORITES_GROUP) {
+        if (isFavorite(item)) {
+          matches.push(item);
+        }
+      } else if (!group || item.group === group) {
         matches.push(item);
       }
     }
 
     return matches;
+  }
+
+  function updateFavoriteBadge(button, item) {
+    var badge = button.querySelector(".favorite-badge");
+    var favorite = isFavorite(item);
+
+    if (badge) {
+      badge.textContent = favorite ? "★" : "";
+    }
+
+    if (favorite) {
+      button.classList.add("is-favorite");
+    } else {
+      button.classList.remove("is-favorite");
+    }
+
+    button.setAttribute(
+      "aria-label",
+      item.title + (favorite ? ", favorito" : ", não favorito")
+    );
+  }
+
+  function toggleFocusedFavorite() {
+    var button = document.activeElement;
+    var item;
+    var favorite;
+
+    if (!button || !button._blazzingEntry) {
+      return false;
+    }
+
+    item = button._blazzingEntry;
+    if (!item.favoriteKey) {
+      return false;
+    }
+
+    favorite = global.BlazzingStorage.toggle(item.favoriteKey, {
+      title: item.title,
+      group: item.group,
+      kind: item.kind
+    });
+
+    updateFavoriteBadge(button, item);
+
+    if (selectedGroup === FAVORITES_GROUP && !favorite) {
+      renderCatalogGroup(FAVORITES_GROUP, true);
+    } else {
+      byId("catalog-summary").textContent =
+        matchingCatalogItems(selectedGroup).length +
+        " item(ns) — " +
+        global.BlazzingStorage.count() + " favorito(s) salvo(s)";
+    }
+
+    return true;
   }
 
   function renderCatalogGroup(group, preservePage) {
@@ -121,9 +186,14 @@
       button = document.createElement("button");
       button.type = "button";
       button.className = "media-card focusable";
-      button.innerHTML = "<strong></strong><span></span>";
+      button.innerHTML =
+        "<strong></strong><span class=\"media-meta\"></span>" +
+        "<span class=\"favorite-badge\" aria-hidden=\"true\"></span>";
       button.querySelector("strong").textContent = item.title;
-      button.querySelector("span").textContent = item.group || "Sem categoria";
+      button.querySelector(".media-meta").textContent =
+        item.group || "Sem categoria";
+      button._blazzingEntry = item;
+      updateFavoriteBadge(button, item);
       button.addEventListener("click", (function (entry) {
         return function () {
           if (entry.kind === "series") {
@@ -178,6 +248,16 @@
     });
     groups.appendChild(allButton);
 
+    var favoritesButton = document.createElement("button");
+    favoritesButton.type = "button";
+    favoritesButton.className = "group-button focusable";
+    favoritesButton.setAttribute("data-group", FAVORITES_GROUP);
+    favoritesButton.textContent = "★ Favoritos";
+    favoritesButton.addEventListener("click", function () {
+      renderCatalogGroup(FAVORITES_GROUP);
+    });
+    groups.appendChild(favoritesButton);
+
     for (i = 0; i < parsed.groups.length; i += 1) {
       button = document.createElement("button");
       button.type = "button";
@@ -211,6 +291,16 @@
 
       byId("m3u-status").textContent = "Processando playlist…";
       parsed = global.BlazzingM3U.parse(result.text, result.finalUrl || url);
+
+      var sourceKey = global.BlazzingStorage.fingerprint(result.finalUrl || url);
+      var itemIndex;
+      for (itemIndex = 0; itemIndex < parsed.items.length; itemIndex += 1) {
+        parsed.items[itemIndex].favoriteKey =
+          "m3u:" + sourceKey + ":" +
+          global.BlazzingStorage.fingerprint(
+            parsed.items[itemIndex].url + "|" + parsed.items[itemIndex].title
+          );
+      }
 
       if (!parsed.items.length) {
         throw new Error("A playlist não contém itens reproduzíveis.");
@@ -367,7 +457,8 @@
       } else if (kind === "series") {
         parsed = global.BlazzingXtream.buildSeriesCatalog(
           responses[0],
-          responses[1]
+          responses[1],
+          creds
         );
       } else {
         parsed = global.BlazzingXtream.buildLiveCatalog(
@@ -475,6 +566,14 @@
   });
 
   document.addEventListener("keydown", function (event) {
+    if (activeScreen === "catalog" &&
+        (event.keyCode === 405 || event.keyCode === 70)) {
+      if (toggleFocusedFavorite()) {
+        event.preventDefault();
+      }
+      return;
+    }
+
     if (activeScreen === "player" && event.keyCode === 13) {
       global.BlazzingPlayer.togglePause();
     }
