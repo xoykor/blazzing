@@ -476,6 +476,7 @@
     buildLiveCatalog: buildLiveCatalog,
     buildVodCatalog: buildVodCatalog,
     buildVodMetadata: buildVodMetadata,
+    buildSeriesMetadata: buildSeriesMetadata,
     buildSeriesCatalog: buildSeriesCatalog,
     buildEpisodeCatalog: buildEpisodeCatalog
   };
