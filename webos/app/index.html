@@ -37,6 +37,12 @@
           <span>Autentica e carrega TV ao vivo, filmes ou séries do provider.</span>
         </button>
 
+        <button id="action-pluto" class="card focusable" type="button">
+          <span class="card-kicker">FAST</span>
+          <strong>Pluto TV</strong>
+          <span>Abre os canais gratuitos da Pluto TV usando sessão regional própria.</span>
+        </button>
+
         <button id="action-manual" class="card focusable" type="button">
           <span class="card-kicker">Teste</span>
           <strong>Abrir URL de stream</strong>
@@ -141,6 +147,15 @@
       </div>
     </section>
 
+    <section id="screen-pluto" class="screen" aria-label="Pluto TV">
+      <div class="panel">
+        <div class="eyebrow">Pluto TV</div>
+        <h2>TV gratuita ao vivo</h2>
+        <p id="pluto-status" class="status">Preparando sessão…</p>
+        <button id="pluto-back" class="secondary focusable" type="button">Voltar</button>
+      </div>
+    </section>
+
     <section id="screen-manual" class="screen" aria-label="Abrir stream">
       <div class="panel">
         <div class="eyebrow">Player</div>
@@ -232,6 +247,7 @@
   <script src="src/pairing.js"></script>
   <script src="src/qr.js"></script>
   <script src="src/xtream.js"></script>
+  <script src="src/pluto.js"></script>
   <script src="src/network.js"></script>
   <script src="src/artwork.js"></script>
   <script src="src/m3u.js"></script>
