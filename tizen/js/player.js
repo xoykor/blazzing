@@ -18,6 +18,7 @@
     }
 
     function setAvSurfaceActive(active) {
+        document.documentElement.classList.toggle("avplay-active", !!active);
         document.body.classList.toggle("avplay-active", !!active);
         if (avSurface) {
             avSurface.setAttribute("aria-hidden", active ? "false" : "true");
