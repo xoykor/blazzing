@@ -75,4 +75,18 @@ assert(
   "720p layout must keep the home actions in a compact three-column grid"
 );
 
+const appInfo = JSON.parse(fs.readFileSync(
+  path.join(__dirname, "..", "app", "appinfo.json"),
+  "utf8"
+));
+assert.strictEqual(
+  appInfo.disableBackHistoryAPI,
+  true,
+  "manual Back handling requires disableBackHistoryAPI"
+);
+assert(
+  appSource.includes("webOS.platformBack"),
+  "Home Back must delegate to webOS.platformBack"
+);
+
 console.log("UI contract tests passed");
