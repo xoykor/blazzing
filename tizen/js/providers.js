@@ -519,20 +519,38 @@
             var categoriesRaw = Array.isArray(parts[0]) ? parts[0] : [];
             var streamsRaw = Array.isArray(parts[1]) ? parts[1] : [];
             var categoryMap = {};
+            var categoryIdMap = {};
+            var categoryByName = {};
             var catalog = { categories: [], items: [] };
 
             categoriesRaw.forEach(function (category) {
-                var id = String(category.category_id || "");
-                categoryMap[id] = category.category_name || "Sem categoria";
-                catalog.categories.push({
-                    id: id,
-                    name: categoryMap[id]
-                });
+                var originalId = String(category.category_id || "");
+                var cleaned = cleanCategoryName(
+                    category.category_name || "Sem categoria",
+                    kind
+                );
+                var normalized = normalizeWords(cleaned);
+                var canonicalId;
+
+                if (!categoryByName[normalized]) {
+                    canonicalId = originalId || ("xtream:" + hashText(kind + "|" + normalized));
+                    categoryByName[normalized] = canonicalId;
+                    catalog.categories.push({
+                        id: canonicalId,
+                        name: cleaned
+                    });
+                } else {
+                    canonicalId = categoryByName[normalized];
+                }
+
+                categoryMap[originalId] = cleaned;
+                categoryIdMap[originalId] = canonicalId;
             });
 
             streamsRaw.forEach(function (entry) {
                 var id;
-                var categoryValue = String(entry.category_id || "");
+                var rawCategoryValue = String(entry.category_id || "");
+                var categoryValue = categoryIdMap[rawCategoryValue] || rawCategoryValue;
                 var item;
 
                 if (kind === "series") {
@@ -545,7 +563,7 @@
                         name: entry.name || "Série",
                         logo: entry.cover || entry.stream_icon || "",
                         categoryId: categoryValue,
-                        categoryName: categoryMap[categoryValue] || "Sem categoria"
+                        categoryName: categoryMap[rawCategoryValue] || "Outros"
                     };
                 } else {
                     id = String(entry.stream_id || "");
@@ -557,12 +575,36 @@
                         name: entry.name || "Item",
                         logo: entry.stream_icon || "",
                         categoryId: categoryValue,
-                        categoryName: categoryMap[categoryValue] || "Sem categoria",
+                        categoryName: categoryMap[rawCategoryValue] || "Outros",
                         url: self.streamUrl(kind, id, entry.container_extension)
                     };
                 }
 
                 catalog.items.push(item);
+            });
+
+            catalog.categories.sort(function (a, b) {
+                return String(a.name || "").localeCompare(
+                    String(b.name || ""),
+                    "pt-BR",
+                    { sensitivity: "base", numeric: true }
+                );
+            });
+
+            catalog.items.sort(function (a, b) {
+                var categoryCompare = String(a.categoryName || "").localeCompare(
+                    String(b.categoryName || ""),
+                    "pt-BR",
+                    { sensitivity: "base", numeric: true }
+                );
+                if (categoryCompare !== 0) {
+                    return categoryCompare;
+                }
+                return String(a.name || "").localeCompare(
+                    String(b.name || ""),
+                    "pt-BR",
+                    { sensitivity: "base", numeric: true }
+                );
             });
 
             self.cache[kind] = catalog;
