@@ -11,9 +11,9 @@
   var TOUCH_INTERVAL_MS = 60 * 60 * 1000;
   var dbPromise = null;
 
-  function fingerprint(value) {
+  function fingerprintWithSeed(value, seed) {
     var text = String(value || "");
-    var hash = 2166136261;
+    var hash = seed >>> 0;
     var i;
 
     for (i = 0; i < text.length; i += 1) {
@@ -26,7 +26,11 @@
   }
 
   function cacheKey(url) {
-    return "art:" + fingerprint(url);
+    var source = String(url || "");
+
+    return "art:" +
+      fingerprintWithSeed(source, 2166136261) +
+      fingerprintWithSeed(source, 2246822507);
   }
 
   function validUrl(value) {
