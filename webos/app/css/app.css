@@ -47,7 +47,7 @@ input {
 .card-kicker,
 .pair-label {
   color: #67adff;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -82,7 +82,7 @@ h2 {
   border: 1px solid #2f4563;
   border-radius: 999px;
   color: #9eb0c9;
-  font-size: 17px;
+  font-size: 20px;
 }
 
 .action-grid {
@@ -116,7 +116,7 @@ h2 {
 
 .card span:last-child {
   color: #96a9c1;
-  font-size: 18px;
+  font-size: 20px;
   line-height: 1.4;
 }
 
@@ -135,7 +135,7 @@ h2 {
 .hint {
   margin-top: 18px;
   color: #63768e;
-  font-size: 17px;
+  font-size: 20px;
 }
 
 .panel {
@@ -164,7 +164,7 @@ h2 {
   color: #d9e8ff;
   background: #05080e;
   border-radius: 12px;
-  font-size: 19px;
+  font-size: 20px;
   line-height: 1.45;
 }
 
@@ -172,14 +172,14 @@ h2 {
 .status {
   margin-top: 14px;
   color: #8193aa;
-  font-size: 18px;
+  font-size: 20px;
 }
 
 label {
   display: block;
   margin: 24px 0 10px;
   color: #a9bad0;
-  font-size: 18px;
+  font-size: 20px;
 }
 
 input {
@@ -353,20 +353,20 @@ input {
   width: 420px;
   margin-right: 10px;
   padding: 11px 14px;
-  font-size: 17px;
+  font-size: 20px;
 }
 
 .catalog-search-row .secondary {
   min-width: 0;
   margin-top: 0;
   padding: 10px 16px;
-  font-size: 16px;
+  font-size: 20px;
 }
 
 .catalog-hint {
   margin: 8px 0 0;
   color: #63768e;
-  font-size: 15px;
+  font-size: 20px;
 }
 
 .media-artwork {
@@ -416,7 +416,7 @@ input {
   display: block;
   margin-top: 8px;
   color: #8193aa;
-  font-size: 15px;
+  font-size: 20px;
 }
 
 .player-screen {
@@ -550,7 +550,7 @@ input {
   min-width: 0;
   margin-left: 10px;
   margin-right: 0;
-  font-size: 18px;
+  font-size: 20px;
 }
 
 .secondary:disabled {
@@ -595,7 +595,7 @@ input {
 
 .vod-meta {
   color: #8ea4bf;
-  font-size: 18px;
+  font-size: 20px;
 }
 
 .vod-plot {
