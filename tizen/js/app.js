@@ -74,20 +74,33 @@
             root.querySelectorAll('[data-focusable="true"]:not(.hidden)')
         );
 
+        var activeIndex = -1;
+        var active = document.activeElement;
+        if (state.view === "catalog" && active &&
+                active.hasAttribute("data-card-index")) {
+            activeIndex = parseInt(active.getAttribute("data-card-index"), 10);
+        }
+
         return all.filter(function (element) {
-            var rect = element.getBoundingClientRect();
-            if (element.disabled || rect.width <= 0 || rect.height <= 0) {
+            var cardIndex;
+            var rect;
+
+            if (element.disabled) {
                 return false;
             }
 
-            /* Huge IPTV catalogs can contain thousands of focusable nodes.
-             * Navigation only needs elements near the current viewport. */
             if (state.view === "catalog" &&
-                    element.hasAttribute("data-card-index")) {
-                return rect.bottom >= -500 && rect.top <= 1580;
+                    element.hasAttribute("data-card-index") &&
+                    activeIndex >= 0) {
+                cardIndex = parseInt(element.getAttribute("data-card-index"), 10);
+                if (!isNaN(cardIndex) && Math.abs(cardIndex - activeIndex) > 24) {
+                    return false;
+                }
             }
 
-            return true;
+            rect = element.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0 &&
+                rect.bottom >= -500 && rect.top <= 1580;
         });
     }
 
@@ -755,13 +768,6 @@
         applyFilters();
     }
 
-    function posterFallback(name) {
-        var span = document.createElement("span");
-        span.className = "poster-fallback";
-        span.textContent = String(name || "?").charAt(0).toUpperCase();
-        return span;
-    }
-
     function safeImageUrl(url) {
         url = String(url || "").replace(/^\s+|\s+$/g, "");
         if (/^https?:\/\//i.test(url)) { return url; }
@@ -893,7 +899,7 @@
         var imageUrl = safeImageUrl(item.logo);
         var fallback = posterFallback(item.name);
 
-        card.className = "media-card";
+        card.className = "media-card kind-" + (item.kind || "item");
         card.setAttribute("data-item-uid", item.uid);
 
         main.className = "card-main";
@@ -909,6 +915,7 @@
             image.alt = "";
             image.className = "poster-image";
             image.setAttribute("draggable", "false");
+            image.setAttribute("referrerpolicy", "no-referrer");
             poster.appendChild(image);
             observeImage(image, imageUrl);
         }
@@ -938,6 +945,7 @@
         favorite.setAttribute("aria-label", "Favorito");
         favorite.setAttribute("data-focusable", "true");
         favorite.setAttribute("data-item-uid", item.uid);
+        favorite.setAttribute("data-card-index", String(index));
 
         favorite.addEventListener("click", function (event) {
             var on;
