@@ -9,6 +9,7 @@
   var xtreamSession = null;
   var catalogPage = 0;
   var catalogPageSize = 120;
+  var catalogQuery = "";
   var catalogStack = [];
   var activeProgressKey = "";
   var FAVORITES_GROUP = "__favorites__";
@@ -147,19 +148,32 @@
       global.BlazzingStorage.isFavorite(item.favoriteKey));
   }
 
+  function matchesSearch(item) {
+    var query = String(catalogQuery || "").toLowerCase();
+
+    if (!query) {
+      return true;
+    }
+
+    return (
+      String(item.title || "").toLowerCase() + " " +
+      String(item.group || "").toLowerCase()
+    ).indexOf(query) >= 0;
+  }
+
   function matchingCatalogItems(group) {
     var matches = [];
     var i;
     var item;
+    var groupMatches;
 
     for (i = 0; i < catalog.items.length; i += 1) {
       item = catalog.items[i];
+      groupMatches = group === FAVORITES_GROUP ?
+        isFavorite(item) :
+        (!group || item.group === group);
 
-      if (group === FAVORITES_GROUP) {
-        if (isFavorite(item)) {
-          matches.push(item);
-        }
-      } else if (!group || item.group === group) {
+      if (groupMatches && matchesSearch(item)) {
         matches.push(item);
       }
     }
@@ -304,6 +318,8 @@
     var button;
 
     catalog = parsed;
+    catalogQuery = restoreState ? String(restoreState.query || "") : "";
+    byId("catalog-search").value = catalogQuery;
     byId("catalog-title").textContent = name || "Playlist";
     groups.innerHTML = "";
 
@@ -361,7 +377,8 @@
       title: byId("catalog-title").textContent,
       provider: byId("catalog-provider").textContent,
       group: selectedGroup,
-      page: catalogPage
+      page: catalogPage,
+      query: catalogQuery
     });
   }
 
@@ -377,7 +394,8 @@
     byId("catalog-provider").textContent = previous.provider;
     renderCatalog(previous.catalog, previous.title, {
       group: previous.group,
-      page: previous.page
+      page: previous.page,
+      query: previous.query
     });
   }
 
@@ -630,6 +648,17 @@
   byId("manual-back").addEventListener("click", showHome);
   byId("about-back").addEventListener("click", showHome);
   byId("pair-cancel").addEventListener("click", showHome);
+  byId("catalog-search-apply").addEventListener("click", function () {
+    catalogQuery = byId("catalog-search").value.trim().toLowerCase();
+    renderCatalogGroup(selectedGroup);
+  });
+
+  byId("catalog-search-clear").addEventListener("click", function () {
+    byId("catalog-search").value = "";
+    catalogQuery = "";
+    renderCatalogGroup(selectedGroup);
+  });
+
   byId("catalog-prev").addEventListener("click", function () {
     if (catalogPage > 0) {
       catalogPage -= 1;
@@ -683,6 +712,15 @@
   });
 
   document.addEventListener("keydown", function (event) {
+    if (activeScreen === "catalog" &&
+        event.keyCode === 13 &&
+        event.target && event.target.id === "catalog-search") {
+      catalogQuery = byId("catalog-search").value.trim().toLowerCase();
+      renderCatalogGroup(selectedGroup);
+      event.preventDefault();
+      return;
+    }
+
     if (activeScreen === "catalog" &&
         (event.keyCode === 405 || event.keyCode === 70)) {
       if (toggleFocusedFavorite()) {
