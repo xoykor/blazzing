@@ -84,4 +84,48 @@ assert.strictEqual(
 );
 assert.strictEqual(vod.items[1].url, "https://cdn.example/movie.mp4");
 
+const series = xtream.buildSeriesCatalog(
+  [
+    { category_id: "40", category_name: "Drama" }
+  ],
+  [
+    { series_id: 77, name: "Show One", category_id: "40", cover: "https://img/show.jpg" }
+  ]
+);
+
+assert.strictEqual(series.items.length, 1);
+assert.strictEqual(series.items[0].kind, "series");
+assert.strictEqual(series.items[0].seriesId, "77");
+assert.strictEqual(series.items[0].group, "Drama");
+
+const episodes = xtream.buildEpisodeCatalog(
+  {
+    episodes: {
+      "1": [
+        { id: 101, title: "Pilot", container_extension: "mkv" }
+      ],
+      "2": [
+        { stream_id: 201, episode_num: 1, container_extension: "mp4",
+          info: { movie_image: "https://img/ep.jpg" } }
+      ]
+    }
+  },
+  creds
+);
+
+assert.strictEqual(episodes.items.length, 2);
+assert.deepStrictEqual(Array.from(episodes.groups), ["Temporada 1", "Temporada 2"]);
+assert.strictEqual(episodes.items[0].kind, "episode");
+assert.strictEqual(
+  episodes.items[0].url,
+  "http://provider.example:8080/series/user%20name/p%40ss/101.mkv"
+);
+assert.strictEqual(episodes.items[1].title, "Episódio 1");
+assert.strictEqual(episodes.items[1].logo, "https://img/ep.jpg");
+
+assert(
+  xtream.apiUrl(creds, "get_series_info", { seriesId: 77 })
+    .includes("&series_id=77")
+);
+
 console.log("Xtream parser tests passed");

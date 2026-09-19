@@ -27,13 +27,17 @@
     };
   }
 
-  function apiUrl(creds, action) {
+  function apiUrl(creds, action, params) {
     var url = creds.server + "player_api.php?username=" +
       encodeURIComponent(creds.username) + "&password=" +
       encodeURIComponent(creds.password);
 
     if (action) {
       url += "&action=" + encodeURIComponent(action);
+    }
+
+    if (params && params.seriesId != null && params.seriesId !== "") {
+      url += "&series_id=" + encodeURIComponent(String(params.seriesId));
     }
 
     return url;
@@ -59,6 +63,20 @@
     return auth === 1 || auth === "1" || auth === true || status === "active";
   }
 
+  function generatedMediaUrl(creds, route, streamId, extension) {
+    var ext = String(extension || "mp4").replace(/^\.+/, "");
+
+    if (!ext) {
+      ext = "mp4";
+    }
+
+    return creds.server + route + "/" +
+      encodeURIComponent(creds.username) + "/" +
+      encodeURIComponent(creds.password) + "/" +
+      encodeURIComponent(String(streamId)) + "." +
+      encodeURIComponent(ext);
+  }
+
   function liveUrl(creds, streamId, directSource) {
     if (/^https?:\/\//i.test(String(directSource || ""))) {
       return directSource;
@@ -71,21 +89,15 @@
   }
 
   function vodUrl(creds, streamId, extension, directSource) {
-    var ext = String(extension || "mp4").replace(/^\.+/, "");
-
     if (/^https?:\/\//i.test(String(directSource || ""))) {
       return directSource;
     }
 
-    if (!ext) {
-      ext = "mp4";
-    }
+    return generatedMediaUrl(creds, "movie", streamId, extension || "mp4");
+  }
 
-    return creds.server + "movie/" +
-      encodeURIComponent(creds.username) + "/" +
-      encodeURIComponent(creds.password) + "/" +
-      encodeURIComponent(String(streamId)) + "." +
-      encodeURIComponent(ext);
+  function episodeUrl(creds, streamId, extension) {
+    return generatedMediaUrl(creds, "series", streamId, extension || "mp4");
   }
 
   function makeCategoryMap(categories) {
@@ -225,11 +237,170 @@
     return finishCatalog(items, groups);
   }
 
+  function buildSeriesCatalog(categories, series) {
+    var categoryNames = makeCategoryMap(categories);
+    var groups = [];
+    var seenGroups = {};
+    var items = [];
+    var i;
+    var row;
+    var id;
+    var name;
+    var categoryId;
+    var group;
+
+    if (!Array.isArray(series)) {
+      throw new Error("Provider Xtream retornou séries inválidas.");
+    }
+
+    for (i = 0; i < series.length; i += 1) {
+      row = series[i] || {};
+      id = row.series_id;
+      name = String(row.name || row.title || "").trim();
+
+      if ((id == null || id === "") || !name) {
+        continue;
+      }
+
+      categoryId = String(row.category_id == null ? "" : row.category_id);
+      group = categoryNames[categoryId] || "Sem categoria";
+
+      items.push({
+        index: items.length,
+        title: name,
+        group: group,
+        logo: String(row.cover || row.stream_icon || ""),
+        url: "",
+        kind: "series",
+        seriesId: String(id)
+      });
+
+      addGroup(groups, seenGroups, group);
+    }
+
+    return finishCatalog(items, groups);
+  }
+
+  function episodeImage(episode) {
+    var info = episode && episode.info;
+    if (!info || typeof info !== "object") {
+      return "";
+    }
+    return String(info.movie_image || info.cover_big || "");
+  }
+
+  function pushEpisode(items, groups, seenGroups, episode, seasonId, seasonName, creds) {
+    var id;
+    var title;
+    var episodeNum;
+
+    if (!episode || typeof episode !== "object") {
+      return;
+    }
+
+    id = episode.id != null && episode.id !== "" ?
+      episode.id : episode.stream_id;
+
+    if (id == null || id === "") {
+      return;
+    }
+
+    title = String(episode.title || "").trim();
+    episodeNum = String(episode.episode_num == null ? "" : episode.episode_num);
+
+    if (!title) {
+      title = "Episódio " + (episodeNum || String(id));
+    }
+
+    items.push({
+      index: items.length,
+      title: title,
+      group: seasonName,
+      seasonId: String(seasonId),
+      logo: episodeImage(episode),
+      url: episodeUrl(
+        creds,
+        id,
+        episode.container_extension || "mp4"
+      ),
+      kind: "episode"
+    });
+
+    addGroup(groups, seenGroups, seasonName);
+  }
+
+  function buildEpisodeCatalog(payload, creds) {
+    var episodes;
+    var groups = [];
+    var seenGroups = {};
+    var items = [];
+    var seasonIds;
+    var i;
+    var j;
+    var seasonId;
+    var list;
+    var seasonName;
+
+    if (!payload || typeof payload !== "object") {
+      throw new Error("Detalhes da série Xtream inválidos.");
+    }
+
+    episodes = payload.episodes;
+
+    if (Array.isArray(episodes)) {
+      seasonName = "Episódios";
+      for (i = 0; i < episodes.length; i += 1) {
+        pushEpisode(items, groups, seenGroups, episodes[i], "1", seasonName, creds);
+      }
+      return {
+        items: items,
+        groups: groups
+      };
+    }
+
+    if (!episodes || typeof episodes !== "object") {
+      throw new Error("Série sem episódios.");
+    }
+
+    seasonIds = Object.keys(episodes);
+    seasonIds.sort(function (a, b) {
+      var na = Number(a);
+      var nb = Number(b);
+      if (!isNaN(na) && !isNaN(nb)) {
+        return na - nb;
+      }
+      return String(a).localeCompare(String(b));
+    });
+
+    for (i = 0; i < seasonIds.length; i += 1) {
+      seasonId = seasonIds[i];
+      list = episodes[seasonId];
+      if (!Array.isArray(list)) {
+        continue;
+      }
+      seasonName = "Temporada " + seasonId;
+      for (j = 0; j < list.length; j += 1) {
+        pushEpisode(items, groups, seenGroups, list[j], seasonId, seasonName, creds);
+      }
+    }
+
+    if (!items.length) {
+      throw new Error("Nenhum episódio encontrado.");
+    }
+
+    return {
+      items: items,
+      groups: groups
+    };
+  }
+
   global.BlazzingXtream = {
     credentials: credentials,
     apiUrl: apiUrl,
     authAccepted: authAccepted,
     buildLiveCatalog: buildLiveCatalog,
-    buildVodCatalog: buildVodCatalog
+    buildVodCatalog: buildVodCatalog,
+    buildSeriesCatalog: buildSeriesCatalog,
+    buildEpisodeCatalog: buildEpisodeCatalog
   };
 }(window));

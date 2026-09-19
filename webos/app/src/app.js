@@ -6,6 +6,7 @@
   var catalog = null;
   var selectedGroup = "";
   var playerReturnScreen = "home";
+  var xtreamSession = null;
 
   function byId(id) {
     return document.getElementById(id);
@@ -40,6 +41,8 @@
   function showHome() {
     stopPairing();
     global.BlazzingPlayer.stop();
+    xtreamSession = null;
+    byId("xtream-password").value = "";
     showScreen("home");
   }
 
@@ -95,7 +98,11 @@
       button.querySelector("span").textContent = item.group || "Sem categoria";
       button.addEventListener("click", (function (entry) {
         return function () {
-          playUrl(entry.url, entry.title, "catalog");
+          if (entry.kind === "series") {
+            openSeries(entry);
+          } else {
+            playUrl(entry.url, entry.title, "catalog");
+          }
         };
       }(item)));
       container.appendChild(button);
@@ -187,6 +194,31 @@
     });
   }
 
+  function openSeries(entry) {
+    if (!xtreamSession || !entry || !entry.seriesId) {
+      return;
+    }
+
+    byId("catalog-summary").textContent = "Carregando episódios…";
+
+    global.BlazzingNetwork.xtreamRequest(
+      xtreamSession,
+      "get_series_info",
+      { seriesId: entry.seriesId }
+    ).then(function (payload) {
+      var parsed = global.BlazzingXtream.buildEpisodeCatalog(
+        payload,
+        xtreamSession
+      );
+
+      byId("catalog-provider").textContent = "Xtream • Série";
+      renderCatalog(parsed, entry.title);
+    }).catch(function (error) {
+      byId("catalog-summary").textContent =
+        error && error.message ? error.message : "Falha ao carregar episódios.";
+    });
+  }
+
   function startPairing() {
     byId("pair-status").textContent = "Criando sessão segura…";
     byId("pair-url").textContent = "—";
@@ -271,6 +303,10 @@
       categoryAction = "get_vod_categories";
       streamAction = "get_vod_streams";
       loadingLabel = "filmes";
+    } else if (kind === "series") {
+      categoryAction = "get_series_categories";
+      streamAction = "get_series";
+      loadingLabel = "séries";
     } else {
       categoryAction = "get_live_categories";
       streamAction = "get_live_streams";
@@ -298,6 +334,11 @@
           responses[1],
           creds
         );
+      } else if (kind === "series") {
+        parsed = global.BlazzingXtream.buildSeriesCatalog(
+          responses[0],
+          responses[1]
+        );
       } else {
         parsed = global.BlazzingXtream.buildLiveCatalog(
           responses[0],
@@ -306,19 +347,27 @@
         );
       }
 
+      xtreamSession = creds;
       byId("xtream-password").value = "";
 
       if (!parsed.items.length) {
         throw new Error(
           kind === "vod" ?
             "Provider não retornou filmes." :
-            "Provider não retornou canais live."
+            (kind === "series" ?
+              "Provider não retornou séries." :
+              "Provider não retornou canais live.")
         );
       }
 
       byId("catalog-provider").textContent =
-        kind === "vod" ? "Xtream • Filmes" : "Xtream • TV";
-      renderCatalog(parsed, kind === "vod" ? "Filmes" : "TV ao vivo");
+        kind === "vod" ? "Xtream • Filmes" :
+          (kind === "series" ? "Xtream • Séries" : "Xtream • TV");
+      renderCatalog(
+        parsed,
+        kind === "vod" ? "Filmes" :
+          (kind === "series" ? "Séries" : "TV ao vivo")
+      );
     }).catch(function (error) {
       byId("xtream-password").value = "";
       byId("xtream-status").textContent =
@@ -332,6 +381,10 @@
 
   byId("xtream-vod").addEventListener("click", function () {
     loadXtreamCatalog("vod");
+  });
+
+  byId("xtream-series").addEventListener("click", function () {
+    loadXtreamCatalog("series");
   });
 
   byId("manual-play").addEventListener("click", function () {

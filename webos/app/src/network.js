@@ -84,14 +84,15 @@
     });
   }
 
-  function xtreamRequest(creds, action) {
+  function xtreamRequest(creds, action, params) {
     if (global.webOS && global.webOS.service &&
         typeof global.webOS.service.request === "function") {
       return serviceRequest("xtreamRequest", {
         server: creds.server,
         username: creds.username,
         password: creds.password,
-        action: action || ""
+        action: action || "",
+        seriesId: params && params.seriesId != null ? String(params.seriesId) : ""
       }).then(function (response) {
         if (typeof response.text !== "string") {
           throw new Error("O serviço webOS não retornou JSON Xtream.");
@@ -102,7 +103,7 @@
           throw new Error("Provider Xtream retornou JSON inválido.");
         }
       }).catch(function () {
-        return fetchInBrowser(global.BlazzingXtream.apiUrl(creds, action)).then(function (text) {
+        return fetchInBrowser(global.BlazzingXtream.apiUrl(creds, action, params)).then(function (text) {
           try {
             return JSON.parse(text);
           } catch (error) {
@@ -112,7 +113,7 @@
       });
     }
 
-    return fetchInBrowser(global.BlazzingXtream.apiUrl(creds, action)).then(function (text) {
+    return fetchInBrowser(global.BlazzingXtream.apiUrl(creds, action, params)).then(function (text) {
       try {
         return JSON.parse(text);
       } catch (error) {
