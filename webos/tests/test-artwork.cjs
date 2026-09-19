@@ -50,7 +50,11 @@ const key = artwork.cacheKey(sensitiveUrl);
 assert(key.startsWith("art:"));
 assert(!key.includes("super-secret"));
 assert(!key.includes("viewer"));
-assert.strictEqual(key.length, 12);
+assert.notStrictEqual(
+  artwork.cacheKey("https://img.example/a.jpg"),
+  artwork.cacheKey("https://img.example/b.jpg")
+);
+assert.strictEqual(key.length, 20);
 
 assert(serviceSource.includes("MAX_ARTWORK_BYTES = 1024 * 1024"));
 assert(serviceSource.includes('service.register("fetchArtwork"'));
