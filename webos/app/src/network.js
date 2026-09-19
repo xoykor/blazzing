@@ -2,7 +2,8 @@
   "use strict";
 
   var SERVICE_URI = "luna://io.github.xoykor.blazzing.network";
-  var MAX_BROWSER_BYTES = 128 * 1024 * 1024;
+  var MAX_BROWSER_API_BYTES = 8 * 1024 * 1024;
+  var MAX_BROWSER_M3U_BYTES = 128 * 1024 * 1024;
 
   function serviceAvailable() {
     return !!(
@@ -37,7 +38,11 @@
     });
   }
 
-  function fetchInBrowser(url) {
+  function fetchInBrowser(url, maxBytes, tooLargeMessage) {
+    var limit = Number(maxBytes || MAX_BROWSER_API_BYTES);
+    var limitMessage = tooLargeMessage ||
+      "Resposta grande demais para o modo direto do Simulator.";
+
     return fetch(url, {
       method: "GET",
       cache: "no-store",
@@ -49,14 +54,14 @@
         throw new Error("Servidor respondeu HTTP " + response.status + ".");
       }
 
-      if (contentLength > MAX_BROWSER_BYTES) {
-        throw new Error("Playlist excede o limite de 128 MiB.");
+      if (contentLength > limit) {
+        throw new Error(limitMessage);
       }
 
       return response.text();
     }).then(function (text) {
-      if (text.length > MAX_BROWSER_BYTES) {
-        throw new Error("Playlist excede o limite de 128 MiB.");
+      if (text.length > limit) {
+        throw new Error(limitMessage);
       }
       return text;
     }).catch(function (error) {
@@ -68,7 +73,11 @@
   }
 
   function browserM3U(url) {
-    return fetchInBrowser(url).then(function (text) {
+    return fetchInBrowser(
+      url,
+      MAX_BROWSER_M3U_BYTES,
+      "Playlist excede o limite de 128 MiB."
+    ).then(function (text) {
       return {
         mode: "memory",
         text: text,
@@ -100,7 +109,7 @@
         totalBytes: Number(response.totalBytes || 0),
         itemCount: Number(response.itemCount || 0),
         groups: response.groups,
-        maxBytes: Number(response.maxBytes || MAX_BROWSER_BYTES),
+        maxBytes: Number(response.maxBytes || MAX_BROWSER_M3U_BYTES),
         transport: "service"
       };
     }).catch(function (error) {
