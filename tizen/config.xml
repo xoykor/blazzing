@@ -4,7 +4,7 @@
         id="https://github.com/xoykor/blazzing/tizen"
         version="0.2.0"
         viewmodes="maximized">
-    <tizen:application id="Blazzing01.Blazzing"
+    <tizen:application id="Blazzing01.tizen"
                        package="Blazzing01"
                        required_version="9.0"/>
     <content src="index.html"/>
