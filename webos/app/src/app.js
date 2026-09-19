@@ -643,6 +643,20 @@
     }, 0);
   }
 
+  function mediaMetaText(item) {
+    var parts = [item.group || "Sem categoria"];
+
+    if (item.kind === "live" && item.channelNumber) {
+      parts.push("Canal " + item.channelNumber);
+    }
+
+    if (item.kind === "live" && item.archiveDays) {
+      parts.push("Catch-up " + item.archiveDays + "d");
+    }
+
+    return parts.join(" • ");
+  }
+
   function renderCatalogCards(items) {
     var container = byId("catalog-items");
     var i;
@@ -663,7 +677,7 @@
         "<span class=\"favorite-badge\" aria-hidden=\"true\"></span>";
       button.querySelector("strong").textContent = item.title;
       button.querySelector(".media-meta").textContent =
-        item.group || "Sem categoria";
+        mediaMetaText(item);
       button._blazzingEntry = item;
       renderArtwork(button, item);
       updateFavoriteBadge(button, item);
