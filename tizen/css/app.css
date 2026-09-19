@@ -25,8 +25,11 @@ body { font-size: 28px; }
     width: 100%;
     height: 100%;
 }
+html.avplay-active,
+html.avplay-active body,
 body.avplay-active,
-body.avplay-active #app {
+body.avplay-active #app,
+body.avplay-active #player-view {
     background: transparent !important;
 }
 * { box-sizing: border-box; }
