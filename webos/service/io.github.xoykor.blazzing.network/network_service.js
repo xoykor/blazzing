@@ -689,6 +689,65 @@ service.register("plutoStream", function (message) {
   });
 });
 
+service.register("plutoVod", function (message) {
+  plutoService.vod(function (error, payload) {
+    if (error) {
+      message.respond({
+        returnValue: false,
+        errorText: error.message || "Pluto VOD request failed."
+      });
+      return;
+    }
+
+    message.respond({
+      returnValue: true,
+      payload: payload
+    });
+  });
+});
+
+service.register("plutoSeries", function (message) {
+  var seriesId = String(
+    message.payload && message.payload.seriesId || ""
+  );
+
+  plutoService.series(seriesId, function (error, payload) {
+    if (error) {
+      message.respond({
+        returnValue: false,
+        errorText: error.message || "Pluto series request failed."
+      });
+      return;
+    }
+
+    message.respond({
+      returnValue: true,
+      payload: payload
+    });
+  });
+});
+
+service.register("plutoVodStream", function (message) {
+  var path = String(
+    message.payload && message.payload.path || ""
+  );
+
+  plutoService.vodStream(path, function (error, result) {
+    if (error) {
+      message.respond({
+        returnValue: false,
+        errorText: error.message || "Pluto VOD stream request failed."
+      });
+      return;
+    }
+
+    message.respond({
+      returnValue: true,
+      url: result.url
+    });
+  });
+});
+
 service.register("xtreamRequest", function (message) {
   var payload = message.payload || {};
   var server = normalizeServer(payload.server);
