@@ -21,6 +21,7 @@ Implemented:
 - packaged Node.js network service for providers blocked by browser CORS;
 - direct browser fallback for Simulator development;
 - Xtream authentication;
+- optional remembered Xtream server + username, never the password;
 - Xtream live categories and channels;
 - Xtream VOD plus movie detail metadata;
 - Xtream series detail metadata, seasons and episodes;
