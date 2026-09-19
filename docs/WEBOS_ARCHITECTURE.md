@@ -62,10 +62,15 @@ Implemented:
 - direct player handoff;
 - parser regression tests.
 
-Temporary alpha limits:
+Large-playlist behavior:
 
-- 8 MiB provider response cap;
-- 48 DOM items rendered per selected group/page to bound image and layout memory.
+- packaged webOS service accepts M3U/M3U8 playlists up to **128 MiB**;
+- playlists are streamed to a private temporary file instead of being held as one giant JavaScript string;
+- categories and total item count are extracted while the download is being written;
+- catalog pages are queried from disk on demand;
+- only 48 media cards are rendered at a time;
+- temporary playlist sessions expire after 12 hours and are also released when leaving the catalog;
+- Xtream/API JSON responses keep the separate 8 MiB safety cap.
 
 ## Xtream
 
@@ -106,9 +111,11 @@ is still planned.
 
 ## Search
 
-The catalog can filter the currently loaded source by title or category. The
-search value is part of the in-memory catalog navigation state, so opening an
-Xtream series and pressing Back restores the previous query, category and page.
+The catalog can filter the currently loaded source by title or category. For
+large M3U sources the query is executed against the temporary disk-backed
+playlist and returns only one page. The search value remains part of catalog
+navigation state, so opening an Xtream series and pressing Back restores the
+previous query, category and page.
 
 ## Playback progress
 
@@ -142,8 +149,9 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 - [x] catalog
 - [x] playback handoff
 - [x] tests
-- [x] pagination window (48 items)\n- [ ] full virtualization
-- [ ] large-playlist chunking
+- [x] disk-backed pagination window (48 items)
+- [x] M3U/M3U8 up to 128 MiB without loading the full playlist into UI memory
+- [ ] full virtualization
 - [x] artwork rendering
 
 ### M3 Xtream
