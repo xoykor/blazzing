@@ -8,6 +8,7 @@ var fs = require("fs");
 var pathModule = require("path");
 var os = require("os");
 var m3uCatalog = require("./m3u_catalog");
+var plutoService = require("./pluto_service");
 
 var service = new Service("io.github.xoykor.blazzing.network");
 var MAX_TEXT_BYTES = 8 * 1024 * 1024;
@@ -645,6 +646,46 @@ service.register("releaseM3U", function (message) {
 
   message.respond({
     returnValue: true
+  });
+});
+
+service.register("plutoLive", function (message) {
+  plutoService.live(function (error, result) {
+    if (error) {
+      message.respond({
+        returnValue: false,
+        errorText: error.message || "Pluto live request failed."
+      });
+      return;
+    }
+
+    message.respond({
+      returnValue: true,
+      channels: result.channels,
+      categories: result.categories,
+      mode: result.mode
+    });
+  });
+});
+
+service.register("plutoStream", function (message) {
+  var channelId = String(
+    message.payload && message.payload.channelId || ""
+  );
+
+  plutoService.stream(channelId, function (error, result) {
+    if (error) {
+      message.respond({
+        returnValue: false,
+        errorText: error.message || "Pluto stream request failed."
+      });
+      return;
+    }
+
+    message.respond({
+      returnValue: true,
+      url: result.url
+    });
   });
 });
 
