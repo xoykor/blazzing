@@ -48,6 +48,12 @@ jobs:
             node --check "$file"
           done
           node --check webos/tools/prepare.mjs
+          node --check webos/tools/validate-release.mjs
+          node --check webos/tools/validate-legacy-js.mjs
+
+      - name: Validate legacy webOS compatibility
+        working-directory: webos
+        run: npm run validate-compat
 
       - name: Test M3U parser
         working-directory: webos
