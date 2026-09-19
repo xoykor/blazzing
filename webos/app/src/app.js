@@ -312,6 +312,7 @@
     }
 
     byId("vod-meta").textContent = details.join(" • ") || entry.group || "";
+    global.BlazzingArtwork.releaseImage(image);
     image.removeAttribute("src");
     image.style.display = "none";
 
@@ -320,9 +321,11 @@
         image.style.display = "block";
       };
       image.onerror = function () {
+        global.BlazzingArtwork.invalidate(logo);
+        global.BlazzingArtwork.releaseImage(image);
         image.style.display = "none";
       };
-      image.src = logo;
+      global.BlazzingArtwork.apply(image, logo);
     }
 
     showScreen("vod");
@@ -382,6 +385,7 @@
     byId("series-meta").textContent =
       details.join(" • ") || entry.group || "";
 
+    global.BlazzingArtwork.releaseImage(image);
     image.removeAttribute("src");
     image.style.display = "none";
 
@@ -390,9 +394,11 @@
         image.style.display = "block";
       };
       image.onerror = function () {
+        global.BlazzingArtwork.invalidate(logo);
+        global.BlazzingArtwork.releaseImage(image);
         image.style.display = "none";
       };
-      image.src = logo;
+      global.BlazzingArtwork.apply(image, logo);
     }
 
     showScreen("series");
@@ -554,13 +560,15 @@
       shell.classList.add("has-image");
     });
     image.addEventListener("error", function () {
+      global.BlazzingArtwork.invalidate(url);
+      global.BlazzingArtwork.releaseImage(image);
       if (image.parentNode) {
         image.parentNode.removeChild(image);
       }
       shell.classList.remove("has-image");
     });
-    image.src = url;
     shell.appendChild(image);
+    global.BlazzingArtwork.apply(image, url);
   }
 
   function updateFavoriteBadge(button, item) {
@@ -663,6 +671,7 @@
     var item;
     var button;
 
+    global.BlazzingArtwork.releaseTree(container);
     container.innerHTML = "";
 
     for (i = 0; i < items.length; i += 1) {
