@@ -40,6 +40,10 @@
       url += "&series_id=" + encodeURIComponent(String(params.seriesId));
     }
 
+    if (params && params.vodId != null && params.vodId !== "") {
+      url += "&vod_id=" + encodeURIComponent(String(params.vodId));
+    }
+
     return url;
   }
 
@@ -249,6 +253,7 @@
           row.direct_source
         ),
         kind: "vod",
+        vodId: String(id),
         favoriteKey: favoriteKey(creds, "vod", id)
       });
 
@@ -256,6 +261,24 @@
     }
 
     return finishCatalog(items, groups);
+  }
+
+  function buildVodMetadata(payload, fallback) {
+    var data = payload && typeof payload === "object" ? payload : {};
+    var info = data.info && typeof data.info === "object" ? data.info : {};
+    var movie = data.movie_data && typeof data.movie_data === "object" ?
+      data.movie_data : {};
+    var base = fallback || {};
+
+    return {
+      title: String(movie.name || info.name || base.title || "Filme"),
+      plot: String(info.plot || info.description || ""),
+      genre: String(info.genre || ""),
+      year: String(info.releasedate || info.release_date || info.year || ""),
+      rating: String(info.rating_5based || info.rating || ""),
+      duration: String(info.duration || ""),
+      logo: String(info.movie_image || movie.stream_icon || base.logo || "")
+    };
   }
 
   function buildSeriesCatalog(categories, series, creds) {
@@ -423,6 +446,7 @@
     authAccepted: authAccepted,
     buildLiveCatalog: buildLiveCatalog,
     buildVodCatalog: buildVodCatalog,
+    buildVodMetadata: buildVodMetadata,
     buildSeriesCatalog: buildSeriesCatalog,
     buildEpisodeCatalog: buildEpisodeCatalog
   };
