@@ -15,6 +15,7 @@ Implemented:
 - local QR rendering;
 - M3U/M3U8 URL loading up to 128 MiB on the packaged webOS service;
 - disk-backed M3U catalog paging so large playlists do not live entirely in UI RAM;
+- automatic recovery if a temporary paged M3U session expires or the service restarts;
 - M3U parser, categories and catalog grid;
 - provider artwork with lightweight fallback tiles;
 - packaged Node.js network service for providers blocked by browser CORS;
@@ -26,6 +27,7 @@ Implemented:
 - catalog search by title/category;
 - persistent favorites without storing credentials or media URLs;
 - playback progress/resume for Xtream movies and episodes;
+- automatic Xtream direct-source failover plus manual retry in the TV player;
 - regression tests for M3U, Xtream and persistence.
 
 Still planned:
