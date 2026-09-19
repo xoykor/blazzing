@@ -13,6 +13,7 @@
   var catalogStack = [];
   var catalogRequestId = 0;
   var activeProgressKey = "";
+  var activePlayback = null;
   var vodEntry = null;
   var FAVORITES_GROUP = "__favorites__";
 
@@ -72,6 +73,7 @@
     savePlayerProgress();
     global.BlazzingPlayer.stop();
     activeProgressKey = "";
+    activePlayback = null;
     vodEntry = null;
     releaseRemoteCatalog();
     catalog = null;
@@ -101,40 +103,91 @@
     return minutes + ":" + (secs < 10 ? "0" : "") + secs;
   }
 
-  function playUrl(url, title, returnScreen, entry) {
-    var resumeAt = 0;
-    var trackProgress = entry &&
-      (entry.kind === "vod" || entry.kind === "episode") &&
-      entry.favoriteKey;
+  function setRetryVisible(visible) {
+    var button = byId("player-retry");
 
-    if (!validHttpUrl(url)) {
+    button.style.display = visible ? "" : "none";
+    button.disabled = !visible;
+  }
+
+  function playbackSources(url, entry) {
+    var sources = [];
+    var fallback = entry && entry.fallbackUrl ?
+      String(entry.fallbackUrl) : "";
+
+    if (validHttpUrl(url)) {
+      sources.push(url);
+    }
+
+    if (validHttpUrl(fallback) && fallback !== url) {
+      sources.push(fallback);
+    }
+
+    return sources;
+  }
+
+  function currentResumePoint(playback) {
+    var stored;
+
+    if (!playback) {
+      return 0;
+    }
+
+    if (activeProgressKey) {
+      stored = global.BlazzingStorage.getProgress(activeProgressKey);
+      if (stored >= 10) {
+        return stored;
+      }
+    }
+
+    return Number(playback.resumeAt || 0);
+  }
+
+  function openPlaybackCandidate(playback) {
+    var resumeAt;
+    var sourceIndex;
+
+    if (!playback || activePlayback !== playback) {
       return;
     }
 
-    activeProgressKey = trackProgress ? entry.favoriteKey : "";
-    if (activeProgressKey) {
-      resumeAt = global.BlazzingStorage.getProgress(activeProgressKey);
+    sourceIndex = Number(playback.sourceIndex || 0);
+    if (sourceIndex < 0 || sourceIndex >= playback.sources.length) {
+      sourceIndex = 0;
+      playback.sourceIndex = 0;
     }
 
-    playerReturnScreen = returnScreen || "home";
-    byId("player-title").textContent = title || "Stream";
-    byId("player-status").textContent =
-      resumeAt >= 10 ? "Retomando em " + formatTime(resumeAt) + "…" : "Carregando…";
-    showScreen("player");
+    resumeAt = currentResumePoint(playback);
+    setRetryVisible(false);
 
-    global.BlazzingPlayer.open(url, {
+    global.BlazzingPlayer.open(playback.sources[sourceIndex], {
       resumeAt: resumeAt,
       onResume: function (seconds) {
+        if (activePlayback !== playback) {
+          return;
+        }
+
         byId("player-status").textContent =
           "Retomando em " + formatTime(seconds) + "…";
       },
       onPlaying: function () {
+        var suffix = playback.sourceIndex > 0 ?
+          " • fonte alternativa" : "";
+
+        if (activePlayback !== playback) {
+          return;
+        }
+
         byId("player-status").textContent =
           resumeAt >= 10 ?
-            "Reproduzindo • retomado em " + formatTime(resumeAt) :
-            "Reproduzindo";
+            "Reproduzindo • retomado em " + formatTime(resumeAt) + suffix :
+            "Reproduzindo" + suffix;
       },
       onProgress: function (seconds, duration) {
+        if (activePlayback !== playback) {
+          return;
+        }
+
         if (activeProgressKey) {
           global.BlazzingStorage.setProgress(
             activeProgressKey,
@@ -144,15 +197,78 @@
         }
       },
       onEnded: function () {
+        if (activePlayback !== playback) {
+          return;
+        }
+
         if (activeProgressKey) {
           global.BlazzingStorage.clearProgress(activeProgressKey);
           activeProgressKey = "";
         }
       },
       onError: function (message) {
-        byId("player-status").textContent = message;
+        var nextIndex;
+
+        if (activePlayback !== playback) {
+          return;
+        }
+
+        nextIndex = playback.sourceIndex + 1;
+        if (nextIndex < playback.sources.length) {
+          playback.sourceIndex = nextIndex;
+          playback.resumeAt = currentResumePoint(playback);
+          byId("player-status").textContent =
+            "Fonte principal falhou. Tentando rota alternativa…";
+          global.BlazzingPlayer.stop();
+
+          setTimeout(function () {
+            openPlaybackCandidate(playback);
+          }, 120);
+          return;
+        }
+
+        byId("player-status").textContent =
+          (message || "Falha de reprodução.") +
+          " Você pode tentar novamente.";
+        setRetryVisible(true);
       }
     });
+  }
+
+  function playUrl(url, title, returnScreen, entry) {
+    var resumeAt = 0;
+    var trackProgress = entry &&
+      (entry.kind === "vod" || entry.kind === "episode") &&
+      entry.favoriteKey;
+    var sources = playbackSources(url, entry);
+
+    if (!sources.length) {
+      return;
+    }
+
+    activeProgressKey = trackProgress ? entry.favoriteKey : "";
+    if (activeProgressKey) {
+      resumeAt = global.BlazzingStorage.getProgress(activeProgressKey);
+    }
+
+    activePlayback = {
+      sources: sources,
+      sourceIndex: 0,
+      resumeAt: resumeAt,
+      title: title || "Stream",
+      returnScreen: returnScreen || "home",
+      entry: entry || null
+    };
+
+    playerReturnScreen = activePlayback.returnScreen;
+    byId("player-title").textContent = activePlayback.title;
+    byId("player-status").textContent =
+      resumeAt >= 10 ?
+        "Retomando em " + formatTime(resumeAt) + "…" :
+        "Carregando…";
+    setRetryVisible(false);
+    showScreen("player");
+    openPlaybackCandidate(activePlayback);
   }
 
   function showVodMetadata(entry, metadata) {
@@ -1001,10 +1117,28 @@
   });
 
   byId("catalog-back").addEventListener("click", backFromCatalog);
+
+  byId("player-retry").addEventListener("click", function () {
+    if (!activePlayback) {
+      return;
+    }
+
+    savePlayerProgress();
+    global.BlazzingPlayer.stop();
+    activePlayback.sourceIndex = 0;
+    activePlayback.resumeAt = currentResumePoint(activePlayback);
+    byId("player-status").textContent = "Tentando novamente…";
+    setRetryVisible(false);
+    openPlaybackCandidate(activePlayback);
+  });
+
   byId("player-back").addEventListener("click", function () {
     savePlayerProgress();
     global.BlazzingPlayer.stop();
     activeProgressKey = "";
+    activePlayback = null;
+    setRetryVisible(false);
+
     if (playerReturnScreen === "vod" && vodEntry) {
       showScreen("vod");
     } else if (playerReturnScreen === "catalog" && catalog) {
@@ -1024,6 +1158,8 @@
       savePlayerProgress();
       global.BlazzingPlayer.stop();
       activeProgressKey = "";
+      activePlayback = null;
+      setRetryVisible(false);
       showScreen("vod");
       return;
     }
@@ -1032,6 +1168,8 @@
       savePlayerProgress();
       global.BlazzingPlayer.stop();
       activeProgressKey = "";
+      activePlayback = null;
+      setRetryVisible(false);
       showScreen("catalog");
       renderCatalogGroup(selectedGroup, true);
       return;
@@ -1068,7 +1206,9 @@
       return;
     }
 
-    if (activeScreen === "player" && event.keyCode === 13) {
+    if (activeScreen === "player" &&
+        event.keyCode === 13 &&
+        (!event.target || event.target.tagName !== "BUTTON")) {
       global.BlazzingPlayer.togglePause();
     }
   });
