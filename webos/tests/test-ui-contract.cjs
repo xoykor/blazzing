@@ -36,6 +36,7 @@ const requiredScreens = [
   "m3u",
   "catalog",
   "xtream",
+  "pluto",
   "manual",
   "about",
   "vod",
