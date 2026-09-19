@@ -38,30 +38,9 @@ jobs:
         working-directory: webos
         run: npm run prepare-app
 
-      - name: Validate JSON metadata
-        run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-
-          appinfo = json.loads(Path("webos/app/appinfo.json").read_text())
-          required = {"id", "version", "vendor", "type", "main", "title", "icon", "requiredACG"}
-          missing = sorted(required - set(appinfo))
-          if missing:
-              raise SystemExit(f"Missing appinfo fields: {missing}")
-          if appinfo["type"] != "web":
-              raise SystemExit("webOS app type must be 'web'")
-          if appinfo["requiredACG"] != []:
-              raise SystemExit("Current webOS app must not request privileged ACG groups")
-
-          service_dir = Path("webos/service/io.github.xoykor.blazzing.network")
-          service_pkg = json.loads((service_dir / "package.json").read_text())
-          services = json.loads((service_dir / "services.json").read_text())
-          if service_pkg["name"] != "io.github.xoykor.blazzing.network":
-              raise SystemExit("Unexpected service name")
-          if services["id"] != service_pkg["name"]:
-              raise SystemExit("services.json ID must match package name")
-          PY
+      - name: Validate release metadata
+        working-directory: webos
+        run: npm run validate-release
 
       - name: Validate JavaScript syntax
         run: |
@@ -85,3 +64,18 @@ jobs:
           test -x webos/prepare.fish
           test -x webos/run-simulator.fish
           test -x webos/package.fish
+
+      - name: Build installable IPK
+        working-directory: webos
+        run: |
+          npm run package-ci
+          test "$(find dist -maxdepth 1 -type f -name '*.ipk' | wc -l)" -ge 1
+          find dist -maxdepth 1 -type f -name '*.ipk' -print
+
+      - name: Upload webOS IPK
+        uses: actions/upload-artifact@v4
+        with:
+          name: blazzing-webos-ipk
+          path: webos/dist/*.ipk
+          if-no-files-found: error
+          retention-days: 14
