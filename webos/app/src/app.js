@@ -9,6 +9,7 @@
   var xtreamSession = null;
   var catalogPage = 0;
   var catalogPageSize = 120;
+  var catalogStack = [];
   var activeProgressKey = "";
   var FAVORITES_GROUP = "__favorites__";
 
@@ -62,6 +63,7 @@
     savePlayerProgress();
     global.BlazzingPlayer.stop();
     activeProgressKey = "";
+    catalogStack = [];
     xtreamSession = null;
     byId("xtream-password").value = "";
     showScreen("home");
@@ -295,7 +297,7 @@
     }, 0);
   }
 
-  function renderCatalog(parsed, name) {
+  function renderCatalog(parsed, name, restoreState) {
     var groups = byId("catalog-groups");
     var allButton;
     var i;
@@ -340,7 +342,43 @@
     }
 
     showScreen("catalog");
-    renderCatalogGroup("");
+
+    if (restoreState) {
+      catalogPage = Number(restoreState.page || 0);
+      renderCatalogGroup(restoreState.group || "", true);
+    } else {
+      renderCatalogGroup("");
+    }
+  }
+
+  function pushCatalogState() {
+    if (!catalog) {
+      return;
+    }
+
+    catalogStack.push({
+      catalog: catalog,
+      title: byId("catalog-title").textContent,
+      provider: byId("catalog-provider").textContent,
+      group: selectedGroup,
+      page: catalogPage
+    });
+  }
+
+  function backFromCatalog() {
+    var previous;
+
+    if (!catalogStack.length) {
+      showHome();
+      return;
+    }
+
+    previous = catalogStack.pop();
+    byId("catalog-provider").textContent = previous.provider;
+    renderCatalog(previous.catalog, previous.title, {
+      group: previous.group,
+      page: previous.page
+    });
   }
 
   function loadPlaylist(url, name) {
@@ -373,6 +411,7 @@
         throw new Error("A playlist não contém itens reproduzíveis.");
       }
 
+      catalogStack = [];
       byId("catalog-provider").textContent = "M3U";
       renderCatalog(parsed, name || "Playlist M3U");
     }).catch(function (error) {
@@ -398,6 +437,7 @@
         xtreamSession
       );
 
+      pushCatalogState();
       byId("catalog-provider").textContent = "Xtream • Série";
       renderCatalog(parsed, entry.title);
     }).catch(function (error) {
@@ -548,6 +588,7 @@
         );
       }
 
+      catalogStack = [];
       byId("catalog-provider").textContent =
         kind === "vod" ? "Xtream • Filmes" :
           (kind === "series" ? "Xtream • Séries" : "Xtream • TV");
@@ -606,7 +647,7 @@
     }
   });
 
-  byId("catalog-back").addEventListener("click", showHome);
+  byId("catalog-back").addEventListener("click", backFromCatalog);
   byId("player-back").addEventListener("click", function () {
     savePlayerProgress();
     global.BlazzingPlayer.stop();
@@ -629,7 +670,12 @@
       global.BlazzingPlayer.stop();
       activeProgressKey = "";
       showScreen("catalog");
-      renderCatalogGroup(selectedGroup);
+      renderCatalogGroup(selectedGroup, true);
+      return;
+    }
+
+    if (activeScreen === "catalog") {
+      backFromCatalog();
       return;
     }
 
