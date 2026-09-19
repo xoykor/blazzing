@@ -7,7 +7,8 @@ Architecture: [../docs/WEBOS_ARCHITECTURE.md](../docs/WEBOS_ARCHITECTURE.md)
 Release QA: [QA_CHECKLIST.md](QA_CHECKLIST.md)  
 Seller Lounge draft: [SELLER_LOUNGE.md](SELLER_LOUNGE.md)  
 Privacy policy draft: [PRIVACY.md](PRIVACY.md)  
-LG self-check preparation: [LG_SELF_CHECK_PREP.md](LG_SELF_CHECK_PREP.md)
+LG self-check preparation: [LG_SELF_CHECK_PREP.md](LG_SELF_CHECK_PREP.md)  
+Store asset notes: [store/README.md](store/README.md)
 
 ## Current scope
 
