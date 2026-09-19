@@ -232,7 +232,8 @@ the minimum browser engine.
 ### M5 distribution
 - [ ] simulator matrix executed
 - [ ] real LG TV matrix executed
-- [ ] store artwork (400×400 Seller Lounge icon/screenshots)
+- [x] 400×400 Seller Lounge icon candidate
+- [ ] final store artwork/screenshots approved
 - [x] packaged 80×80 + 130×130 app icons
 - [x] Seller Lounge metadata/UX draft
 - [x] privacy policy draft
