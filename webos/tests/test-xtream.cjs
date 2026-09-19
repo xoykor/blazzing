@@ -39,7 +39,8 @@ const catalog = xtream.buildLiveCatalog(
   [
     { stream_id: 1, name: "News One", stream_type: "live", category_id: "10" },
     { stream_id: "2", name: "Sports One", stream_type: "live", category_id: "20",
-      direct_source: "https://cdn.example/direct.m3u8" },
+      direct_source: "https://cdn.example/direct.m3u8", num: 202,
+      epg_channel_id: "sports.one", tv_archive: 1, tv_archive_duration: 7 },
     { stream_id: 3, name: "Movie", stream_type: "movie", category_id: "20" }
   ],
   creds
@@ -58,6 +59,9 @@ assert.strictEqual(
   "http://provider.example:8080/live/user%20name/p%40ss/2.ts"
 );
 assert.strictEqual(catalog.items[0].fallbackUrl, "");
+assert.strictEqual(catalog.items[1].channelNumber, "202");
+assert.strictEqual(catalog.items[1].epgChannelId, "sports.one");
+assert.strictEqual(catalog.items[1].archiveDays, "7");
 assert(catalog.items[0].favoriteKey.startsWith("xtream:"));
 assert(!catalog.items[0].favoriteKey.includes("user name"));
 assert(!catalog.items[0].favoriteKey.includes("p@ss"));
