@@ -17,7 +17,6 @@ body { font-size: 28px; }
     height: 1080px;
     z-index: 0;
     background: transparent;
-    visibility: hidden;
     pointer-events: none;
 }
 #app {
