@@ -83,6 +83,7 @@ Implemented:
 - authentication through `player_api.php`;
 - `get_live_categories`;
 - `get_live_streams`;
+- Live channel number, EPG channel ID and catch-up duration metadata;
 - VOD categories and streams;
 - VOD detail metadata through `get_vod_info`;
 - series detail metadata from `get_series_info`;
@@ -179,7 +180,7 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 - [x] search
 - [x] VOD metadata
 - [x] series metadata
-- [ ] live metadata
+- [x] live metadata
 - [ ] artwork cache
 - [ ] Pluto
 - [x] failover UX
