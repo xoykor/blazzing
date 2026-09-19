@@ -29,7 +29,7 @@ e não:
 .../raw/<sha-fixo>/CanaisBR01.m3u8
 ```
 
-O mesmo vale para o catálogo do Saimo.
+O mesmo vale para todas as fontes do Saimo.
 
 ## Detecção de atualização
 
@@ -56,6 +56,8 @@ Saimo:
 
 - `catalogo.txt`
 - `canais.txt`
+- `1.m3u`
+- `3.m3u`
 
 Ramys:
 
