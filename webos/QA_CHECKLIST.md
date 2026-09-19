@@ -31,6 +31,7 @@ For each tested Simulator:
 - [ ] Directional navigation never loses focus.
 - [ ] OK activates buttons and checkboxes.
 - [ ] Back returns to the previous logical screen.
+- [ ] Back on the Home/entry screen invokes the platform Home/exit behavior.
 - [ ] Search Apply/Clear works with the remote.
 - [ ] Yellow key / F toggles favorites.
 - [ ] Crossing the end of a 48-card window loads the next window and keeps focus.
