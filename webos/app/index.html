@@ -47,9 +47,14 @@
         <h2>Adicionar pelo celular</h2>
         <p id="pair-status">Preparando sessão…</p>
         <div class="pair-box">
-          <div class="pair-label">URL da sessão</div>
-          <code id="pair-url">—</code>
-          <div class="pair-note">QR Code será adicionado no próximo passo. A sessão expira em 5 minutos.</div>
+          <div class="pair-layout">
+            <div id="pair-qr" class="pair-qr" aria-label="QR Code de pareamento"></div>
+            <div class="pair-copy">
+              <div class="pair-label">URL da sessão</div>
+              <code id="pair-url">—</code>
+              <div class="pair-note">Escaneie o QR ou abra a URL. A sessão expira em 5 minutos.</div>
+            </div>
+          </div>
         </div>
         <button id="pair-cancel" class="secondary focusable" type="button">Cancelar</button>
       </div>
@@ -92,9 +97,13 @@
     </section>
   </main>
 
+  <script src="vendor/webOSTV.js"></script>
+  <script src="vendor/webOSTV-dev.js"></script>
+  <script src="vendor/qrcode.js"></script>
   <script src="src/config.js"></script>
   <script src="src/navigation.js"></script>
   <script src="src/pairing.js"></script>
+  <script src="src/qr.js"></script>
   <script src="src/player.js"></script>
   <script src="src/app.js"></script>
 </body>
