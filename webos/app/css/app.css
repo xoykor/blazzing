@@ -323,6 +323,26 @@ input {
   line-height: 1;
 }
 
+.remember-option {
+  display: flex;
+  align-items: center;
+  margin: 14px 0 6px;
+  color: #aabbd0;
+  cursor: pointer;
+}
+
+.remember-option input {
+  width: 28px;
+  height: 28px;
+  margin: 0 12px 0 0;
+}
+
+.remember-option input:focus,
+.remember-option input.is-focused {
+  outline: 3px solid #63a9f2;
+  outline-offset: 3px;
+}
+
 .catalog-search-row {
   display: flex;
   align-items: center;
