@@ -64,6 +64,8 @@ be proven by browser-only fallback.
 - [ ] VOD starts.
 - [ ] Episode starts.
 - [ ] Pause/resume works with OK.
+- [ ] The on-screen Play/Pause control works with 4-way navigation + OK.
+- [ ] The on-screen Play/Pause control works with the Magic Remote pointer.
 - [ ] VOD/episode progress resumes after leaving and reopening.
 - [ ] Completed media clears the resume point.
 - [ ] Xtream `direct_source` failure tries the generated provider URL.
