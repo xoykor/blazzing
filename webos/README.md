@@ -15,6 +15,7 @@ Implemented:
 - local QR rendering;
 - M3U/M3U8 URL loading up to 128 MiB on the packaged webOS service;
 - disk-backed M3U catalog paging so large playlists do not live entirely in UI RAM;
+- seamless remote traversal between 48-card catalog windows;
 - automatic recovery if a temporary paged M3U session expires or the service restarts;
 - M3U parser, categories and catalog grid;
 - provider artwork with lightweight fallback tiles and bounded IndexedDB cache;
@@ -34,7 +35,7 @@ Implemented:
 
 Still planned:
 
-- full catalog virtualization beyond the current 48-item page window;
+- true scroll virtualization beyond the current seamless 48-item card window;
 - store submission and real-TV media validation.
 
 ## Prepare
