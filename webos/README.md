@@ -4,6 +4,9 @@ Early webOS port of Blazzing.
 
 Architecture: [../docs/WEBOS_ARCHITECTURE.md](../docs/WEBOS_ARCHITECTURE.md)
 
+Release QA: [QA_CHECKLIST.md](QA_CHECKLIST.md)  
+Seller Lounge draft: [SELLER_LOUNGE.md](SELLER_LOUNGE.md)
+
 ## Current scope
 
 Implemented:
