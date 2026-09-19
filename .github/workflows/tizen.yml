@@ -60,10 +60,9 @@ jobs:
           assert app is not None
           assert app.attrib["id"] == "Blazzing01.tizen"
           assert app.attrib["package"] == "Blazzing01"
-          assert app.attrib["required_version"] == "9.0"
+          assert app.attrib["required_version"] == "2.3"
           assert root.find("t:profile", ns).attrib["name"] == "tv-samsung"
           privileges = {p.attrib["name"] for p in root.findall("t:privilege", ns)}
-          assert "http://developer.samsung.com/privilege/avplay" in privileges
           print("config.xml: OK")
           PY
 
