@@ -630,6 +630,11 @@
     function renderCategories() {
         var root = byId("categories");
         var all = document.createElement("button");
+        var counts = {};
+
+        state.catalog.items.forEach(function (item) {
+            counts[item.categoryId] = (counts[item.categoryId] || 0) + 1;
+        });
 
         root.innerHTML = "";
 
@@ -646,9 +651,7 @@
 
         state.catalog.categories.forEach(function (category) {
             var button = document.createElement("button");
-            var count = state.catalog.items.filter(function (item) {
-                return item.categoryId === category.id;
-            }).length;
+            var count = counts[category.id] || 0;
 
             button.textContent = (category.name || "Outros") + " (" + count + ")";
             button.setAttribute("data-focusable", "true");
