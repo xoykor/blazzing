@@ -40,6 +40,14 @@ jobs:
       - name: Validate Worker JavaScript syntax
         run: node --check worker/src/index.js && node --check worker/public/pair.js
 
+      - name: Smoke test pairing Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd worker
+          npm install
+          npm run smoke
+
       - name: Validate config.xml
         shell: bash
         run: |
