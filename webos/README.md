@@ -23,12 +23,12 @@ Implemented:
 - Xtream authentication;
 - Xtream live categories and channels;
 - Xtream VOD plus movie detail metadata;
-- Xtream series, seasons and episodes;
+- Xtream series detail metadata, seasons and episodes;
 - catalog search by title/category;
 - persistent favorites without storing credentials or media URLs;
 - playback progress/resume for Xtream movies and episodes;
 - automatic Xtream direct-source failover plus manual retry in the TV player;
-- regression tests for M3U, Xtream and persistence.
+- regression tests for M3U, Xtream, persistence and the UI/DOM contract.
 
 Still planned:
 
