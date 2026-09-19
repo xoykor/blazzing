@@ -80,6 +80,16 @@ export const SOURCES = [
     format: "m3u",
     priority: 23,
   },
+  {
+    id: "ramys-filmes-series",
+    owner: "Ramys",
+    repo: "Iptv-Brasil-2026",
+    branch: "master",
+    path: "Filmes-Series.m3u8",
+    format: "m3u",
+    priority: 30,
+    kind: "vod",
+  },
 ];
 
 export function rawUrl(source) {
