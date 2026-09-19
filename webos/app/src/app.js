@@ -9,6 +9,7 @@
   var xtreamSession = null;
   var catalogPage = 0;
   var catalogPageSize = 120;
+  var activeProgressKey = "";
   var FAVORITES_GROUP = "__favorites__";
 
   function byId(id) {
@@ -41,9 +42,26 @@
     return session.stop();
   }
 
+  function savePlayerProgress() {
+    var position;
+
+    if (!activeProgressKey) {
+      return;
+    }
+
+    position = global.BlazzingPlayer.position();
+    global.BlazzingStorage.setProgress(
+      activeProgressKey,
+      position.currentTime,
+      position.duration
+    );
+  }
+
   function showHome() {
     stopPairing();
+    savePlayerProgress();
     global.BlazzingPlayer.stop();
+    activeProgressKey = "";
     xtreamSession = null;
     byId("xtream-password").value = "";
     showScreen("home");
@@ -53,19 +71,68 @@
     return /^https?:\/\//i.test(value);
   }
 
-  function playUrl(url, title, returnScreen) {
+  function formatTime(seconds) {
+    var total = Math.max(0, Math.floor(Number(seconds || 0)));
+    var hours = Math.floor(total / 3600);
+    var minutes = Math.floor((total % 3600) / 60);
+    var secs = total % 60;
+
+    if (hours > 0) {
+      return hours + ":" +
+        (minutes < 10 ? "0" : "") + minutes + ":" +
+        (secs < 10 ? "0" : "") + secs;
+    }
+
+    return minutes + ":" + (secs < 10 ? "0" : "") + secs;
+  }
+
+  function playUrl(url, title, returnScreen, entry) {
+    var resumeAt = 0;
+    var trackProgress = entry &&
+      (entry.kind === "vod" || entry.kind === "episode") &&
+      entry.favoriteKey;
+
     if (!validHttpUrl(url)) {
       return;
     }
 
+    activeProgressKey = trackProgress ? entry.favoriteKey : "";
+    if (activeProgressKey) {
+      resumeAt = global.BlazzingStorage.getProgress(activeProgressKey);
+    }
+
     playerReturnScreen = returnScreen || "home";
     byId("player-title").textContent = title || "Stream";
-    byId("player-status").textContent = "Carregando…";
+    byId("player-status").textContent =
+      resumeAt >= 10 ? "Retomando em " + formatTime(resumeAt) + "…" : "Carregando…";
     showScreen("player");
 
     global.BlazzingPlayer.open(url, {
+      resumeAt: resumeAt,
+      onResume: function (seconds) {
+        byId("player-status").textContent =
+          "Retomando em " + formatTime(seconds) + "…";
+      },
       onPlaying: function () {
-        byId("player-status").textContent = "Reproduzindo";
+        byId("player-status").textContent =
+          resumeAt >= 10 ?
+            "Reproduzindo • retomado em " + formatTime(resumeAt) :
+            "Reproduzindo";
+      },
+      onProgress: function (seconds, duration) {
+        if (activeProgressKey) {
+          global.BlazzingStorage.setProgress(
+            activeProgressKey,
+            seconds,
+            duration
+          );
+        }
+      },
+      onEnded: function () {
+        if (activeProgressKey) {
+          global.BlazzingStorage.clearProgress(activeProgressKey);
+          activeProgressKey = "";
+        }
       },
       onError: function (message) {
         byId("player-status").textContent = message;
@@ -199,7 +266,7 @@
           if (entry.kind === "series") {
             openSeries(entry);
           } else {
-            playUrl(entry.url, entry.title, "catalog");
+            playUrl(entry.url, entry.title, "catalog", entry);
           }
         };
       }(item)));
@@ -541,7 +608,9 @@
 
   byId("catalog-back").addEventListener("click", showHome);
   byId("player-back").addEventListener("click", function () {
+    savePlayerProgress();
     global.BlazzingPlayer.stop();
+    activeProgressKey = "";
     if (playerReturnScreen === "catalog" && catalog) {
       showScreen("catalog");
       renderCatalogGroup(selectedGroup, true);
@@ -556,7 +625,9 @@
     }
 
     if (activeScreen === "player" && playerReturnScreen === "catalog" && catalog) {
+      savePlayerProgress();
       global.BlazzingPlayer.stop();
+      activeProgressKey = "";
       showScreen("catalog");
       renderCatalogGroup(selectedGroup);
       return;
