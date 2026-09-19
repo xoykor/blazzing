@@ -141,6 +141,10 @@ opaque item identifier used by favorites. Progress is checkpointed approximately
 every 15 seconds and again when leaving the player. Items within 30 seconds of the
 end are treated as completed and their checkpoint is removed.
 
+The player exposes an on-screen Play/Pause control that is focusable by 4-way
+navigation and clickable by the Magic Remote pointer. Its label follows the
+actual media pause/play state.
+
 For Xtream Live/VOD entries that provide a `direct_source`, the catalog also keeps
 the provider-generated stream URL in memory as a fallback. If the direct source
 fails, the player automatically tries the generated Xtream route. If all known
