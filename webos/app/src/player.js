@@ -74,6 +74,12 @@
       }
     };
 
+    element.onpause = function () {
+      if (options.onPaused) {
+        options.onPaused();
+      }
+    };
+
     element.src = url;
     element.load();
 
@@ -91,11 +97,26 @@
 
   function togglePause() {
     var element = ensureVideo();
+    var promise;
+
     if (element.paused) {
-      element.play();
+      try {
+        promise = element.play();
+        if (promise && promise.catch) {
+          promise.catch(function () {
+            // The existing media error handler reports playback failures.
+          });
+        }
+      } catch (error) {
+        // The existing media error handler reports playback failures.
+      }
     } else {
       element.pause();
     }
+  }
+
+  function isPaused() {
+    return !!ensureVideo().paused;
   }
 
   function position() {
@@ -115,6 +136,7 @@
     element.ontimeupdate = null;
     element.onended = null;
     element.onplaying = null;
+    element.onpause = null;
     element.removeAttribute("src");
     element.load();
   }
@@ -123,6 +145,7 @@
     open: open,
     stop: stop,
     togglePause: togglePause,
+    isPaused: isPaused,
     position: position
   };
 }(window));
