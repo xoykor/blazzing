@@ -24,6 +24,9 @@ end
 
 mkdir -p "$out_dir"
 
+# Evita que pacotes/checksums de versões anteriores confundam a validação.
+find "$out_dir" -maxdepth 1 -type f \( -name '*.ipk' -o -name 'SHA256SUMS.txt' \) -delete
+
 echo "Empacotando Blazzing webOS + serviço de rede..."
 "$ares_package" -o "$out_dir" "$app_dir" "$service_dir"
 or exit $status
