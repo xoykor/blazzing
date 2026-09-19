@@ -94,6 +94,21 @@ assert(
   "720p layout must keep the home actions in a compact three-column grid"
 );
 
+const desktopCss = cssSource.split("@media (max-width: 1366px)")[0];
+const undersizedDesktopFonts = [];
+const desktopFontExpression = /font-size:\s*(\d+)px/g;
+let fontMatch;
+while ((fontMatch = desktopFontExpression.exec(desktopCss)) !== null) {
+  if (Number(fontMatch[1]) < 20) {
+    undersizedDesktopFonts.push(Number(fontMatch[1]));
+  }
+}
+assert.deepStrictEqual(
+  undersizedDesktopFonts,
+  [],
+  "1080p base UI should not use text below the 20px recommendation"
+);
+
 const appInfo = JSON.parse(fs.readFileSync(
   path.join(__dirname, "..", "app", "appinfo.json"),
   "utf8"
