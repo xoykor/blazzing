@@ -3,269 +3,137 @@
 Status: alpha implementation  
 Branch: `feature/webos-port`
 
-## Goal
+## Runtime
 
-Build a native-feeling LG webOS TV client that preserves the Blazzing product
-model while using the webOS platform instead of trying to port the Linux/X11
-runtime directly.
+The webOS port is a separate runtime from the Linux C17/X11 application.
 
-The Linux application remains the reference implementation for behavior and
-provider semantics. The webOS port is a separate frontend/runtime inside the
-same repository.
-
-## High-level architecture
-
-~~~text
-                         +----------------------+
-                         | Cloudflare Worker    |
-                         | pairing only         |
-                         | Durable Objects      |
-                         +----------+-----------+
-                                    ^
-                                    | HTTPS, encrypted payload only
-                                    |
-     phone browser -----------------+---------------- LG webOS app
-                                                        |
-                                                        | provider/API/media
-                                                        v
-                                                IPTV/media server
-~~~
-
-The Worker is never a video proxy.
-
-## Runtime choices
-
-The Linux app depends on X11/XWayland, Cairo/Pango and mpv. The webOS version
-uses:
+It uses:
 
 - HTML/CSS/JavaScript for UI;
 - HTML5 `<video>` for playback;
 - Web Crypto for AES-256-GCM pairing;
-- IndexedDB for future persistence;
-- a packaged JavaScript service for provider requests affected by browser CORS.
+- a packaged JavaScript service for provider networking;
+- IndexedDB planned for persistence.
 
-## Compatibility target
+Initial compatibility target: webOS 4.0+.
 
-Initial target: webOS 4.0 and newer.
-
-App scripts intentionally use classic scripts/ES5-compatible patterns where
-practical. The network service is kept compatible with the old Node.js runtime
-used by webOS 4.x: no `const`, `let`, arrow functions or destructuring.
-
-## Repository layout
+## Architecture
 
 ~~~text
-webos/
-├── app/
-│   ├── appinfo.json
-│   ├── index.html
-│   ├── css/
-│   ├── src/
-│   │   ├── app.js
-│   │   ├── config.js
-│   │   ├── m3u.js
-│   │   ├── navigation.js
-│   │   ├── network.js
-│   │   ├── pairing.js
-│   │   ├── player.js
-│   │   ├── qr.js
-│   │   └── xtream.js
-│   └── vendor/                 generated, ignored
-├── service/
-│   └── io.github.xoykor.blazzing.network/
-├── tests/
-│   ├── test-m3u.cjs
-│   └── test-xtream.cjs
-├── tools/
-│   └── prepare.mjs
-├── prepare.fish
-├── run-simulator.fish
-├── package.fish
-└── package.json
+Phone browser
+     |
+     | encrypted pairing payload
+     v
+Cloudflare Worker / Durable Object
+     ^
+     |
+     | HTTPS
+     |
+LG webOS app
+     |
+     +--> packaged JS network service --> M3U / Xtream API
+     |
+     +--> direct media URL -----------> LG media pipeline
 ~~~
 
-## Application and service IDs
+The Worker is never used as a media proxy.
 
-App: `io.github.xoykor.blazzing`
+## Pairing
 
-Network service: `io.github.xoykor.blazzing.network`
-
-## Phone pairing
-
-The app reuses:
+Production endpoint:
 
 `https://blazzing-pairing.vsxk.workers.dev`
 
-Flow:
+The TV generates the session ID and AES-256 key. The QR is rendered locally and
+contains the AES key only in the URL fragment. The Worker stores ciphertext only.
+The TV polls every 2 seconds, decrypts locally and deletes the session.
 
-1. TV creates random 128-bit session ID.
-2. TV creates random AES-256 key.
-3. TV creates the Worker session.
-4. TV renders a local QR containing `/pair/<id>#<key>`.
-5. Phone encrypts the playlist name/URL using AES-256-GCM.
-6. Worker stores only IV/ciphertext plus expiry state.
-7. TV polls every 2 seconds.
-8. TV decrypts locally.
-9. TV deletes the session.
-10. The decrypted URL is passed to the M3U loader.
+## M3U
 
-QR generation happens locally. No external QR service receives the fragment key.
+Implemented:
 
-## Provider networking
+- URL loading;
+- CORS-safe packaged service path;
+- Simulator browser fallback;
+- relative URL resolution;
+- EXTINF parsing;
+- groups/categories;
+- shared catalog UI;
+- direct player handoff;
+- parser regression tests.
 
-~~~text
-web app
-   |
-   +-- packaged app --> Luna request --> Blazzing network JS service
-   |                                      |
-   |                                      +--> M3U / Xtream API
-   |
-   +-- Simulator fallback --------------------> browser fetch (CORS applies)
-~~~
+Temporary alpha limits:
 
-The service exposes narrow provider operations, not an unrestricted proxy.
+- 8 MiB provider response cap;
+- 120 DOM items rendered per selected group.
 
-Current service capabilities:
+## Xtream live
 
-- `fetchM3U`;
-- `xtreamRequest` with an action allow-list.
+Implemented:
 
-Current common limits:
+- credentials kept only in memory;
+- authentication through `player_api.php`;
+- `get_live_categories`;
+- `get_live_streams`;
+- category normalization;
+- `direct_source` preference;
+- fallback generation of `/live/<user>/<pass>/<stream_id>.ts`;
+- shared catalog UI;
+- regression tests.
 
-- HTTP/HTTPS only;
-- at most five redirects;
-- 8 MiB response cap during the alpha;
-- 15-second request timeout;
-- no provider credential logging.
+The packaged network service has an explicit action allow-list. It is not a
+generic open proxy and does not log credentials.
 
-## M3U flow
+## Compatibility
 
-~~~text
-playlist URL
-   |
-   v
-BlazzingNetwork.fetchM3U()
-   |
-   v
-BlazzingM3U.parse()
-   |
-   v
-normalized items + groups
-   |
-   v
-shared catalog --> selected URL --> HTML5 video
-~~~
-
-Relative media URLs are resolved against the final playlist URL.
-
-The catalog currently renders at most 120 items per selected group. This is a
-temporary DOM bound until virtualization/pagination is implemented.
-
-## Xtream live flow
-
-~~~text
-server + username + password
-        |
-        v
-player_api.php authentication
-        |
-        +--> get_live_categories
-        |
-        +--> get_live_streams
-        |
-        v
-BlazzingXtream.buildLiveCatalog()
-        |
-        v
-shared catalog --> direct_source or generated /live/...ts URL --> video
-~~~
-
-Credentials currently remain in memory only. The password field is cleared
-after the authentication attempt. Persistent credentials are intentionally not
-implemented until the storage/security design is reviewed.
-
-The implementation follows the existing desktop provider behavior:
-
-- authenticated if `user_info.auth` is truthy or status is `active`;
-- only `stream_type=live` enters the live catalog;
-- `direct_source` is preferred when it is HTTP/HTTPS;
-- otherwise a `/live/<user>/<pass>/<stream_id>.ts` URL is generated.
-
-## Playback
-
-The Worker is not in the media path. Once an item is selected, its media URL is
-given directly to the TV's HTML5 media element.
-
-Simulator playback is not sufficient evidence of real TV codec/HLS support, so
-media compatibility remains a real-device release gate.
+The app avoids unnecessary modern syntax because older LG TVs use older browser
+engines. The packaged service remains ES5-style while webOS 4.x is supported.
 
 ## Milestones
 
-### M1 — platform skeleton
-
+### M1 platform
 - [x] app metadata
-- [x] TV-first UI
-- [x] directional remote navigation
-- [x] Back handling
-- [x] HTML5 player wrapper
+- [x] remote navigation
+- [x] Back
+- [x] player
 - [x] encrypted pairing
-- [x] local QR rendering
-- [x] Simulator launcher
-- [ ] real-TV install smoke test
+- [x] local QR
+- [x] Simulator helper
+- [ ] real TV smoke test
 
-### M2 — M3U
-
-- [x] packaged network JS service
-- [x] bounded M3U fetch
+### M2 M3U
+- [x] network service
+- [x] bounded fetch
 - [x] parser
-- [x] relative URL resolution
-- [x] category normalization
-- [x] catalog grid
-- [x] direct HTML5 playback handoff
-- [x] parser regression tests
-- [ ] catalog virtualization/pagination
+- [x] categories
+- [x] catalog
+- [x] playback handoff
+- [x] tests
+- [ ] virtualization/pagination
 - [ ] large-playlist chunking
 - [ ] artwork
 
-### M3 — Xtream
-
+### M3 Xtream
 - [x] authentication
 - [x] live categories
 - [x] live streams
-- [x] live catalog normalization
-- [x] regression tests
-- [ ] VOD categories/streams
+- [x] tests
+- [ ] VOD
 - [ ] series/seasons/episodes
-- [ ] profile storage
+- [ ] profile persistence
 
-### M4 — product parity
-
+### M4 parity
 - [ ] favorites
 - [ ] progress
 - [ ] search
 - [ ] metadata
 - [ ] artwork cache
 - [ ] Pluto
-- [ ] error/failover UX
+- [ ] failover UX
 
-### M5 — distribution
-
+### M5 distribution
 - [ ] simulator matrix
 - [ ] real LG TV matrix
-- [ ] icon/store artwork
+- [ ] store artwork
 - [ ] Seller Lounge metadata
 - [ ] QA checklist
-- [ ] signed/public release process
-
-## Development rules
-
-1. Keep Linux and webOS implementations independent at runtime.
-2. Share protocols and data semantics, not X11/mpv implementation details.
-3. Keep the Worker backwards-compatible with released Linux clients.
-4. Never use the Worker as a media proxy.
-5. Prefer remote-control usability over mouse-centric interactions.
-6. Keep app code compatible with the declared webOS baseline.
-7. Keep service syntax compatible with Node.js 0.12 while webOS 4.x is supported.
-8. Every privileged Luna API must document its exact ACG requirement.
-9. Bound provider network operations and never create an unrestricted proxy.
-10. Do not persist Xtream credentials until the storage/security model is explicitly reviewed.
