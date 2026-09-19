@@ -100,7 +100,10 @@
         move(0, 1);
         break;
       case 13:
-        if (current && current.tagName !== "INPUT") {
+        if (current &&
+            (current.tagName !== "INPUT" ||
+             current.type === "checkbox" ||
+             current.type === "radio")) {
           event.preventDefault();
           current.click();
         }
