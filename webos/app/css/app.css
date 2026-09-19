@@ -404,3 +404,22 @@ input {
     font-size: 17px;
   }
 }
+
+
+.catalog-actions {
+  display: flex;
+  align-items: center;
+}
+
+.catalog-actions .secondary {
+  min-width: 0;
+  margin-left: 10px;
+  margin-right: 0;
+  font-size: 18px;
+}
+
+.secondary:disabled {
+  opacity: 0.36;
+  transform: none;
+  box-shadow: none;
+}

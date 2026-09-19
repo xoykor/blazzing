@@ -7,6 +7,8 @@
   var selectedGroup = "";
   var playerReturnScreen = "home";
   var xtreamSession = null;
+  var catalogPage = 0;
+  var catalogPageSize = 120;
 
   function byId(id) {
     return document.getElementById(id);
@@ -70,16 +72,10 @@
     });
   }
 
-  function renderCatalogGroup(group) {
-    var container = byId("catalog-items");
+  function matchingCatalogItems(group) {
     var matches = [];
     var i;
     var item;
-    var button;
-    var limit = 120;
-
-    selectedGroup = group;
-    container.innerHTML = "";
 
     for (i = 0; i < catalog.items.length; i += 1) {
       item = catalog.items[i];
@@ -88,7 +84,39 @@
       }
     }
 
-    for (i = 0; i < matches.length && i < limit; i += 1) {
+    return matches;
+  }
+
+  function renderCatalogGroup(group, preservePage) {
+    var container = byId("catalog-items");
+    var matches;
+    var totalPages;
+    var start;
+    var end;
+    var i;
+    var item;
+    var button;
+
+    selectedGroup = group;
+    if (!preservePage) {
+      catalogPage = 0;
+    }
+
+    matches = matchingCatalogItems(group);
+    totalPages = Math.max(1, Math.ceil(matches.length / catalogPageSize));
+
+    if (catalogPage >= totalPages) {
+      catalogPage = totalPages - 1;
+    }
+    if (catalogPage < 0) {
+      catalogPage = 0;
+    }
+
+    start = catalogPage * catalogPageSize;
+    end = Math.min(matches.length, start + catalogPageSize);
+    container.innerHTML = "";
+
+    for (i = start; i < end; i += 1) {
       item = matches[i];
       button = document.createElement("button");
       button.type = "button";
@@ -109,8 +137,10 @@
     }
 
     byId("catalog-summary").textContent =
-      matches.length + " item(ns)" +
-      (matches.length > limit ? " — exibindo os primeiros " + limit : "");
+      matches.length + " item(ns) — página " + (catalogPage + 1) + " de " + totalPages;
+
+    byId("catalog-prev").disabled = catalogPage <= 0;
+    byId("catalog-next").disabled = catalogPage >= totalPages - 1;
 
     Array.prototype.forEach.call(
       document.querySelectorAll(".group-button"),
@@ -401,12 +431,29 @@
   byId("manual-back").addEventListener("click", showHome);
   byId("about-back").addEventListener("click", showHome);
   byId("pair-cancel").addEventListener("click", showHome);
+  byId("catalog-prev").addEventListener("click", function () {
+    if (catalogPage > 0) {
+      catalogPage -= 1;
+      renderCatalogGroup(selectedGroup, true);
+    }
+  });
+
+  byId("catalog-next").addEventListener("click", function () {
+    var matches = matchingCatalogItems(selectedGroup);
+    var totalPages = Math.max(1, Math.ceil(matches.length / catalogPageSize));
+
+    if (catalogPage < totalPages - 1) {
+      catalogPage += 1;
+      renderCatalogGroup(selectedGroup, true);
+    }
+  });
+
   byId("catalog-back").addEventListener("click", showHome);
   byId("player-back").addEventListener("click", function () {
     global.BlazzingPlayer.stop();
     if (playerReturnScreen === "catalog" && catalog) {
       showScreen("catalog");
-      renderCatalogGroup(selectedGroup);
+      renderCatalogGroup(selectedGroup, true);
     } else {
       showHome();
     }
