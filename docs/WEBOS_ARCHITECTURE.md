@@ -120,9 +120,11 @@ is capped at 24 MiB and 256 items, expires entries after 7 days and prunes least
 recently used entries. Object URLs are revoked when cards/details leave the DOM.
 
 The page window remains limited to 48 items to reduce decoded-image pressure on
-older TVs. Remote navigation now crosses page boundaries automatically when the
-focus reaches the end of the current card window, so the user does not have to
-move to the pagination buttons during normal browsing.
+older TVs. Remote navigation crosses page boundaries automatically in both
+directions when focus reaches the top or bottom of the current card window, while
+page zero can still move upward into the search/header controls. Pointer hover
+also resolves nested card content back to its focusable parent, keeping the
+selection effect consistent across the full card surface.
 
 ## Search
 
