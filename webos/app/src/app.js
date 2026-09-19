@@ -662,7 +662,8 @@
   function mediaMetaText(item) {
     var parts = [item.group || "Sem categoria"];
 
-    if (item.kind === "live" && item.channelNumber) {
+    if ((item.kind === "live" || item.kind === "pluto-live") &&
+        item.channelNumber) {
       parts.push("Canal " + item.channelNumber);
     }
 
@@ -704,6 +705,8 @@
             openSeriesDetails(entry);
           } else if (entry.kind === "vod") {
             openVod(entry);
+          } else if (entry.kind === "pluto-live") {
+            playPluto(entry);
           } else {
             playUrl(entry.url, entry.title, "catalog", entry);
           }
@@ -1087,6 +1090,52 @@
   }
 
 
+  function playPluto(entry) {
+    if (!entry || !entry.plutoChannelId) {
+      return;
+    }
+
+    byId("catalog-summary").textContent =
+      "Preparando stream Pluto TV…";
+
+    global.BlazzingNetwork.plutoStream(entry.plutoChannelId)
+      .then(function (url) {
+        playUrl(url, entry.title, "catalog", entry);
+      })
+      .catch(function (error) {
+        byId("catalog-summary").textContent =
+          error && error.message ?
+            error.message :
+            "Falha ao abrir canal Pluto TV.";
+      });
+  }
+
+  function loadPlutoCatalog() {
+    byId("pluto-status").textContent =
+      "Criando sessão e carregando canais…";
+    showScreen("pluto");
+
+    global.BlazzingNetwork.plutoLive()
+      .then(function (payload) {
+        var parsed = global.BlazzingPluto.buildLiveCatalog(payload);
+
+        if (!parsed.items.length) {
+          throw new Error("Pluto TV não retornou canais para esta região.");
+        }
+
+        catalogStack = [];
+        xtreamSession = null;
+        byId("catalog-provider").textContent = "Pluto TV • Live";
+        renderCatalog(parsed, "Pluto TV");
+      })
+      .catch(function (error) {
+        byId("pluto-status").textContent =
+          error && error.message ?
+            error.message :
+            "Falha ao carregar Pluto TV.";
+      });
+  }
+
   function startPairing() {
     byId("pair-status").textContent = "Criando sessão segura…";
     byId("pair-url").textContent = "—";
@@ -1137,6 +1186,8 @@
     restoreXtreamProfile();
     showScreen("xtream");
   });
+
+  byId("action-pluto").addEventListener("click", loadPlutoCatalog);
 
   byId("action-manual").addEventListener("click", function () {
     byId("manual-status").textContent = "";
@@ -1284,6 +1335,7 @@
 
   byId("m3u-back").addEventListener("click", showHome);
   byId("xtream-back").addEventListener("click", showHome);
+  byId("pluto-back").addEventListener("click", showHome);
   byId("manual-back").addEventListener("click", showHome);
   byId("about-back").addEventListener("click", showHome);
   byId("pair-cancel").addEventListener("click", showHome);
