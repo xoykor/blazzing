@@ -8,6 +8,28 @@ html, body {
     color: #f6f7fb;
 }
 body { font-size: 28px; }
+
+#av-player-object {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 1920px;
+    height: 1080px;
+    z-index: 0;
+    background: transparent;
+    visibility: hidden;
+    pointer-events: none;
+}
+#app {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+}
+body.avplay-active,
+body.avplay-active #app {
+    background: transparent !important;
+}
 * { box-sizing: border-box; }
 button, input { font: inherit; }
 
@@ -406,7 +428,8 @@ label input { margin-top: 9px; color: #f6f7fb; }
     background: black;
     object-fit: contain;
 }
-#player-view { padding: 0; background: black; }
+#player-view { padding: 0; background: transparent; }
+body:not(.avplay-active) #player-view { background: black; }
 .player-hud {
     position: absolute;
     left: 55px;
