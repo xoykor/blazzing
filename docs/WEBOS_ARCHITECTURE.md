@@ -13,7 +13,8 @@ It uses:
 - HTML5 `<video>` for playback;
 - Web Crypto for AES-256-GCM pairing;
 - a packaged JavaScript service for provider networking;
-- localStorage for small non-secret state such as favorites; IndexedDB remains reserved for larger caches.
+- localStorage for small non-secret state such as favorites;
+- IndexedDB for the bounded artwork cache.
 
 Initial compatibility target: webOS 4.0+.
 
@@ -110,9 +111,16 @@ focused item; the Simulator also accepts **F**.
 
 Catalog items render provider artwork when an HTTP/HTTPS image is available and
 fall back to a lightweight initial tile when it is not. Images use lazy-loading
-hints and no-referrer requests. The page window is intentionally limited to 48
-items to reduce decoded-image pressure on older TVs. A persistent artwork cache
-is still planned.
+hints and no-referrer requests.
+
+Artwork is cached in IndexedDB using only an opaque hash of the source URL as the
+persistent key; raw provider image URLs are not stored in the cache index. The
+network service accepts at most 1 MiB per artwork response. The persistent cache
+is capped at 24 MiB and 256 items, expires entries after 7 days and prunes least
+recently used entries. Object URLs are revoked when cards/details leave the DOM.
+
+The page window remains limited to 48 items to reduce decoded-image pressure on
+older TVs.
 
 ## Search
 
@@ -181,7 +189,7 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 - [x] VOD metadata
 - [x] series metadata
 - [x] live metadata
-- [ ] artwork cache
+- [x] artwork cache
 - [ ] Pluto
 - [x] failover UX
 
