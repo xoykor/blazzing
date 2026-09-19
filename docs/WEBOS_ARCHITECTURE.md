@@ -26,7 +26,7 @@ same repository.
                                     |
      phone browser -----------------+---------------- LG webOS app
                                                         |
-                                                        | direct media URL
+                                                        | provider/API/media
                                                         v
                                                 IPTV/media server
 ~~~
@@ -68,10 +68,14 @@ webos/
 │   │   ├── network.js
 │   │   ├── pairing.js
 │   │   ├── player.js
-│   │   └── qr.js
+│   │   ├── qr.js
+│   │   └── xtream.js
 │   └── vendor/                 generated, ignored
 ├── service/
 │   └── io.github.xoykor.blazzing.network/
+├── tests/
+│   ├── test-m3u.cjs
+│   └── test-xtream.cjs
 ├── tools/
 │   └── prepare.mjs
 ├── prepare.fish
@@ -82,15 +86,9 @@ webos/
 
 ## Application and service IDs
 
-App:
+App: `io.github.xoykor.blazzing`
 
-`io.github.xoykor.blazzing`
-
-Network service:
-
-`io.github.xoykor.blazzing.network`
-
-The service name begins with the application ID as required by webOS packaging.
+Network service: `io.github.xoykor.blazzing.network`
 
 ## Phone pairing
 
@@ -109,57 +107,93 @@ Flow:
 7. TV polls every 2 seconds.
 8. TV decrypts locally.
 9. TV deletes the session.
-10. The decrypted URL is sent to the M3U loader, not directly treated as a media stream.
+10. The decrypted URL is passed to the M3U loader.
 
-QR generation happens locally from a pinned MIT dependency. No external QR
-service sees the fragment key.
+QR generation happens locally. No external QR service receives the fragment key.
+
+## Provider networking
+
+~~~text
+web app
+   |
+   +-- packaged app --> Luna request --> Blazzing network JS service
+   |                                      |
+   |                                      +--> M3U / Xtream API
+   |
+   +-- Simulator fallback --------------------> browser fetch (CORS applies)
+~~~
+
+The service exposes narrow provider operations, not an unrestricted proxy.
+
+Current service capabilities:
+
+- `fetchM3U`;
+- `xtreamRequest` with an action allow-list.
+
+Current common limits:
+
+- HTTP/HTTPS only;
+- at most five redirects;
+- 8 MiB response cap during the alpha;
+- 15-second request timeout;
+- no provider credential logging.
 
 ## M3U flow
 
 ~~~text
-phone/manual URL
-      |
-      v
+playlist URL
+   |
+   v
 BlazzingNetwork.fetchM3U()
-      |
-      +-- webOS app + service available --> Luna JS Service --> HTTP/HTTPS
-      |
-      +-- Simulator/browser fallback ----> fetch() (subject to CORS)
-      |
-      v
+   |
+   v
 BlazzingM3U.parse()
-      |
-      v
+   |
+   v
 normalized items + groups
-      |
-      v
-catalog UI --> selected media URL --> HTML5 video
+   |
+   v
+shared catalog --> selected URL --> HTML5 video
 ~~~
 
-The current alpha bounds a fetched playlist at 8 MiB. This is deliberately
-smaller than the Linux client's large-playlist limit until chunking and memory
-behavior are validated on TV hardware.
+Relative media URLs are resolved against the final playlist URL.
 
-The catalog currently renders at most 120 items for the selected group. This is
-a temporary DOM bound; virtualization/pagination is required before large
-catalog support is considered complete.
+The catalog currently renders at most 120 items per selected group. This is a
+temporary DOM bound until virtualization/pagination is implemented.
 
-## Network service security
+## Xtream live flow
 
-The service exposes a narrow `fetchM3U` method rather than a generic browser
-proxy. It:
+~~~text
+server + username + password
+        |
+        v
+player_api.php authentication
+        |
+        +--> get_live_categories
+        |
+        +--> get_live_streams
+        |
+        v
+BlazzingXtream.buildLiveCatalog()
+        |
+        v
+shared catalog --> direct_source or generated /live/...ts URL --> video
+~~~
 
-- accepts only HTTP/HTTPS URLs;
-- follows at most five redirects;
-- limits payload size to 8 MiB;
-- applies a 15-second request timeout;
-- does not log provider URLs or credentials.
+Credentials currently remain in memory only. The password field is cleared
+after the authentication attempt. Persistent credentials are intentionally not
+implemented until the storage/security design is reviewed.
 
-Future Xtream and EPG methods should be separate bounded APIs.
+The implementation follows the existing desktop provider behavior:
+
+- authenticated if `user_info.auth` is truthy or status is `active`;
+- only `stream_type=live` enters the live catalog;
+- `direct_source` is preferred when it is HTTP/HTTPS;
+- otherwise a `/live/<user>/<pass>/<stream_id>.ts` URL is generated.
 
 ## Playback
 
-The Worker is not in the media path. Once a catalog item is selected, its URL is
+The Worker is not in the media path. Once an item is selected, its media URL is
 given directly to the TV's HTML5 media element.
 
 Simulator playback is not sufficient evidence of real TV codec/HLS support, so
@@ -184,18 +218,23 @@ media compatibility remains a real-device release gate.
 - [x] packaged network JS service
 - [x] bounded M3U fetch
 - [x] parser
+- [x] relative URL resolution
 - [x] category normalization
 - [x] catalog grid
 - [x] direct HTML5 playback handoff
+- [x] parser regression tests
 - [ ] catalog virtualization/pagination
 - [ ] large-playlist chunking
 - [ ] artwork
 
 ### M3 — Xtream
 
-- [ ] authentication
-- [ ] live categories
-- [ ] VOD
+- [x] authentication
+- [x] live categories
+- [x] live streams
+- [x] live catalog normalization
+- [x] regression tests
+- [ ] VOD categories/streams
 - [ ] series/seasons/episodes
 - [ ] profile storage
 
@@ -229,3 +268,4 @@ media compatibility remains a real-device release gate.
 7. Keep service syntax compatible with Node.js 0.12 while webOS 4.x is supported.
 8. Every privileged Luna API must document its exact ACG requirement.
 9. Bound provider network operations and never create an unrestricted proxy.
+10. Do not persist Xtream credentials until the storage/security model is explicitly reviewed.
