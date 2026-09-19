@@ -9,9 +9,22 @@ var service = new Service("io.github.xoykor.blazzing.network");
 var MAX_BYTES = 8 * 1024 * 1024;
 var MAX_REDIRECTS = 5;
 var TIMEOUT_MS = 15000;
+var XTREAM_ACTIONS = {
+  "": true,
+  "get_live_categories": true,
+  "get_live_streams": true
+};
 
 function validUrl(value) {
   return typeof value === "string" && /^https?:\/\//i.test(value);
+}
+
+function normalizeServer(value) {
+  var server = String(value || "");
+  if (!validUrl(server)) {
+    return null;
+  }
+  return server.replace(/\/+$/, "") + "/";
 }
 
 function fetchText(target, redirectsLeft, callback) {
@@ -42,8 +55,8 @@ function fetchText(target, redirectsLeft, callback) {
     port: parsed.port,
     path: parsed.path,
     headers: {
-      "User-Agent": "Blazzing-webOS/0.2",
-      "Accept": "application/x-mpegURL, application/vnd.apple.mpegurl, text/plain, */*"
+      "User-Agent": "Blazzing-webOS/0.3",
+      "Accept": "application/json, application/x-mpegURL, application/vnd.apple.mpegurl, text/plain, */*"
     }
   }, function (response) {
     var chunks = [];
@@ -73,7 +86,7 @@ function fetchText(target, redirectsLeft, callback) {
       total += chunk.length;
       if (total > MAX_BYTES) {
         request.abort();
-        done(new Error("Playlist exceeds the 8 MiB webOS alpha limit."));
+        done(new Error("Provider response exceeds the 8 MiB webOS alpha limit."));
         return;
       }
       chunks.push(chunk);
@@ -122,6 +135,46 @@ service.register("fetchM3U", function (message) {
       returnValue: true,
       text: text,
       finalUrl: finalUrl
+    });
+  });
+});
+
+service.register("xtreamRequest", function (message) {
+  var payload = message.payload || {};
+  var server = normalizeServer(payload.server);
+  var username = String(payload.username || "");
+  var password = String(payload.password || "");
+  var action = String(payload.action || "");
+  var target;
+
+  if (!server || !username || !password || !XTREAM_ACTIONS[action]) {
+    message.respond({
+      returnValue: false,
+      errorText: "Invalid Xtream request."
+    });
+    return;
+  }
+
+  target = server + "player_api.php?username=" +
+    encodeURIComponent(username) + "&password=" +
+    encodeURIComponent(password);
+
+  if (action) {
+    target += "&action=" + encodeURIComponent(action);
+  }
+
+  fetchText(target, MAX_REDIRECTS, function (error, text) {
+    if (error) {
+      message.respond({
+        returnValue: false,
+        errorText: error.message || "Xtream request failed."
+      });
+      return;
+    }
+
+    message.respond({
+      returnValue: true,
+      text: text
     });
   });
 });

@@ -179,6 +179,7 @@
         throw new Error("A playlist não contém itens reproduzíveis.");
       }
 
+      byId("catalog-provider").textContent = "M3U";
       renderCatalog(parsed, name || "Playlist M3U");
     }).catch(function (error) {
       byId("m3u-status").textContent =
@@ -230,6 +231,12 @@
     showScreen("m3u");
   });
 
+  byId("action-xtream").addEventListener("click", function () {
+    byId("xtream-status").textContent = "";
+    byId("xtream-password").value = "";
+    showScreen("xtream");
+  });
+
   byId("action-manual").addEventListener("click", function () {
     byId("manual-status").textContent = "";
     showScreen("manual");
@@ -243,6 +250,54 @@
     loadPlaylist(byId("m3u-url").value.trim(), "Playlist M3U");
   });
 
+  byId("xtream-login").addEventListener("click", function () {
+    var creds;
+
+    try {
+      creds = global.BlazzingXtream.credentials(
+        byId("xtream-server").value,
+        byId("xtream-username").value,
+        byId("xtream-password").value
+      );
+    } catch (error) {
+      byId("xtream-status").textContent = error.message;
+      return;
+    }
+
+    byId("xtream-status").textContent = "Autenticando…";
+
+    global.BlazzingNetwork.xtreamRequest(creds, "").then(function (auth) {
+      if (!global.BlazzingXtream.authAccepted(auth)) {
+        throw new Error("Provider rejeitou as credenciais.");
+      }
+
+      byId("xtream-status").textContent = "Carregando canais…";
+      return Promise.all([
+        global.BlazzingNetwork.xtreamRequest(creds, "get_live_categories"),
+        global.BlazzingNetwork.xtreamRequest(creds, "get_live_streams")
+      ]);
+    }).then(function (responses) {
+      var parsed = global.BlazzingXtream.buildLiveCatalog(
+        responses[0],
+        responses[1],
+        creds
+      );
+
+      byId("xtream-password").value = "";
+
+      if (!parsed.items.length) {
+        throw new Error("Provider não retornou canais live.");
+      }
+
+      byId("catalog-provider").textContent = "Xtream";
+      renderCatalog(parsed, "TV ao vivo");
+    }).catch(function (error) {
+      byId("xtream-password").value = "";
+      byId("xtream-status").textContent =
+        error && error.message ? error.message : "Falha ao carregar Xtream.";
+    });
+  });
+
   byId("manual-play").addEventListener("click", function () {
     var url = byId("manual-url").value.trim();
     if (!validHttpUrl(url)) {
@@ -253,6 +308,7 @@
   });
 
   byId("m3u-back").addEventListener("click", showHome);
+  byId("xtream-back").addEventListener("click", showHome);
   byId("manual-back").addEventListener("click", showHome);
   byId("about-back").addEventListener("click", showHome);
   byId("pair-cancel").addEventListener("click", showHome);

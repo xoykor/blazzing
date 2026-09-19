@@ -31,6 +31,12 @@
           <span>Carrega uma lista M3U/M3U8 e monta categorias e canais.</span>
         </button>
 
+        <button id="action-xtream" class="card focusable" type="button">
+          <span class="card-kicker">Xtream</span>
+          <strong>Entrar no provider</strong>
+          <span>Autentica e carrega categorias e canais de TV ao vivo.</span>
+        </button>
+
         <button id="action-manual" class="card focusable" type="button">
           <span class="card-kicker">Teste</span>
           <strong>Abrir URL de stream</strong>
@@ -84,7 +90,7 @@
     <section id="screen-catalog" class="screen catalog-screen" aria-label="Catálogo">
       <header class="catalog-header">
         <div>
-          <div class="eyebrow">M3U</div>
+          <div id="catalog-provider" class="eyebrow">M3U</div>
           <h2 id="catalog-title">Playlist</h2>
           <p id="catalog-summary" class="status"></p>
         </div>
@@ -93,6 +99,27 @@
       <div class="catalog-layout">
         <aside id="catalog-groups" class="group-list" aria-label="Categorias"></aside>
         <section id="catalog-items" class="media-grid" aria-label="Canais"></section>
+      </div>
+    </section>
+
+    <section id="screen-xtream" class="screen" aria-label="Entrar no Xtream">
+      <div class="panel">
+        <div class="eyebrow">Xtream Codes</div>
+        <h2>Entrar no provider</h2>
+        <label for="xtream-server">Servidor</label>
+        <input id="xtream-server" class="focusable" type="url" inputmode="url"
+               placeholder="http://servidor:porta" autocomplete="off">
+        <label for="xtream-username">Usuário</label>
+        <input id="xtream-username" class="focusable" type="text"
+               autocomplete="off">
+        <label for="xtream-password">Senha</label>
+        <input id="xtream-password" class="focusable" type="password"
+               autocomplete="off">
+        <div class="row">
+          <button id="xtream-login" class="primary focusable" type="button">Entrar</button>
+          <button id="xtream-back" class="secondary focusable" type="button">Voltar</button>
+        </div>
+        <p id="xtream-status" class="status"></p>
       </div>
     </section>
 
@@ -140,6 +167,7 @@
   <script src="src/navigation.js"></script>
   <script src="src/pairing.js"></script>
   <script src="src/qr.js"></script>
+  <script src="src/xtream.js"></script>
   <script src="src/network.js"></script>
   <script src="src/m3u.js"></script>
   <script src="src/player.js"></script>
