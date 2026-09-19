@@ -147,6 +147,17 @@
     button.disabled = !visible;
   }
 
+  function setPlayerPaused(paused) {
+    var button = byId("player-toggle");
+    var isPaused = !!paused;
+
+    button.textContent = isPaused ? "Reproduzir" : "Pausar";
+    button.setAttribute(
+      "aria-label",
+      isPaused ? "Reproduzir vídeo" : "Pausar vídeo"
+    );
+  }
+
   function playbackSources(url, entry) {
     var sources = [];
     var fallback = entry && entry.fallbackUrl ?
@@ -196,6 +207,7 @@
 
     resumeAt = currentResumePoint(playback);
     setRetryVisible(false);
+    setPlayerPaused(false);
 
     global.BlazzingPlayer.open(playback.sources[sourceIndex], {
       resumeAt: resumeAt,
@@ -215,10 +227,18 @@
           return;
         }
 
+        setPlayerPaused(false);
         byId("player-status").textContent =
           resumeAt >= 10 ?
             "Reproduzindo • retomado em " + formatTime(resumeAt) + suffix :
             "Reproduzindo" + suffix;
+      },
+      onPaused: function () {
+        if (activePlayback !== playback) {
+          return;
+        }
+
+        setPlayerPaused(true);
       },
       onProgress: function (seconds, duration) {
         if (activePlayback !== playback) {
@@ -238,6 +258,7 @@
           return;
         }
 
+        setPlayerPaused(true);
         if (activeProgressKey) {
           global.BlazzingStorage.clearProgress(activeProgressKey);
           activeProgressKey = "";
@@ -1631,6 +1652,15 @@
     }
   });
 
+
+  byId("player-toggle").addEventListener("click", function () {
+    if (!activePlayback) {
+      return;
+    }
+
+    global.BlazzingPlayer.togglePause();
+    setPlayerPaused(global.BlazzingPlayer.isPaused());
+  });
 
   byId("player-retry").addEventListener("click", function () {
     if (!activePlayback) {
