@@ -47,6 +47,15 @@ jobs:
           import xml.etree.ElementTree as ET
           root = ET.parse("tizen/config.xml").getroot()
           assert root.tag.endswith("widget")
+          ns = {"t": "http://tizen.org/ns/widgets"}
+          app = root.find("t:application", ns)
+          assert app is not None
+          assert app.attrib["id"] == "Blazzing01.tizen"
+          assert app.attrib["package"] == "Blazzing01"
+          assert app.attrib["required_version"] == "9.0"
+          assert root.find("t:profile", ns).attrib["name"] == "tv-samsung"
+          privileges = {p.attrib["name"] for p in root.findall("t:privilege", ns)}
+          assert "http://developer.samsung.com/privilege/avplay" in privileges
           print("config.xml: OK")
           PY
 
@@ -55,12 +64,16 @@ jobs:
         run: |
           test -s tizen/index.html
           test -s tizen/css/app.css
+          test -s tizen/js/boot.js
           test -s tizen/js/app.js
           test -s tizen/js/player.js
           test -s tizen/js/providers.js
           test -s tizen/js/net-storage.js
           test -s tizen/js/pairing.js
           test -s tizen/.tproject
+          grep -q '"js/boot.js"' tizen/index.html
+          grep -q '"js/pairing.js"' tizen/index.html
+          grep -q '"pair-button"' tizen/index.html
 
       - name: Package unsigned WGT
         shell: bash
