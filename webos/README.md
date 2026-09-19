@@ -15,6 +15,7 @@ Implemented:
 - local QR rendering;
 - M3U/M3U8 URL loading;
 - M3U parser, categories and catalog grid;
+- provider artwork with lightweight fallback tiles;
 - packaged Node.js network service for providers blocked by browser CORS;
 - direct browser fallback for Simulator development;
 - Xtream authentication;
@@ -28,7 +29,7 @@ Implemented:
 
 Still planned:
 
-- catalog virtualization beyond the current page window;
+- full catalog virtualization beyond the current 48-item page window;
 - large-playlist handling beyond the temporary 8 MiB alpha limit;
 - artwork cache;
 - store submission and real-TV media validation.
