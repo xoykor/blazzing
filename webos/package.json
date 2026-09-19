@@ -1,7 +1,7 @@
 {
   "name": "blazzing-webos-dev",
   "private": true,
-  "version": "0.13.0",
+  "version": "0.14.0",
   "scripts": {
     "prepare-app": "node tools/prepare.mjs",
     "validate-release": "node tools/validate-release.mjs",
