@@ -80,7 +80,9 @@ The generated IPK in `webos/dist` contains both the app and
 
 Pull-request CI also builds the installable IPK and exposes it as the
 `blazzing-webos-ipk` workflow artifact. App, service and development package
-versions are kept aligned and validated before packaging.
+versions are kept aligned and validated before packaging. CI opens the generated
+IPK, verifies the expected app/service payload paths, and publishes
+`SHA256SUMS.txt` beside the package.
 
 ## Install on a configured TV
 
