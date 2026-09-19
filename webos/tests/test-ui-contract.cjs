@@ -51,4 +51,18 @@ for (const screen of requiredScreens) {
   );
 }
 
+const navigationSource = fs.readFileSync(
+  path.join(__dirname, "..", "app", "src", "navigation.js"),
+  "utf8"
+);
+
+assert(
+  navigationSource.includes("blazzing-navigation-boundary"),
+  "navigation must emit catalog boundary events"
+);
+assert(
+  appSource.includes("catalogFocusRequest"),
+  "catalog must preserve focus across paged navigation"
+);
+
 console.log("UI contract tests passed");
