@@ -22,7 +22,10 @@
         playerReturnView: "catalog",
         currentPlaylistIndex: -1,
         lastProgressWrite: 0,
-        pairingActive: false
+        pairingActive: false,
+        returnFocusUid: "",
+        catalogScrollTop: 0,
+        lastZapAt: 0
     };
 
     var toastTimer = 0;
@@ -613,43 +616,70 @@
 
     byId("catalog-search").addEventListener("input", applyFilters);
 
+    function focusCategoryButton(id) {
+        var buttons = byId("categories").querySelectorAll("[data-category-id]");
+        var i;
+        for (i = 0; i < buttons.length; i += 1) {
+            if (buttons[i].getAttribute("data-category-id") === id) {
+                buttons[i].focus();
+                return;
+            }
+        }
+    }
+
     function renderCategories() {
         var root = byId("categories");
         var all = document.createElement("button");
 
         root.innerHTML = "";
 
-        all.textContent = "Todos";
+        all.textContent = "Todos (" + state.catalog.items.length + ")";
         all.setAttribute("data-focusable", "true");
+        all.setAttribute("data-category-id", "all");
         all.className = state.category === "all" ? "active" : "";
         all.addEventListener("click", function () {
             state.category = "all";
             applyFilters();
+            setTimeout(function () { focusCategoryButton("all"); }, 0);
         });
         root.appendChild(all);
 
         state.catalog.categories.forEach(function (category) {
             var button = document.createElement("button");
-            button.textContent = category.name || "Sem categoria";
+            var count = state.catalog.items.filter(function (item) {
+                return item.categoryId === category.id;
+            }).length;
+
+            button.textContent = (category.name || "Outros") + " (" + count + ")";
             button.setAttribute("data-focusable", "true");
+            button.setAttribute("data-category-id", category.id);
             button.className = state.category === category.id ? "active" : "";
             button.addEventListener("click", function () {
                 state.category = category.id;
                 applyFilters();
+                setTimeout(function () {
+                    focusCategoryButton(category.id);
+                }, 0);
             });
             root.appendChild(button);
         });
     }
 
     function applyFilters() {
-        var query = byId("catalog-search").value.toLowerCase();
+        var normalize = window.BlazzingProviders.normalizeWords || function (value) {
+            return String(value || "").toLowerCase();
+        };
+        var query = normalize(byId("catalog-search").value);
         var favorites = window.BlazzingStorage.favorites();
 
         state.filtered = state.catalog.items.filter(function (item) {
             var categoryOk = state.category === "all" ||
                 item.categoryId === state.category;
-            var queryOk = !query ||
-                String(item.name || "").toLowerCase().indexOf(query) !== -1;
+            var searchable = normalize(
+                String(item.name || "") + " " +
+                String(item.categoryName || item.group || "")
+            );
+            var queryOk = !query || searchable.indexOf(query) !== -1;
             var favoriteOk = !state.favoritesOnly || favorites[item.uid];
 
             return categoryOk && queryOk && favoriteOk;
@@ -936,6 +966,11 @@
         state.playerReturnView =
             state.view === "series" ? "series" : "catalog";
         state.currentPlaylistIndex = state.filtered.indexOf(item);
+        state.returnFocusUid = item.uid || "";
+
+        if (state.view === "catalog") {
+            state.catalogScrollTop = byId("catalog-grid").parentNode.scrollTop || 0;
+        }
 
         byId("player-title").textContent = item.name || "Reproduzindo";
         byId("player-status").textContent = "Preparando…";
@@ -943,6 +978,31 @@
         setView("player");
         window.BlazzingPlayer.open(item, resume);
         showHud();
+    }
+
+    function restorePlayerReturnFocus() {
+        var root;
+        var candidates;
+        var i;
+
+        if (state.playerReturnView !== "catalog") {
+            return;
+        }
+
+        try {
+            byId("catalog-grid").parentNode.scrollTop = state.catalogScrollTop || 0;
+        } catch (ignoreScroll) {}
+
+        root = byId("catalog-grid");
+        candidates = root.querySelectorAll("[data-item-uid]");
+        for (i = 0; i < candidates.length; i += 1) {
+            if (candidates[i].getAttribute("data-item-uid") === state.returnFocusUid &&
+                    candidates[i].classList.contains("card-main")) {
+                candidates[i].focus();
+                try { candidates[i].scrollIntoView(false); } catch (ignoreFocusScroll) {}
+                return;
+            }
+        }
     }
 
     function closePlayer() {
@@ -957,16 +1017,23 @@
 
         window.BlazzingPlayer.stop();
         setView(state.playerReturnView || "catalog");
+        setTimeout(restorePlayerReturnFocus, 40);
     }
 
     function switchLive(delta) {
         var item;
         var list;
         var index;
+        var now = Date.now();
 
         if (state.kind !== "live" || !state.filtered.length) {
             return;
         }
+
+        if (now - state.lastZapAt < 280) {
+            return;
+        }
+        state.lastZapAt = now;
 
         item = window.BlazzingPlayer.item();
         list = state.filtered;
@@ -982,6 +1049,9 @@
         item = list[index];
 
         byId("player-title").textContent = item.name || "Canal";
+        byId("player-status").textContent =
+            "Canal " + (index + 1) + " de " + list.length + " · Preparando…";
+        state.returnFocusUid = item.uid || state.returnFocusUid;
         window.BlazzingPlayer.open(item, 0);
     }
 
