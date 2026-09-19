@@ -403,6 +403,22 @@
     });
   }
 
+  function invalidate(url) {
+    var sourceUrl = String(url || "");
+
+    if (!validUrl(sourceUrl)) {
+      return Promise.resolve();
+    }
+
+    return openDb()
+      .then(function (db) {
+        return deleteKeys(db, [cacheKey(sourceUrl)]);
+      })
+      .catch(function () {
+        // Invalidating a cache entry is best effort.
+      });
+  }
+
   function clear() {
     return openDb().then(function (db) {
       return new Promise(function (resolve, reject) {
@@ -433,6 +449,7 @@
     load: load,
     releaseImage: releaseImage,
     releaseTree: releaseTree,
+    invalidate: invalidate,
     clear: clear,
     cacheKey: cacheKey,
     limits: {
