@@ -120,7 +120,9 @@ is capped at 24 MiB and 256 items, expires entries after 7 days and prunes least
 recently used entries. Object URLs are revoked when cards/details leave the DOM.
 
 The page window remains limited to 48 items to reduce decoded-image pressure on
-older TVs.
+older TVs. Remote navigation now crosses page boundaries automatically when the
+focus reaches the end of the current card window, so the user does not have to
+move to the pagination buttons during normal browsing.
 
 ## Search
 
@@ -193,7 +195,8 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 - [x] tests
 - [x] disk-backed pagination window (48 items)
 - [x] M3U/M3U8 up to 128 MiB without loading the full playlist into UI memory
-- [ ] full virtualization
+- [x] seamless bounded-window navigation (48 cards kept in DOM)
+- [ ] true scroll virtualization within a single logical page
 - [x] artwork rendering
 
 ### M3 Xtream
