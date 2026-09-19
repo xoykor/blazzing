@@ -736,6 +736,19 @@
     );
   }
 
+  function updateCatalogWindowBoundary(hasPrevious, hasNext) {
+    var container = byId("catalog-items");
+
+    container.setAttribute(
+      "data-has-prev-window",
+      hasPrevious ? "true" : "false"
+    );
+    container.setAttribute(
+      "data-has-next-window",
+      hasNext ? "true" : "false"
+    );
+  }
+
   function focusCatalogLater() {
     var request = catalogFocusRequest;
     catalogFocusRequest = "";
@@ -920,6 +933,7 @@
     byId("catalog-summary").textContent = "Carregando página…";
     byId("catalog-prev").disabled = true;
     byId("catalog-next").disabled = true;
+    updateCatalogWindowBoundary(false, false);
     selectCatalogGroupButton(group);
 
     global.BlazzingNetwork.queryM3U(currentCatalog.sessionId, {
@@ -971,6 +985,7 @@
 
       byId("catalog-prev").disabled = catalogPage <= 0;
       byId("catalog-next").disabled = !result.hasMore;
+      updateCatalogWindowBoundary(catalogPage > 0, !!result.hasMore);
       focusCatalogLater();
     }).catch(function (error) {
       if (requestId !== catalogRequestId || catalog !== currentCatalog) {
@@ -1028,6 +1043,10 @@
 
     byId("catalog-prev").disabled = catalogPage <= 0;
     byId("catalog-next").disabled = catalogPage >= totalPages - 1;
+    updateCatalogWindowBoundary(
+      catalogPage > 0,
+      catalogPage < totalPages - 1
+    );
     selectCatalogGroupButton(group);
     focusCatalogLater();
   }
