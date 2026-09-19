@@ -21,6 +21,7 @@ Implemented:
 - Xtream live categories and channels;
 - Xtream VOD;
 - Xtream series, seasons and episodes;
+- catalog search by title/category;
 - persistent favorites without storing credentials or media URLs;
 - playback progress/resume for Xtream movies and episodes;
 - regression tests for M3U, Xtream and persistence.
