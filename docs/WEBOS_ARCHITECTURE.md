@@ -65,7 +65,7 @@ Implemented:
 Temporary alpha limits:
 
 - 8 MiB provider response cap;
-- 120 DOM items rendered per selected group.
+- 48 DOM items rendered per selected group/page to bound image and layout memory.
 
 ## Xtream
 
@@ -94,6 +94,14 @@ Xtream passwords. M3U URLs are fingerprinted before an item key is persisted.
 
 The catalog always exposes a **Favoritos** group. The yellow remote key toggles the
 focused item; the Simulator also accepts **F**.
+
+## Artwork
+
+Catalog items render provider artwork when an HTTP/HTTPS image is available and
+fall back to a lightweight initial tile when it is not. Images use lazy-loading
+hints and no-referrer requests. The page window is intentionally limited to 48
+items to reduce decoded-image pressure on older TVs. A persistent artwork cache
+is still planned.
 
 ## Search
 
@@ -133,9 +141,9 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 - [x] catalog
 - [x] playback handoff
 - [x] tests
-- [ ] virtualization/pagination
+- [x] pagination window (48 items)\n- [ ] full virtualization
 - [ ] large-playlist chunking
-- [ ] artwork
+- [x] artwork rendering
 
 ### M3 Xtream
 - [x] authentication
