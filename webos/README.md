@@ -17,7 +17,7 @@ Implemented:
 - disk-backed M3U catalog paging so large playlists do not live entirely in UI RAM;
 - automatic recovery if a temporary paged M3U session expires or the service restarts;
 - M3U parser, categories and catalog grid;
-- provider artwork with lightweight fallback tiles;
+- provider artwork with lightweight fallback tiles and bounded IndexedDB cache;
 - packaged Node.js network service for providers blocked by browser CORS;
 - direct browser fallback for Simulator development;
 - Xtream authentication;
@@ -34,7 +34,7 @@ Implemented:
 Still planned:
 
 - full catalog virtualization beyond the current 48-item page window;
-- artwork cache;
+- Pluto integration;
 - store submission and real-TV media validation.
 
 ## Prepare
