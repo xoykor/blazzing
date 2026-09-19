@@ -210,7 +210,7 @@ assert.strictEqual(
   service.sanitizeVodPath(
     "https://old.example/stitch/hls/episode/movie123/master.m3u8?jwt=STALE"
   ),
-  "/stitch/hls/episode/movie123/master.m3u8"
+  "/v2/stitch/hls/episode/movie123/master.m3u8"
 );
 assert.strictEqual(
   service.sanitizeVodPath("https://old.example/not-stitch/movie.m3u8"),
