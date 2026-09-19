@@ -1,0 +1,10 @@
+{
+  "id": "io.github.xoykor.blazzing.network",
+  "description": "Blazzing webOS provider network service",
+  "services": [
+    {
+      "name": "io.github.xoykor.blazzing.network",
+      "description": "Fetches bounded M3U playlists for the Blazzing app"
+    }
+  ]
+}

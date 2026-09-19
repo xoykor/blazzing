@@ -13,16 +13,22 @@
         <div>
           <div class="eyebrow">Blazzing para LG webOS</div>
           <h1>Seu conteúdo, direto na TV.</h1>
-          <p>Primeiro protótipo nativo para webOS.</p>
+          <p>Protótipo nativo para webOS com pareamento, M3U e player.</p>
         </div>
-        <div class="version-badge">webOS alpha 0.1</div>
+        <div class="version-badge">webOS alpha 0.2</div>
       </header>
 
       <div class="action-grid">
         <button id="action-pair" class="card focusable" type="button">
           <span class="card-kicker">Celular</span>
           <strong>Adicionar pelo celular</strong>
-          <span>Cria uma sessão cifrada pelo Worker do Blazzing.</span>
+          <span>Recebe uma playlist cifrada pelo Worker do Blazzing.</span>
+        </button>
+
+        <button id="action-m3u" class="card focusable" type="button">
+          <span class="card-kicker">M3U</span>
+          <strong>Abrir playlist</strong>
+          <span>Carrega uma lista M3U/M3U8 e monta categorias e canais.</span>
         </button>
 
         <button id="action-manual" class="card focusable" type="button">
@@ -34,7 +40,7 @@
         <button id="action-about" class="card focusable" type="button">
           <span class="card-kicker">Projeto</span>
           <strong>Arquitetura webOS</strong>
-          <span>M3U, Xtream e catálogo entram nas próximas etapas.</span>
+          <span>M3U já está no alpha; Xtream e persistência vêm depois.</span>
         </button>
       </div>
 
@@ -60,6 +66,36 @@
       </div>
     </section>
 
+    <section id="screen-m3u" class="screen" aria-label="Abrir playlist">
+      <div class="panel">
+        <div class="eyebrow">Playlist</div>
+        <h2>Abrir M3U/M3U8</h2>
+        <label for="m3u-url">URL HTTP/HTTPS</label>
+        <input id="m3u-url" class="focusable" type="url" inputmode="url"
+               placeholder="https://exemplo/lista.m3u8" autocomplete="off">
+        <div class="row">
+          <button id="m3u-load" class="primary focusable" type="button">Carregar</button>
+          <button id="m3u-back" class="secondary focusable" type="button">Voltar</button>
+        </div>
+        <p id="m3u-status" class="status"></p>
+      </div>
+    </section>
+
+    <section id="screen-catalog" class="screen catalog-screen" aria-label="Catálogo">
+      <header class="catalog-header">
+        <div>
+          <div class="eyebrow">M3U</div>
+          <h2 id="catalog-title">Playlist</h2>
+          <p id="catalog-summary" class="status"></p>
+        </div>
+        <button id="catalog-back" class="secondary focusable" type="button">Voltar</button>
+      </header>
+      <div class="catalog-layout">
+        <aside id="catalog-groups" class="group-list" aria-label="Categorias"></aside>
+        <section id="catalog-items" class="media-grid" aria-label="Canais"></section>
+      </div>
+    </section>
+
     <section id="screen-manual" class="screen" aria-label="Abrir stream">
       <div class="panel">
         <div class="eyebrow">Player</div>
@@ -77,9 +113,9 @@
 
     <section id="screen-about" class="screen" aria-label="Sobre">
       <div class="panel">
-        <div class="eyebrow">Primeiro milestone</div>
+        <div class="eyebrow">Alpha webOS</div>
         <h2>Blazzing webOS</h2>
-        <p>Esta base já separa navegação, player e pareamento. O próximo bloco é o catálogo M3U e o serviço de rede para contornar CORS de providers.</p>
+        <p>A base já separa navegação, player, pareamento, rede e parser M3U. O próximo bloco é Xtream, persistência e catálogo virtualizado.</p>
         <button id="about-back" class="secondary focusable" type="button">Voltar</button>
       </div>
     </section>
@@ -104,6 +140,8 @@
   <script src="src/navigation.js"></script>
   <script src="src/pairing.js"></script>
   <script src="src/qr.js"></script>
+  <script src="src/network.js"></script>
+  <script src="src/m3u.js"></script>
   <script src="src/player.js"></script>
   <script src="src/app.js"></script>
 </body>
