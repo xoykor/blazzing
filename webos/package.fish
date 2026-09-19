@@ -9,6 +9,10 @@ set ares_package "$script_dir/node_modules/.bin/ares-package"
 "$script_dir/prepare.fish"
 or exit $status
 
+cd "$script_dir"
+npm run validate-release
+or exit $status
+
 if not test -x "$ares_package"
     if type -q ares-package
         set ares_package (command -s ares-package)
