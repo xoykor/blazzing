@@ -172,6 +172,9 @@ signed media URL is persisted.
 
 The app avoids unnecessary modern syntax because older LG TVs use older browser
 engines. The packaged service remains ES5-style while webOS 4.x is supported.
+CI rejects optional chaining, nullish coalescing, async/await, dynamic imports and
+BigInt literals in the runtime JavaScript so future changes do not silently raise
+the minimum browser engine.
 
 ## Milestones
 
@@ -230,4 +233,5 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 - [x] QA checklist authored
 - [ ] official LG App Self Checklist completed with real results
 - [x] CI release metadata validation
+- [x] legacy JavaScript compatibility gate
 - [x] CI-generated installable IPK artifact
