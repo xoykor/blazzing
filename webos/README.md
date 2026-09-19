@@ -25,6 +25,7 @@ Implemented:
 - Xtream live categories/channels with channel number and catch-up metadata;
 - Xtream VOD plus movie detail metadata;
 - Xtream series detail metadata, seasons and episodes;
+- direct regional Pluto TV Live catalogue and HLS session handling;
 - catalog search by title/category;
 - persistent favorites without storing credentials or media URLs;
 - playback progress/resume for Xtream movies and episodes;
@@ -34,7 +35,7 @@ Implemented:
 Still planned:
 
 - full catalog virtualization beyond the current 48-item page window;
-- Pluto integration;
+- Pluto VOD;
 - store submission and real-TV media validation.
 
 ## Prepare
