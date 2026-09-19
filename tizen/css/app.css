@@ -53,6 +53,17 @@ input::placeholder { color: #747d91; }
     justify-content: space-between;
 }
 .hero { height: 160px; }
+.home-signature {
+    position: absolute;
+    right: 64px;
+    bottom: 24px;
+    z-index: 8;
+    color: #7f8798;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: .03em;
+    pointer-events: none;
+}
 
 .brand {
     display: flex;
@@ -382,6 +393,7 @@ label input { margin-top: 9px; color: #f6f7fb; }
 @media (max-width: 1400px) {
     body { font-size: 22px; }
     .view { padding: 34px 42px; }
+    .home-signature { right: 42px; bottom: 18px; font-size: 15px; }
     .brand h1 { font-size: 48px; }
     .media-card { width: calc(25% - 18px); }
 }
