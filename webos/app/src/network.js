@@ -283,6 +283,58 @@
     });
   }
 
+  function plutoVod() {
+    if (!serviceAvailable()) {
+      return Promise.reject(new Error(
+        "Pluto VOD requer o serviço webOS empacotado."
+      ));
+    }
+
+    return serviceRequest("plutoVod", {}).then(function (response) {
+      if (!response.payload || typeof response.payload !== "object") {
+        throw new Error("O serviço webOS retornou Pluto VOD inválido.");
+      }
+      return response.payload;
+    });
+  }
+
+  function plutoSeries(seriesId) {
+    if (!serviceAvailable()) {
+      return Promise.reject(new Error(
+        "Séries Pluto requerem o serviço webOS empacotado."
+      ));
+    }
+
+    return serviceRequest("plutoSeries", {
+      seriesId: String(seriesId || "")
+    }).then(function (response) {
+      if (!response.payload || typeof response.payload !== "object") {
+        throw new Error("O serviço webOS retornou série Pluto inválida.");
+      }
+      return response.payload;
+    });
+  }
+
+  function plutoVodStream(path) {
+    if (!serviceAvailable()) {
+      return Promise.reject(new Error(
+        "Pluto VOD requer o serviço webOS empacotado."
+      ));
+    }
+
+    return serviceRequest("plutoVodStream", {
+      path: String(path || "")
+    }).then(function (response) {
+      var url = String(response.url || "");
+
+      if (!/^https?:\/\//i.test(url)) {
+        throw new Error("O serviço webOS retornou stream Pluto VOD inválido.");
+      }
+
+      return url;
+    });
+  }
+
   function xtreamRequest(creds, action, params) {
     if (serviceAvailable()) {
       return serviceRequest("xtreamRequest", {
@@ -328,6 +380,9 @@
     fetchArtwork: fetchArtwork,
     plutoLive: plutoLive,
     plutoStream: plutoStream,
+    plutoVod: plutoVod,
+    plutoSeries: plutoSeries,
+    plutoVodStream: plutoVodStream,
     xtreamRequest: xtreamRequest
   };
 }(window));
