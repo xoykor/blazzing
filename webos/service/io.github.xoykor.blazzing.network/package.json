@@ -1,6 +1,6 @@
 {
   "name": "io.github.xoykor.blazzing.network",
-  "version": "0.1.0",
+  "version": "0.12.0",
   "description": "Bounded network helper for Blazzing webOS",
   "main": "network_service.js"
 }
