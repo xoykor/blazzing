@@ -15,6 +15,7 @@ var XTREAM_ACTIONS = {
   "get_live_streams": true,
   "get_vod_categories": true,
   "get_vod_streams": true,
+  "get_vod_info": true,
   "get_series_categories": true,
   "get_series": true,
   "get_series_info": true
@@ -151,10 +152,12 @@ service.register("xtreamRequest", function (message) {
   var password = String(payload.password || "");
   var action = String(payload.action || "");
   var seriesId = String(payload.seriesId || "");
+  var vodId = String(payload.vodId || "");
   var target;
 
   if (!server || !username || !password || !XTREAM_ACTIONS[action] ||
-      (action === "get_series_info" && !seriesId)) {
+      (action === "get_series_info" && !seriesId) ||
+      (action === "get_vod_info" && !vodId)) {
     message.respond({
       returnValue: false,
       errorText: "Invalid Xtream request."
@@ -172,6 +175,10 @@ service.register("xtreamRequest", function (message) {
 
   if (action === "get_series_info") {
     target += "&series_id=" + encodeURIComponent(seriesId);
+  }
+
+  if (action === "get_vod_info") {
+    target += "&vod_id=" + encodeURIComponent(vodId);
   }
 
   fetchText(target, MAX_REDIRECTS, function (error, text) {
