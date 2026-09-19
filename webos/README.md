@@ -22,13 +22,13 @@ Implemented:
 - Xtream VOD;
 - Xtream series, seasons and episodes;
 - persistent favorites without storing credentials or media URLs;
+- playback progress/resume for Xtream movies and episodes;
 - regression tests for M3U, Xtream and persistence.
 
 Still planned:
 
 - catalog virtualization beyond the current page window;
 - large-playlist handling beyond the temporary 8 MiB alpha limit;
-- playback progress/resume;
 - artwork cache;
 - store submission and real-TV media validation.
 
