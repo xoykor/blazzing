@@ -243,3 +243,5 @@ the minimum browser engine.
 - [x] CI release metadata validation
 - [x] legacy JavaScript compatibility gate
 - [x] CI-generated installable IPK artifact
+- [x] CI inspection of packaged app/service payload
+- [x] SHA-256 manifest included with workflow artifact
