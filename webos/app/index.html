@@ -15,7 +15,7 @@
           <h1>Seu conteúdo, direto na TV.</h1>
           <p>Cliente webOS com M3U, Xtream, favoritos e retomada de reprodução.</p>
         </div>
-        <div class="version-badge">webOS alpha 0.9</div>
+        <div class="version-badge">webOS alpha 0.10</div>
       </header>
 
       <div class="action-grid">
@@ -188,7 +188,11 @@
           <h2 id="player-title">Stream</h2>
           <p id="player-status">Carregando…</p>
         </div>
-        <button id="player-back" class="secondary focusable" type="button">Voltar</button>
+        <div class="player-actions">
+          <button id="player-retry" class="primary focusable" type="button"
+                  style="display:none" disabled>Tentar novamente</button>
+          <button id="player-back" class="secondary focusable" type="button">Voltar</button>
+        </div>
       </div>
     </section>
   </main>
