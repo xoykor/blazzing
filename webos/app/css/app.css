@@ -542,7 +542,8 @@ input {
   border-radius: 18px;
 }
 
-#vod-poster {
+#vod-poster,
+#series-poster {
   display: none;
   width: 100%;
   height: 100%;
