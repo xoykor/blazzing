@@ -220,10 +220,11 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 - [x] failover UX
 
 ### M5 distribution
-- [ ] simulator matrix
-- [ ] real LG TV matrix
+- [ ] simulator matrix executed
+- [ ] real LG TV matrix executed
 - [ ] store artwork
-- [ ] Seller Lounge metadata
-- [ ] QA checklist
+- [x] Seller Lounge metadata/UX draft
+- [x] QA checklist authored
+- [ ] official LG App Self Checklist completed with real results
 - [x] CI release metadata validation
 - [x] CI-generated installable IPK artifact
