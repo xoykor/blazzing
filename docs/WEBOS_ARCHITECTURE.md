@@ -95,6 +95,13 @@ Xtream passwords. M3U URLs are fingerprinted before an item key is persisted.
 The catalog always exposes a **Favoritos** group. The yellow remote key toggles the
 focused item; the Simulator also accepts **F**.
 
+## Playback progress
+
+Movies and Xtream episodes persist only a playback timestamp keyed by the same
+opaque item identifier used by favorites. Progress is checkpointed approximately
+every 15 seconds and again when leaving the player. Items within 30 seconds of the
+end are treated as completed and their checkpoint is removed.
+
 ## Compatibility
 
 The app avoids unnecessary modern syntax because older LG TVs use older browser
@@ -135,7 +142,7 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 
 ### M4 parity
 - [x] favorites
-- [ ] progress
+- [x] progress
 - [ ] search
 - [ ] metadata
 - [ ] artwork cache
