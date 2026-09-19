@@ -22,6 +22,20 @@
                 <div id="platform-badge" class="pill">Tizen Web App</div>
             </div>
 
+            <div id="pairing-modal" class="pairing-modal hidden" aria-live="polite">
+                <div class="pairing-card">
+                    <div id="pairing-qr" class="pairing-qr"></div>
+                    <div class="pairing-copy">
+                        <p class="eyebrow">Adicionar pelo celular</p>
+                        <h2>Escaneie o QR</h2>
+                        <p id="pairing-status">Preparando sessão segura…</p>
+                        <p class="pairing-help">Abra a câmera do celular, escaneie o código e cole a URL M3U/M3U8. A URL é cifrada no navegador antes de ser enviada.</p>
+                        <p id="pairing-url" class="pairing-url"></p>
+                        <button id="pairing-cancel" data-focusable="true" type="button">Cancelar</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="home-signature">Para sempre gratuito · Feito por Fernando</div>
 
             <div class="home-grid">
@@ -76,6 +90,7 @@
                         </label>
 
                         <button id="connect-button" class="primary" data-focusable="true" type="submit">Conectar</button>
+                        <button id="pair-button" class="secondary wide" data-focusable="true" type="button">Adicionar pelo celular (QR)</button>
                     </form>
 
                     <p class="privacy-note">Use apenas listas e servidores que você tenha autorização para acessar.</p>
@@ -166,6 +181,7 @@
     </main>
 
     <script src="js/net-storage.js"></script>
+    <script src="js/pairing.js"></script>
     <script src="js/providers.js"></script>
     <script src="js/player.js"></script>
     <script src="js/app.js"></script>
