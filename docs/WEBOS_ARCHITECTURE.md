@@ -159,7 +159,8 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 - [x] favorites
 - [x] progress
 - [x] search
-- [x] VOD metadata\n- [ ] series/live metadata
+- [x] VOD metadata
+- [ ] series/live metadata
 - [ ] artwork cache
 - [ ] Pluto
 - [ ] failover UX
