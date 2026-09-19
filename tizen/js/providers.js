@@ -350,21 +350,9 @@
                 );
             });
 
-            catalogs[kind].items.sort(function (a, b) {
-                var categoryCompare = String(a.categoryName || "").localeCompare(
-                    String(b.categoryName || ""),
-                    "pt-BR",
-                    { sensitivity: "base", numeric: true }
-                );
-                if (categoryCompare !== 0) {
-                    return categoryCompare;
-                }
-                return String(a.name || "").localeCompare(
-                    String(b.name || ""),
-                    "pt-BR",
-                    { sensitivity: "base", numeric: true }
-                );
-            });
+            /* Keep provider order for items. Sorting huge IPTV catalogs here
+             * causes long UI stalls on televisions; categories are sorted
+             * separately and filtering keeps item order stable. */
         });
 
         return catalogs;
@@ -591,22 +579,7 @@
                 );
             });
 
-            catalog.items.sort(function (a, b) {
-                var categoryCompare = String(a.categoryName || "").localeCompare(
-                    String(b.categoryName || ""),
-                    "pt-BR",
-                    { sensitivity: "base", numeric: true }
-                );
-                if (categoryCompare !== 0) {
-                    return categoryCompare;
-                }
-                return String(a.name || "").localeCompare(
-                    String(b.name || ""),
-                    "pt-BR",
-                    { sensitivity: "base", numeric: true }
-                );
-            });
-
+            /* Preserve the ordering supplied by the Xtream server. */
             self.cache[kind] = catalog;
             return catalog;
         });
@@ -668,6 +641,7 @@
 
     window.BlazzingProviders = {
         hashText: hashText,
+        normalizeWords: normalizeWords,
         classifyGroup: classifyGroup,
         cleanCategoryName: cleanCategoryName,
         inferKind: inferKind,
