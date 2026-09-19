@@ -65,4 +65,14 @@ assert(
   "catalog must preserve focus across paged navigation"
 );
 
+const cssSource = fs.readFileSync(
+  path.join(__dirname, "..", "app", "css", "app.css"),
+  "utf8"
+);
+assert(
+  cssSource.includes("@media (max-width: 1366px)") &&
+  cssSource.includes("width: calc(33.333% - 12px)"),
+  "720p layout must keep the home actions in a compact three-column grid"
+);
+
 console.log("UI contract tests passed");
