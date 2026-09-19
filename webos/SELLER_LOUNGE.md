@@ -115,9 +115,13 @@ Availability varies by region and current Pluto TV catalog.
 
 Before submission, verify/provide:
 
+The current candidate is `store/blazzing-icon-400-candidate.png`; it is derived
+from the packaged app icon and still requires final visual approval.
+
 - [x] Packaged small icon: 80×80 PNG, referenced by `icon`.
 - [x] Packaged large icon: 130×130 PNG, referenced by `largeIcon`.
-- [ ] Seller Lounge icon: 400×400 PNG.
+- [x] 400×400 Seller Lounge icon candidate prepared.
+- [ ] Final 400×400 store icon approved.
 - [ ] Required Seller Lounge screenshots/store artwork.
 - [x] Project-side LG self-check preparation matrix.
 - [ ] Current official LG App Self Checklist completed with real results.
