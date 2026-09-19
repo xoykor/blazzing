@@ -3,6 +3,7 @@
 
   var STORAGE_KEY = "blazzing.webos.favorites.v1";
   var PROGRESS_KEY = "blazzing.webos.progress.v1";
+  var XTREAM_PROFILE_KEY = "blazzing.webos.xtream-profile.v1";
   var MAX_PROGRESS_ITEMS = 200;
 
   function fingerprint(value) {
@@ -135,6 +136,75 @@
     return result;
   }
 
+  function getXtreamProfile() {
+    var raw;
+    var parsed;
+
+    if (!storageAvailable()) {
+      return null;
+    }
+
+    try {
+      raw = global.localStorage.getItem(XTREAM_PROFILE_KEY);
+      if (!raw) {
+        return null;
+      }
+
+      parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") {
+        return null;
+      }
+
+      if (!/^https?:\/\//i.test(String(parsed.server || "")) ||
+          !String(parsed.username || "")) {
+        return null;
+      }
+
+      return {
+        server: String(parsed.server),
+        username: String(parsed.username)
+      };
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function setXtreamProfile(server, username) {
+    var normalizedServer = String(server || "");
+    var normalizedUser = String(username || "");
+
+    if (!storageAvailable() ||
+        !/^https?:\/\//i.test(normalizedServer) ||
+        !normalizedUser) {
+      return false;
+    }
+
+    try {
+      global.localStorage.setItem(
+        XTREAM_PROFILE_KEY,
+        JSON.stringify({
+          server: normalizedServer,
+          username: normalizedUser
+        })
+      );
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function clearXtreamProfile() {
+    if (!storageAvailable()) {
+      return;
+    }
+
+    try {
+      global.localStorage.removeItem(XTREAM_PROFILE_KEY);
+    } catch (error) {
+      // Storage failures must not break the TV app.
+    }
+  }
+
   function loadProgress() {
     var raw;
     var parsed;
@@ -249,6 +319,7 @@
     try {
       global.localStorage.removeItem(STORAGE_KEY);
       global.localStorage.removeItem(PROGRESS_KEY);
+      global.localStorage.removeItem(XTREAM_PROFILE_KEY);
     } catch (error) {
       // Storage failures must not break the TV app.
     }
@@ -260,6 +331,9 @@
     toggle: toggle,
     count: count,
     favoriteKeys: favoriteKeys,
+    getXtreamProfile: getXtreamProfile,
+    setXtreamProfile: setXtreamProfile,
+    clearXtreamProfile: clearXtreamProfile,
     getProgress: getProgress,
     setProgress: setProgress,
     clearProgress: clearProgress,
