@@ -290,7 +290,7 @@
     };
   }
 
-  function buildSeriesCatalog(categories, series, creds) {
+  function buildSeriesMetadata(payload, fallback) {\n    var data = payload && typeof payload === "object" ? payload : {};\n    var info = data.info && typeof data.info === "object" ? data.info : {};\n    var base = fallback || {};\n\n    return {\n      title: String(info.name || base.title || "Série"),\n      plot: String(info.plot || info.description || ""),\n      genre: String(info.genre || ""),\n      year: String(info.release_date || info.releasedate || info.year || ""),\n      rating: String(info.rating_5based || info.rating || ""),\n      duration: String(info.episode_run_time || info.duration || ""),\n      logo: String(info.cover || info.cover_big || base.logo || "")\n    };\n  }\n\n  function buildSeriesCatalog(categories, series, creds) {
     var categoryNames = makeCategoryMap(categories);
     var groups = [];
     var seenGroups = {};
