@@ -78,7 +78,16 @@
 
     if (best) {
       setFocus(best);
+      return;
     }
+
+    document.dispatchEvent(new CustomEvent("blazzing-navigation-boundary", {
+      detail: {
+        dx: dx,
+        dy: dy,
+        origin: current
+      }
+    }));
   }
 
   document.addEventListener("keydown", function (event) {
