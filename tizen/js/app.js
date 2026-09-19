@@ -21,7 +21,8 @@
         currentSeason: "all",
         playerReturnView: "catalog",
         currentPlaylistIndex: -1,
-        lastProgressWrite: 0
+        lastProgressWrite: 0,
+        pairingActive: false
     };
 
     var toastTimer = 0;
@@ -51,7 +52,7 @@
     }
 
     function focusables() {
-        var root = byId(state.view + "-view");
+        var root = state.pairingActive ? byId("pairing-modal") : byId(state.view + "-view");
         var all;
 
         if (!root) {
@@ -180,7 +181,9 @@
     }
 
     function goBack() {
-        if (state.view === "player") {
+        if (state.pairingActive) {
+            cancelPairing();
+        } else if (state.view === "player") {
             closePlayer();
         } else if (state.view === "series") {
             setView("catalog");
@@ -294,6 +297,74 @@
     byId("mode-xtream").addEventListener("click", function () {
         setMode("xtream");
     });
+
+    function setPairingStatus(message, kind) {
+        var target = byId("pairing-status");
+        if (!target) { return; }
+        target.textContent = message || "";
+        target.setAttribute("data-state", kind || "");
+    }
+
+    function cancelPairing() {
+        if (window.BlazzingPairing) {
+            window.BlazzingPairing.stop();
+        }
+        state.pairingActive = false;
+        byId("pairing-modal").classList.add("hidden");
+        setTimeout(focusFirst, 0);
+    }
+
+    function acceptPairedPlaylist(profile) {
+        var normalized = {
+            type: "m3u",
+            name: profile.name || "Lista do celular",
+            url: profile.url
+        };
+
+        state.pairingActive = false;
+        byId("pairing-modal").classList.add("hidden");
+        setMode("m3u");
+        byId("profile-name").value = normalized.name;
+        byId("m3u-url").value = normalized.url;
+        byId("save-profile").checked = true;
+        connectM3u(normalized);
+    }
+
+    function startPairing() {
+        if (!window.BlazzingPairing) {
+            showToast("O módulo de pareamento não foi carregado.");
+            return;
+        }
+
+        state.pairingActive = true;
+        byId("pairing-modal").classList.remove("hidden");
+        byId("pairing-qr").innerHTML = "";
+        byId("pairing-url").textContent = "";
+        setPairingStatus("Preparando sessão segura…", "creating");
+        setTimeout(focusFirst, 0);
+
+        window.BlazzingPairing.start(
+            acceptPairedPlaylist,
+            setPairingStatus
+        ).then(function (session) {
+            if (!state.pairingActive) {
+                return;
+            }
+            byId("pairing-qr").innerHTML = session.qrSvg;
+            byId("pairing-url").textContent = session.url;
+        }).catch(function (error) {
+            if (!state.pairingActive) {
+                return;
+            }
+            setPairingStatus(
+                error.message || "Não foi possível iniciar o pareamento.",
+                "error"
+            );
+        });
+    }
+
+    byId("pair-button").addEventListener("click", startPairing);
+    byId("pairing-cancel").addEventListener("click", cancelPairing);
 
     function profileFromForm() {
         var name = byId("profile-name").value.replace(/^\s+|\s+$/g, "") ||
@@ -946,6 +1017,11 @@
         if (state.view === "player") {
             showHud();
         }
+    });
+
+    window.addEventListener("beforeunload", function () {
+        if (window.BlazzingPairing) { window.BlazzingPairing.stop(); }
+        if (window.BlazzingPlayer) { window.BlazzingPlayer.stop(); }
     });
 
     registerRemoteKeys();
