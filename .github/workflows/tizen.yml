@@ -1,0 +1,51 @@
+name: Tizen Web
+
+on:
+  push:
+    branches:
+      - main
+      - feature/tizen-web-port
+    paths:
+      - "tizen/**"
+      - ".github/workflows/tizen.yml"
+  pull_request:
+    paths:
+      - "tizen/**"
+      - ".github/workflows/tizen.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in tizen/js/*.js tizen/tests/*.js; do
+            node --check "$file"
+          done
+
+      - name: Run provider tests
+        run: node tizen/tests/providers.test.js
+
+      - name: Validate config.xml
+        shell: bash
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("tizen/config.xml").getroot()
+          assert root.tag.endswith("widget")
+          print("config.xml: OK")
+          PY
+
+      - name: Check required project files
+        shell: bash
+        run: |
+          test -s tizen/index.html
+          test -s tizen/css/app.css
+          test -s tizen/js/app.js
+          test -s tizen/js/player.js
+          test -s tizen/js/providers.js
+          test -s tizen/js/net-storage.js
