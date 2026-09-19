@@ -61,6 +61,12 @@ assert(
   "navigation must emit catalog boundary events"
 );
 assert(
+  !navigationSource.includes(
+    "function dispatchBoundary(dx, dy) {\n    dispatchBoundary(dx, dy);"
+  ),
+  "navigation boundary dispatcher must not recurse into itself"
+);
+assert(
   navigationSource.includes("focusableAncestor"),
   "pointer hover must focus nested content through its focusable ancestor"
 );
