@@ -8,7 +8,7 @@
   var playerReturnScreen = "home";
   var xtreamSession = null;
   var catalogPage = 0;
-  var catalogPageSize = 120;
+  var catalogPageSize = 48;
   var catalogQuery = "";
   var catalogStack = [];
   var activeProgressKey = "";
@@ -181,6 +181,40 @@
     return matches;
   }
 
+  function renderArtwork(button, item) {
+    var shell = button.querySelector(".media-artwork");
+    var url = String(item && item.logo || "");
+    var image;
+    var initial;
+
+    if (!shell) {
+      return;
+    }
+
+    initial = String(item && item.title || "?").trim().charAt(0).toUpperCase();
+    shell.textContent = initial || "?";
+
+    if (!/^https?:\/\//i.test(url)) {
+      return;
+    }
+
+    image = document.createElement("img");
+    image.alt = "";
+    image.setAttribute("loading", "lazy");
+    image.setAttribute("referrerpolicy", "no-referrer");
+    image.addEventListener("load", function () {
+      shell.classList.add("has-image");
+    });
+    image.addEventListener("error", function () {
+      if (image.parentNode) {
+        image.parentNode.removeChild(image);
+      }
+      shell.classList.remove("has-image");
+    });
+    image.src = url;
+    shell.appendChild(image);
+  }
+
   function updateFavoriteBadge(button, item) {
     var badge = button.querySelector(".favorite-badge");
     var favorite = isFavorite(item);
@@ -270,12 +304,15 @@
       button.type = "button";
       button.className = "media-card focusable";
       button.innerHTML =
-        "<strong></strong><span class=\"media-meta\"></span>" +
+        "<span class=\"media-artwork\" aria-hidden=\"true\"></span>" +
+        "<span class=\"media-copy\"><strong></strong>" +
+        "<span class=\"media-meta\"></span></span>" +
         "<span class=\"favorite-badge\" aria-hidden=\"true\"></span>";
       button.querySelector("strong").textContent = item.title;
       button.querySelector(".media-meta").textContent =
         item.group || "Sem categoria";
       button._blazzingEntry = item;
+      renderArtwork(button, item);
       updateFavoriteBadge(button, item);
       button.addEventListener("click", (function (entry) {
         return function () {
