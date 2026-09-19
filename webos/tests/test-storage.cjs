@@ -60,4 +60,22 @@ assert(!serialized.includes(rawUrl));
 assert.strictEqual(storage.toggle(key, {}), false);
 assert.strictEqual(storage.count(), 0);
 
+const mediaKey = "xtream:abcd1234:vod:42";
+assert.strictEqual(storage.getProgress(mediaKey), 0);
+
+storage.setProgress(mediaKey, 125.9, 3600);
+assert.strictEqual(storage.getProgress(mediaKey), 125);
+
+let progressSerialized = Object.values(data).join("\n");
+assert(!progressSerialized.includes("http://"));
+assert(!progressSerialized.includes("user"));
+assert(!progressSerialized.includes("password"));
+
+storage.setProgress(mediaKey, 3590, 3600);
+assert.strictEqual(storage.getProgress(mediaKey), 0);
+
+storage.setProgress(mediaKey, 300, 3600);
+storage.clearProgress(mediaKey);
+assert.strictEqual(storage.getProgress(mediaKey), 0);
+
 console.log("Storage tests passed");
