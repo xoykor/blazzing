@@ -4,6 +4,7 @@
   var SERVICE_URI = "luna://io.github.xoykor.blazzing.network";
   var MAX_BROWSER_API_BYTES = 8 * 1024 * 1024;
   var MAX_BROWSER_M3U_BYTES = 128 * 1024 * 1024;
+  var MAX_ARTWORK_BYTES = 1024 * 1024;
 
   function serviceAvailable() {
     return !!(
@@ -163,6 +164,89 @@
     });
   }
 
+  function base64ToBlob(base64, mime) {
+    var binary = global.atob(String(base64 || ""));
+    var bytes = new Uint8Array(binary.length);
+    var i;
+
+    for (i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+
+    return new Blob([bytes], {
+      type: mime || "application/octet-stream"
+    });
+  }
+
+  function fetchArtworkInBrowser(url) {
+    return fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      credentials: "omit"
+    }).then(function (response) {
+      var contentLength = Number(response.headers.get("content-length") || 0);
+      var contentType = String(response.headers.get("content-type") || "")
+        .split(";")[0]
+        .trim()
+        .toLowerCase();
+
+      if (!response.ok) {
+        throw new Error("Artwork HTTP " + response.status + ".");
+      }
+
+      if (contentLength > MAX_ARTWORK_BYTES) {
+        throw new Error("Artwork excede 1 MiB.");
+      }
+
+      if (contentType &&
+          contentType.indexOf("image/") !== 0 &&
+          contentType !== "application/octet-stream") {
+        throw new Error("Resposta de artwork não é uma imagem.");
+      }
+
+      return response.blob();
+    }).then(function (blob) {
+      if (!blob || blob.size > MAX_ARTWORK_BYTES) {
+        throw new Error("Artwork excede 1 MiB.");
+      }
+
+      return {
+        blob: blob,
+        mime: blob.type || "application/octet-stream",
+        size: Number(blob.size || 0),
+        transport: "browser"
+      };
+    });
+  }
+
+  function fetchArtwork(url) {
+    if (!serviceAvailable()) {
+      return fetchArtworkInBrowser(url);
+    }
+
+    return serviceRequest("fetchArtwork", {
+      url: url
+    }).then(function (response) {
+      var blob;
+
+      if (!response.base64 ||
+          Number(response.size || 0) > MAX_ARTWORK_BYTES) {
+        throw new Error("O serviço webOS retornou artwork inválido.");
+      }
+
+      blob = base64ToBlob(response.base64, response.mime);
+
+      return {
+        blob: blob,
+        mime: response.mime || blob.type || "application/octet-stream",
+        size: Number(response.size || blob.size || 0),
+        transport: "service"
+      };
+    }).catch(function () {
+      return fetchArtworkInBrowser(url);
+    });
+  }
+
   function xtreamRequest(creds, action, params) {
     if (serviceAvailable()) {
       return serviceRequest("xtreamRequest", {
@@ -205,6 +289,7 @@
     fetchM3U: fetchM3U,
     queryM3U: queryM3U,
     releaseM3U: releaseM3U,
+    fetchArtwork: fetchArtwork,
     xtreamRequest: xtreamRequest
   };
 }(window));
