@@ -13,7 +13,7 @@ It uses:
 - HTML5 `<video>` for playback;
 - Web Crypto for AES-256-GCM pairing;
 - a packaged JavaScript service for provider networking;
-- IndexedDB planned for persistence.
+- localStorage for small non-secret state such as favorites; IndexedDB remains reserved for larger caches.
 
 Initial compatibility target: webOS 4.0+.
 
@@ -67,7 +67,7 @@ Temporary alpha limits:
 - 8 MiB provider response cap;
 - 120 DOM items rendered per selected group.
 
-## Xtream live
+## Xtream
 
 Implemented:
 
@@ -75,6 +75,8 @@ Implemented:
 - authentication through `player_api.php`;
 - `get_live_categories`;
 - `get_live_streams`;
+- VOD categories and streams;
+- series, seasons and episodes;
 - category normalization;
 - `direct_source` preference;
 - fallback generation of `/live/<user>/<pass>/<stream_id>.ts`;
@@ -83,6 +85,15 @@ Implemented:
 
 The packaged network service has an explicit action allow-list. It is not a
 generic open proxy and does not log credentials.
+
+## Favorites
+
+Favorites are stored locally using opaque stable keys plus safe display metadata.
+The persistence layer deliberately does not store media URLs, Xtream usernames or
+Xtream passwords. M3U URLs are fingerprinted before an item key is persisted.
+
+The catalog always exposes a **Favoritos** group. The yellow remote key toggles the
+focused item; the Simulator also accepts **F**.
 
 ## Compatibility
 
@@ -118,12 +129,12 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 - [x] live categories
 - [x] live streams
 - [x] tests
-- [ ] VOD
-- [ ] series/seasons/episodes
+- [x] VOD
+- [x] series/seasons/episodes
 - [ ] profile persistence
 
 ### M4 parity
-- [ ] favorites
+- [x] favorites
 - [ ] progress
 - [ ] search
 - [ ] metadata
