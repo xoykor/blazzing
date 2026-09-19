@@ -261,7 +261,10 @@
   function playUrl(url, title, returnScreen, entry) {
     var resumeAt = 0;
     var trackProgress = entry &&
-      (entry.kind === "vod" || entry.kind === "episode") &&
+      (entry.kind === "vod" ||
+       entry.kind === "episode" ||
+       entry.kind === "pluto-movie" ||
+       entry.kind === "pluto-episode") &&
       entry.favoriteKey;
     var sources = playbackSources(url, entry);
 
@@ -338,8 +341,16 @@
   }
 
   function openVod(entry) {
-    var fallback = global.BlazzingXtream.buildVodMetadata({}, entry);
+    var fallback;
 
+    if (entry && entry.kind === "pluto-movie") {
+      fallback = global.BlazzingPluto.buildVodMetadata(entry);
+      showVodMetadata(entry, fallback);
+      byId("vod-status").textContent = "";
+      return;
+    }
+
+    fallback = global.BlazzingXtream.buildVodMetadata({}, entry);
     showVodMetadata(entry, fallback);
     byId("vod-status").textContent = "Carregando detalhes…";
 
@@ -385,7 +396,10 @@
       details.push("Nota " + metadata.rating);
     }
     if (metadata.duration) {
-      details.push(metadata.duration + " min");
+      var durationText = String(metadata.duration);
+      details.push(/[A-Za-z]/.test(durationText) ?
+        durationText :
+        durationText + " min");
     }
 
     byId("series-meta").textContent =
@@ -411,12 +425,47 @@
   }
 
   function openSeriesDetails(entry) {
-    var fallback = global.BlazzingXtream.buildSeriesMetadata({}, entry);
+    var fallback;
 
     seriesPayload = null;
+    byId("series-episodes").disabled = true;
+
+    if (entry && entry.kind === "pluto-series") {
+      fallback = global.BlazzingPluto.buildSeriesMetadata({}, entry);
+      showSeriesMetadata(entry, fallback);
+      byId("series-status").textContent = "Carregando temporadas…";
+
+      global.BlazzingNetwork.plutoSeries(entry.plutoSeriesId)
+        .then(function (payload) {
+          if (seriesEntry !== entry) {
+            return;
+          }
+
+          seriesPayload = payload;
+          showSeriesMetadata(
+            entry,
+            global.BlazzingPluto.buildSeriesMetadata(payload, entry)
+          );
+          byId("series-status").textContent = "";
+          byId("series-episodes").disabled = false;
+        })
+        .catch(function (error) {
+          if (seriesEntry !== entry) {
+            return;
+          }
+
+          byId("series-status").textContent =
+            error && error.message ?
+              error.message :
+              "Falha ao carregar temporadas da Pluto TV.";
+          byId("series-episodes").disabled = true;
+        });
+      return;
+    }
+
+    fallback = global.BlazzingXtream.buildSeriesMetadata({}, entry);
     showSeriesMetadata(entry, fallback);
     byId("series-status").textContent = "Carregando detalhes…";
-    byId("series-episodes").disabled = true;
 
     if (!xtreamSession || !entry || !entry.seriesId) {
       byId("series-status").textContent =
@@ -447,16 +496,30 @@
 
   function openSeriesEpisodes() {
     var parsed;
+    var providerLabel;
 
-    if (!seriesEntry || !seriesPayload || !xtreamSession) {
+    if (!seriesEntry || !seriesPayload) {
       return;
     }
 
     try {
-      parsed = global.BlazzingXtream.buildEpisodeCatalog(
-        seriesPayload,
-        xtreamSession
-      );
+      if (seriesEntry.kind === "pluto-series") {
+        parsed = global.BlazzingPluto.buildEpisodeCatalog(
+          seriesPayload,
+          seriesEntry
+        );
+        providerLabel = "Pluto TV • Série";
+      } else {
+        if (!xtreamSession) {
+          return;
+        }
+
+        parsed = global.BlazzingXtream.buildEpisodeCatalog(
+          seriesPayload,
+          xtreamSession
+        );
+        providerLabel = "Xtream • Série";
+      }
     } catch (error) {
       byId("series-status").textContent =
         error && error.message ?
@@ -465,8 +528,14 @@
       return;
     }
 
+    if (!parsed.items.length) {
+      byId("series-status").textContent =
+        "Nenhum episódio disponível.";
+      return;
+    }
+
     pushCatalogState();
-    byId("catalog-provider").textContent = "Xtream • Série";
+    byId("catalog-provider").textContent = providerLabel;
     renderCatalog(parsed, seriesEntry.title);
   }
 
@@ -671,6 +740,14 @@
       parts.push("Catch-up " + item.archiveDays + "d");
     }
 
+    if (item.kind === "pluto-movie") {
+      parts.push("Filme");
+    } else if (item.kind === "pluto-series") {
+      parts.push("Série");
+    } else if (item.kind === "pluto-episode" && item.duration) {
+      parts.push(item.duration);
+    }
+
     return parts.join(" • ");
   }
 
@@ -701,12 +778,14 @@
       updateFavoriteBadge(button, item);
       button.addEventListener("click", (function (entry) {
         return function () {
-          if (entry.kind === "series") {
+          if (entry.kind === "series" || entry.kind === "pluto-series") {
             openSeriesDetails(entry);
-          } else if (entry.kind === "vod") {
+          } else if (entry.kind === "vod" || entry.kind === "pluto-movie") {
             openVod(entry);
           } else if (entry.kind === "pluto-live") {
             playPluto(entry);
+          } else if (entry.kind === "pluto-episode") {
+            playPlutoVod(entry, "catalog");
           } else {
             playUrl(entry.url, entry.title, "catalog", entry);
           }
@@ -1110,6 +1189,37 @@
       });
   }
 
+  function playPlutoVod(entry, returnScreen) {
+    var statusNode;
+
+    if (!entry || !entry.plutoVodPath) {
+      return;
+    }
+
+    statusNode = returnScreen === "vod" ?
+      byId("vod-status") :
+      byId("catalog-summary");
+
+    statusNode.textContent = "Preparando stream Pluto TV…";
+
+    global.BlazzingNetwork.plutoVodStream(entry.plutoVodPath)
+      .then(function (url) {
+        statusNode.textContent = "";
+        playUrl(
+          url,
+          entry.title,
+          returnScreen || "catalog",
+          entry
+        );
+      })
+      .catch(function (error) {
+        statusNode.textContent =
+          error && error.message ?
+            error.message :
+            "Falha ao abrir conteúdo Pluto TV.";
+      });
+  }
+
   function loadPlutoCatalog() {
     byId("pluto-status").textContent =
       "Criando sessão e carregando canais…";
@@ -1133,6 +1243,35 @@
           error && error.message ?
             error.message :
             "Falha ao carregar Pluto TV.";
+      });
+  }
+
+
+  function loadPlutoVodCatalog() {
+    byId("pluto-status").textContent =
+      "Carregando filmes e séries…";
+    showScreen("pluto");
+
+    global.BlazzingNetwork.plutoVod()
+      .then(function (payload) {
+        var parsed = global.BlazzingPluto.buildVodCatalog(payload);
+
+        if (!parsed.items.length) {
+          throw new Error(
+            "Pluto TV não retornou filmes ou séries para esta região."
+          );
+        }
+
+        catalogStack = [];
+        xtreamSession = null;
+        byId("catalog-provider").textContent = "Pluto TV • VOD";
+        renderCatalog(parsed, "Filmes e séries");
+      })
+      .catch(function (error) {
+        byId("pluto-status").textContent =
+          error && error.message ?
+            error.message :
+            "Falha ao carregar Pluto VOD.";
       });
   }
 
@@ -1187,7 +1326,13 @@
     showScreen("xtream");
   });
 
-  byId("action-pluto").addEventListener("click", loadPlutoCatalog);
+  byId("action-pluto").addEventListener("click", function () {
+    byId("pluto-status").textContent = "";
+    showScreen("pluto");
+  });
+
+  byId("pluto-live").addEventListener("click", loadPlutoCatalog);
+  byId("pluto-vod").addEventListener("click", loadPlutoVodCatalog);
 
   byId("action-manual").addEventListener("click", function () {
     byId("manual-status").textContent = "";
@@ -1340,7 +1485,13 @@
   byId("about-back").addEventListener("click", showHome);
   byId("pair-cancel").addEventListener("click", showHome);
   byId("vod-play").addEventListener("click", function () {
-    if (vodEntry) {
+    if (!vodEntry) {
+      return;
+    }
+
+    if (vodEntry.kind === "pluto-movie") {
+      playPlutoVod(vodEntry, "vod");
+    } else {
       playUrl(vodEntry.url, vodEntry.title, "vod", vodEntry);
     }
   });
