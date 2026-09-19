@@ -85,30 +85,7 @@ jobs:
 
       - name: Inspect IPK contents and write checksum
         working-directory: webos
-        run: |
-          set -eu
-          ipk="$(find dist -maxdepth 1 -type f -name '*.ipk' | head -n 1)"
-          test -n "$ipk"
-
-          inspect_dir="$(mktemp -d)"
-          (
-            cd "$inspect_dir"
-            ar x "$GITHUB_WORKSPACE/webos/$ipk"
-            test -f data.tar.gz
-
-            tar -tzf data.tar.gz > contents.txt
-
-            grep -Fxq 'usr/palm/applications/io.github.xoykor.blazzing/' contents.txt
-            grep -Fxq 'usr/palm/applications/io.github.xoykor.blazzing/appinfo.json' contents.txt
-            grep -Fxq 'usr/palm/applications/io.github.xoykor.blazzing/icon.png' contents.txt
-            grep -Fxq 'usr/palm/applications/io.github.xoykor.blazzing/largeicon.png' contents.txt
-            grep -Fxq 'usr/palm/services/io.github.xoykor.blazzing.network/' contents.txt
-            grep -Fxq 'usr/palm/services/io.github.xoykor.blazzing.network/network_service.js' contents.txt
-            grep -Fxq 'usr/palm/services/io.github.xoykor.blazzing.network/services.json' contents.txt
-          )
-
-          sha256sum "$ipk" > dist/SHA256SUMS.txt
-          cat dist/SHA256SUMS.txt
+        run: npm run verify-package
 
       - name: Upload webOS IPK
         uses: actions/upload-artifact@v4
