@@ -224,6 +224,7 @@ engines. The packaged service remains ES5-style while webOS 4.x is supported.
 - [ ] real LG TV matrix executed
 - [ ] store artwork
 - [x] Seller Lounge metadata/UX draft
+- [x] privacy policy draft
 - [x] QA checklist authored
 - [ ] official LG App Self Checklist completed with real results
 - [x] CI release metadata validation
