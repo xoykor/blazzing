@@ -9,40 +9,76 @@ Architecture: [../docs/WEBOS_ARCHITECTURE.md](../docs/WEBOS_ARCHITECTURE.md)
 Implemented:
 
 - packageable web app skeleton;
-- remote directional navigation;
-- Back handling;
+- remote directional navigation and Back handling;
 - HTML5 video wrapper;
-- encrypted phone-pairing client using the production Blazzing Worker;
-- AES-256-GCM decryption in the TV app.
+- encrypted phone pairing using the production Blazzing Worker;
+- local QR rendering;
+- M3U/M3U8 URL loading;
+- M3U parser, categories and catalog grid;
+- packaged Node.js network service for providers blocked by browser CORS;
+- direct browser fetch fallback for Simulator development.
 
-Not implemented yet:
+Still planned:
 
-- QR rendering;
-- M3U catalog parser/UI;
+- catalog pagination/virtualization;
+- large-playlist chunking beyond the temporary 8 MiB alpha limit;
 - Xtream;
-- packaged network JS service;
 - persistence;
-- store submission.
+- artwork cache;
+- store submission and real-TV media validation.
+
+## Prepare
+
+The repository does not commit generated third-party browser files. They are
+copied from pinned npm packages into the ignored `app/vendor` directory.
+
+~~~fish
+cd webos
+./prepare.fish
+~~~
+
+The same install also provides the pinned official webOS CLI locally under
+`webos/node_modules/.bin`.
+
+For webOS TV CLI commands, make sure the CLI profile is `tv` on your machine.
+
+## Run without a TV
+
+With an LG webOS TV Simulator installed:
+
+~~~fish
+cd webos
+./run-simulator.fish
+~~~
+
+The helper defaults to Simulator 25. To select another installed version:
+
+~~~fish
+./run-simulator.fish 26
+~~~
+
+The Simulator can validate UI, remote navigation, Worker pairing, QR rendering,
+M3U parsing and most JavaScript behavior. Actual stream/codec compatibility must
+still be verified on real LG hardware before store release.
 
 ## Package
 
-Install the current webOS CLI first. Then:
-
-```fish
+~~~fish
 cd webos
 ./package.fish
-```
+~~~
 
-The generated IPK is written to `webos/dist`.
+The generated IPK is written to `webos/dist` and contains both the app and the
+`io.github.xoykor.blazzing.network` JavaScript service.
 
 ## Install on a configured TV
 
 After adding the TV as an ares device:
 
-```fish
+~~~fish
 ares-install --device <device-name> dist/*.ipk
 ares-launch --device <device-name> io.github.xoykor.blazzing
-```
+~~~
 
-The exact device setup is intentionally not automated because Developer Mode
-credentials belong to the developer machine.
+Developer Mode credentials remain on the developer machine and are never stored
+in this repository.

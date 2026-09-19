@@ -25,6 +25,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install webOS dependencies
+        working-directory: webos
+        run: npm install
+
+      - name: Prepare browser vendor files
+        working-directory: webos
+        run: npm run prepare-app
+
       - name: Validate JSON metadata
         run: |
           python3 - <<'PY'
@@ -39,18 +52,32 @@ jobs:
           if appinfo["type"] != "web":
               raise SystemExit("webOS app type must be 'web'")
           if appinfo["requiredACG"] != []:
-              raise SystemExit("Initial webOS milestone must not request privileged ACG groups")
+              raise SystemExit("Current webOS app must not request privileged ACG groups")
+
+          service_dir = Path("webos/service/io.github.xoykor.blazzing.network")
+          service_pkg = json.loads((service_dir / "package.json").read_text())
+          services = json.loads((service_dir / "services.json").read_text())
+          if service_pkg["name"] != "io.github.xoykor.blazzing.network":
+              raise SystemExit("Unexpected service name")
+          if services["id"] != service_pkg["name"]:
+              raise SystemExit("services.json ID must match package name")
           PY
 
       - name: Validate JavaScript syntax
         run: |
-          for file in webos/app/src/*.js; do
+          for file in webos/app/src/*.js webos/service/io.github.xoykor.blazzing.network/*.js; do
             node --check "$file"
           done
+          node --check webos/tools/prepare.mjs
 
-      - name: Validate required package files
+      - name: Validate prepared package inputs
         run: |
           test -f webos/app/index.html
           test -f webos/app/icon.png
           test -f webos/app/css/app.css
+          test -f webos/app/vendor/webOSTV.js
+          test -f webos/app/vendor/webOSTV-dev.js
+          test -f webos/app/vendor/qrcode.js
+          test -x webos/prepare.fish
+          test -x webos/run-simulator.fish
           test -x webos/package.fish

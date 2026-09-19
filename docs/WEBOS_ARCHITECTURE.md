@@ -1,6 +1,6 @@
 # Blazzing for LG webOS — architecture
 
-Status: initial implementation  
+Status: alpha implementation  
 Branch: `feature/webos-port`
 
 ## Goal
@@ -15,7 +15,7 @@ same repository.
 
 ## High-level architecture
 
-```text
+~~~text
                          +----------------------+
                          | Cloudflare Worker    |
                          | pairing only         |
@@ -29,300 +29,167 @@ same repository.
                                                         | direct media URL
                                                         v
                                                 IPTV/media server
-```
+~~~
 
-The Worker is never a video proxy. It is used only for the small encrypted
-phone-pairing payload.
+The Worker is never a video proxy.
 
-## Why this is not a C/X11 port
+## Runtime choices
 
-The desktop application depends on X11/XWayland, Cairo/Pango and mpv. webOS TV
-applications are web applications packaged as IPK files and use the TV browser
-engine plus platform services.
-
-The webOS implementation therefore uses:
+The Linux app depends on X11/XWayland, Cairo/Pango and mpv. The webOS version
+uses:
 
 - HTML/CSS/JavaScript for UI;
-- the native HTML5 `<video>` pipeline for playback;
+- HTML5 `<video>` for playback;
 - Web Crypto for AES-256-GCM pairing;
-- IndexedDB for application data;
-- a packaged JavaScript service for provider/network requests that cannot be
-  performed safely/reliably from the browser context because of CORS.
+- IndexedDB for future persistence;
+- a packaged JavaScript service for provider requests affected by browser CORS.
 
 ## Compatibility target
 
 Initial target: webOS 4.0 and newer.
 
-Code in `webos/app` deliberately avoids modern syntax that would unnecessarily
-raise the minimum browser-engine requirement. The first implementation uses
-classic scripts rather than JavaScript modules.
-
-Future compatibility work must be tested on real LG hardware or the official
-simulator before lowering or raising this baseline.
+App scripts intentionally use classic scripts/ES5-compatible patterns where
+practical. The network service is kept compatible with the old Node.js runtime
+used by webOS 4.x: no `const`, `let`, arrow functions or destructuring.
 
 ## Repository layout
 
-```text
-blazzing/
-├── src/                         Linux C17 implementation
-├── worker/                      shared Cloudflare pairing service
-├── docs/
-│   └── WEBOS_ARCHITECTURE.md
-└── webos/
-    ├── README.md
-    ├── package.fish
-    └── app/
-        ├── appinfo.json
-        ├── icon.png
-        ├── index.html
-        ├── css/
-        │   └── app.css
-        └── src/
-            ├── config.js
-            ├── navigation.js
-            ├── pairing.js
-            ├── player.js
-            └── app.js
-```
+~~~text
+webos/
+├── app/
+│   ├── appinfo.json
+│   ├── index.html
+│   ├── css/
+│   ├── src/
+│   │   ├── app.js
+│   │   ├── config.js
+│   │   ├── m3u.js
+│   │   ├── navigation.js
+│   │   ├── network.js
+│   │   ├── pairing.js
+│   │   ├── player.js
+│   │   └── qr.js
+│   └── vendor/                 generated, ignored
+├── service/
+│   └── io.github.xoykor.blazzing.network/
+├── tools/
+│   └── prepare.mjs
+├── prepare.fish
+├── run-simulator.fish
+├── package.fish
+└── package.json
+~~~
 
-A future network service will live under:
+## Application and service IDs
 
-```text
-webos/service/io.github.xoykor.blazzing.network/
-```
+App:
 
-The service name must begin with the application ID so it can be packaged and
-registered correctly by webOS.
+`io.github.xoykor.blazzing`
 
-## Application ID
+Network service:
 
-```text
-io.github.xoykor.blazzing
-```
+`io.github.xoykor.blazzing.network`
 
-The ID intentionally contains no hyphen and no numeric dotted component so it
-remains compatible with a future Luna JavaScript service name.
-
-## appinfo.json
-
-The webOS package metadata lives at `webos/app/appinfo.json`.
-
-The initial app declares:
-
-- type: `web`;
-- main: `index.html`;
-- 80x80 PNG app icon;
-- `requiredACG: []`.
-
-The explicit empty `requiredACG` is intentional. The first milestone does not
-call privileged Luna APIs. If later code uses a Luna API, the exact required ACG
-groups must be added rather than granting broad permissions.
-
-## UI model
-
-The UI is designed for 10-foot viewing and remote-control navigation.
-
-Primary screens:
-
-1. Home
-2. Pairing
-3. Manual stream URL
-4. Player
-5. Catalog — planned
-6. Details — planned
-7. Settings — planned
-
-Input sources:
-
-- standard directional remote;
-- OK/Enter;
-- Back;
-- Magic Remote pointer, treated as ordinary pointer interaction.
-
-The focus layer is independent from page business logic. Focusable elements use
-the `.focusable` class and `navigation.js` chooses the nearest target in the
-requested direction using element geometry.
+The service name begins with the application ID as required by webOS packaging.
 
 ## Phone pairing
 
-The webOS app reuses the production Worker:
+The app reuses:
 
-```text
-https://blazzing-pairing.vsxk.workers.dev
-```
+`https://blazzing-pairing.vsxk.workers.dev`
 
-Protocol is the same as Blazzing Linux:
+Flow:
 
-1. TV generates a random 128-bit session ID.
-2. TV generates a random 256-bit AES key.
-3. TV creates the session with the Worker.
-4. TV constructs:
-   `/pair/<session-id>#<base64url-key>`.
-5. Phone opens the pairing page.
-6. Phone encrypts playlist name/URL with AES-256-GCM.
-7. Worker stores only IV/ciphertext plus expiration state.
-8. TV polls every 2 seconds.
-9. TV decrypts locally with Web Crypto.
-10. TV deletes the session.
+1. TV creates random 128-bit session ID.
+2. TV creates random AES-256 key.
+3. TV creates the Worker session.
+4. TV renders a local QR containing `/pair/<id>#<key>`.
+5. Phone encrypts the playlist name/URL using AES-256-GCM.
+6. Worker stores only IV/ciphertext plus expiry state.
+7. TV polls every 2 seconds.
+8. TV decrypts locally.
+9. TV deletes the session.
+10. The decrypted URL is sent to the M3U loader, not directly treated as a media stream.
 
-The AES key is not sent in normal HTTP requests because it is carried in the
-URL fragment.
+QR generation happens locally from a pinned MIT dependency. No external QR
+service sees the fragment key.
 
-The current first milestone exposes the pairing URL on screen. QR rendering is
-the next UI task; the crypto/session implementation is already separated so the
-QR renderer can be added without changing the protocol.
+## M3U flow
+
+~~~text
+phone/manual URL
+      |
+      v
+BlazzingNetwork.fetchM3U()
+      |
+      +-- webOS app + service available --> Luna JS Service --> HTTP/HTTPS
+      |
+      +-- Simulator/browser fallback ----> fetch() (subject to CORS)
+      |
+      v
+BlazzingM3U.parse()
+      |
+      v
+normalized items + groups
+      |
+      v
+catalog UI --> selected media URL --> HTML5 video
+~~~
+
+The current alpha bounds a fetched playlist at 8 MiB. This is deliberately
+smaller than the Linux client's large-playlist limit until chunking and memory
+behavior are validated on TV hardware.
+
+The catalog currently renders at most 120 items for the selected group. This is
+a temporary DOM bound; virtualization/pagination is required before large
+catalog support is considered complete.
+
+## Network service security
+
+The service exposes a narrow `fetchM3U` method rather than a generic browser
+proxy. It:
+
+- accepts only HTTP/HTTPS URLs;
+- follows at most five redirects;
+- limits payload size to 8 MiB;
+- applies a 15-second request timeout;
+- does not log provider URLs or credentials.
+
+Future Xtream and EPG methods should be separate bounded APIs.
 
 ## Playback
 
-The webOS port uses an HTML5 `<video>` element.
+The Worker is not in the media path. Once a catalog item is selected, its URL is
+given directly to the TV's HTML5 media element.
 
-```text
-provider/media server ---> LG media pipeline
-```
-
-The Cloudflare Worker is not in the media path.
-
-The player module currently provides:
-
-- open URL;
-- play;
-- pause/resume;
-- stop;
-- native media error reporting.
-
-Later work must add:
-
-- live/VOD state handling;
-- seek controls for seekable VOD;
-- audio/subtitle track selection where supported;
-- stream failover;
-- playback progress persistence;
-- codec/capability diagnostics.
-
-## M3U and Xtream networking
-
-Browser-side `fetch()` is subject to CORS. Many IPTV servers do not return
-browser-friendly CORS headers.
-
-Therefore the final provider architecture is:
-
-```text
-web app
-   |
-   | Luna request
-   v
-Blazzing packaged JS network service
-   |
-   | Node HTTP/HTTPS
-   v
-provider API / M3U / EPG
-```
-
-The service must expose narrow methods such as:
-
-- `fetchM3U`;
-- `fetchXtream`;
-- `fetchEPG`.
-
-It must not become an unrestricted URL proxy.
-
-The video stream itself should still be handed directly to the native media
-pipeline whenever possible.
-
-## Provider layer
-
-Planned provider modules mirror desktop behavior rather than desktop code:
-
-```text
-Provider
-├── M3U
-├── Xtream
-└── Pluto
-```
-
-Normalized media model:
-
-```text
-MediaItem
-- id
-- provider
-- type: live | movie | series | episode
-- title
-- group/category
-- artwork
-- streamUrl
-- metadata
-```
-
-The UI consumes this normalized model instead of provider-specific payloads.
-
-## Persistence
-
-Use IndexedDB for:
-
-- saved profiles;
-- M3U provider metadata;
-- catalog cache where useful;
-- favorites;
-- VOD/episode progress;
-- settings.
-
-Passwords and other sensitive account material need a separate review before
-being persisted on webOS. Do not automatically copy the Linux Secret Service
-design because that API does not exist unchanged on TV.
-
-## Security boundaries
-
-- Pairing requires HTTPS.
-- Pairing key remains local to TV and phone.
-- Worker receives encrypted payload only.
-- Worker never proxies IPTV streams.
-- Provider credentials must never be written to console logs.
-- Playlist/stream URLs must be redacted from retained diagnostics.
-- Network service methods must validate URL schemes and bound response sizes.
-- No generic open proxy method.
-- No wildcard privileged ACG grants.
-- Session expiration remains five minutes.
-
-## Initial milestone implemented in this branch
-
-The first code drop includes:
-
-- packageable webOS application skeleton;
-- app metadata and requiredACG declaration;
-- TV-oriented responsive home UI;
-- directional focus navigation;
-- Back handling;
-- direct URL playback using HTML5 video;
-- production Cloudflare pairing client;
-- AES-256-GCM decryption on the TV;
-- 2-second pairing polling;
-- session cleanup;
-- basic CI syntax/config validation;
-- fish-compatible packaging helper.
-
-This is intentionally a vertical slice before provider/catalog work.
+Simulator playback is not sufficient evidence of real TV codec/HLS support, so
+media compatibility remains a real-device release gate.
 
 ## Milestones
 
 ### M1 — platform skeleton
 
-- [x] appinfo.json
-- [x] base UI
-- [x] remote navigation
+- [x] app metadata
+- [x] TV-first UI
+- [x] directional remote navigation
+- [x] Back handling
 - [x] HTML5 player wrapper
-- [x] pairing protocol client
-- [ ] QR rendering
+- [x] encrypted pairing
+- [x] local QR rendering
+- [x] Simulator launcher
 - [ ] real-TV install smoke test
 
 ### M2 — M3U
 
-- [ ] packaged network JS service
-- [ ] bounded M3U fetch
-- [ ] parser
-- [ ] category normalization
-- [ ] catalog grid
-- [ ] direct HLS playback
+- [x] packaged network JS service
+- [x] bounded M3U fetch
+- [x] parser
+- [x] category normalization
+- [x] catalog grid
+- [x] direct HTML5 playback handoff
+- [ ] catalog virtualization/pagination
+- [ ] large-playlist chunking
+- [ ] artwork
 
 ### M3 — Xtream
 
@@ -351,27 +218,14 @@ This is intentionally a vertical slice before provider/catalog work.
 - [ ] QA checklist
 - [ ] signed/public release process
 
-## Packaging
-
-With the current webOS CLI installed:
-
-```fish
-cd webos
-./package.fish
-```
-
-The helper runs `ares-package` and writes the IPK into `webos/dist`.
-
-When the JavaScript network service is added, the packaging helper must package
-both the app directory and service directory.
-
 ## Development rules
 
 1. Keep Linux and webOS implementations independent at runtime.
 2. Share protocols and data semantics, not X11/mpv implementation details.
 3. Keep the Worker backwards-compatible with released Linux clients.
-4. Avoid adding a cloud proxy for media traffic.
+4. Never use the Worker as a media proxy.
 5. Prefer remote-control usability over mouse-centric interactions.
-6. Keep code compatible with the declared webOS baseline.
-7. Every new Luna API must document and declare its ACG requirement.
-8. Test packaging and navigation before adding large provider features.
+6. Keep app code compatible with the declared webOS baseline.
+7. Keep service syntax compatible with Node.js 0.12 while webOS 4.x is supported.
+8. Every privileged Luna API must document its exact ACG requirement.
+9. Bound provider network operations and never create an unrestricted proxy.

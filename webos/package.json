@@ -1,11 +1,12 @@
 {
   "name": "blazzing-webos-dev",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "scripts": {
     "prepare-app": "node tools/prepare.mjs"
   },
   "devDependencies": {
+    "@webos-tools/cli": "3.2.4",
     "qrcode-generator": "2.0.4",
     "webostvjs": "1.2.13"
   }
