@@ -14,7 +14,7 @@ var MAX_TEXT_BYTES = 8 * 1024 * 1024;
 var MAX_M3U_BYTES = 128 * 1024 * 1024;
 var MAX_REDIRECTS = 5;
 var TIMEOUT_MS = 15000;
-var M3U_SESSION_TTL_MS = 30 * 60 * 1000;
+var M3U_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 var M3U_FILE_PREFIX = "blazzing-webos-m3u-";
 var m3uSessions = {};
 var XTREAM_ACTIONS = {
@@ -128,6 +128,8 @@ function fetchText(target, redirectsLeft, callback) {
     var total = 0;
     var location;
 
+    responseFail = fail;
+
     if (response.statusCode >= 300 && response.statusCode < 400 &&
         response.headers.location) {
       response.resume();
@@ -181,6 +183,7 @@ function downloadM3U(target, redirectsLeft, sessionId, callback) {
   var transport;
   var request;
   var completed = false;
+  var responseFail = null;
 
   function done(error, result) {
     if (completed) {
@@ -347,12 +350,22 @@ function downloadM3U(target, redirectsLeft, sessionId, callback) {
   });
 
   request.setTimeout(TIMEOUT_MS, function () {
+    var error = new Error("Provider request timed out.");
     request.abort();
-    done(new Error("Provider request timed out."));
+
+    if (responseFail) {
+      responseFail(error);
+    } else {
+      done(error);
+    }
   });
 
   request.on("error", function (error) {
-    done(error);
+    if (responseFail) {
+      responseFail(error);
+    } else {
+      done(error);
+    }
   });
 }
 
