@@ -76,6 +76,19 @@
     global.BlazzingArtwork.releaseImage(byId("series-poster"));
   }
 
+  function leaveApplication() {
+    if (global.webOS &&
+        typeof global.webOS.platformBack === "function") {
+      global.webOS.platformBack();
+      return;
+    }
+
+    if (global.history &&
+        typeof global.history.back === "function") {
+      global.history.back();
+    }
+  }
+
   function showHome() {
     stopPairing();
     releaseDetailArtwork();
@@ -1633,6 +1646,7 @@
 
   document.addEventListener("blazzing-back", function () {
     if (activeScreen === "home") {
+      leaveApplication();
       return;
     }
 
