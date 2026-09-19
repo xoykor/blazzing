@@ -237,6 +237,8 @@ the minimum browser engine.
 - [x] Seller Lounge metadata/UX draft
 - [x] privacy policy draft
 - [x] QA checklist authored
+- [x] LG Self Checklist preparation matrix
+- [x] runtime sensitive-data CI gate
 - [ ] official LG App Self Checklist completed with real results
 - [x] CI release metadata validation
 - [x] legacy JavaScript compatibility gate
