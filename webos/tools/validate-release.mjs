@@ -125,6 +125,11 @@ if (app.largeIcon !== "largeicon.png") {
 requirePngSize("app/icon.png", 80, 80);
 requirePngSize("app/largeicon.png", 130, 130);
 
+const sellerIconCandidate = "store/blazzing-icon-400-candidate.png";
+if (fs.existsSync(path.join(root, sellerIconCandidate))) {
+  requirePngSize(sellerIconCandidate, 400, 400);
+}
+
 console.log(
   "webOS release metadata valid — " +
   app.id + " " + app.version +
