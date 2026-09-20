@@ -3340,9 +3340,12 @@ static void maybe_enforce_fullscreen(app_t *a) {
 static bool stream_needs_forced_hls(const char *url) {
     if (!url || !url[0])
         return false;
-    if (strstr(url, "://l.vsxk.workers.dev/channel/") != NULL)
-        return true;
 
+    /*
+     * The Lista facade now exposes live fallback routes with a real .m3u8
+     * suffix, so mpv/FFmpeg can probe them normally. Only direct legacy
+     * provider URLs ending in .txt still need the explicit HLS hint.
+     */
     const char *end = strpbrk(url, "?#");
     size_t n = end ? (size_t)(end - url) : strlen(url);
     return n >= 4u && strncasecmp(url + n - 4u, ".txt", 4u) == 0;
