@@ -2,7 +2,7 @@
 <widget xmlns="http://www.w3.org/ns/widgets"
         xmlns:tizen="http://tizen.org/ns/widgets"
         id="http://xoykor.github.io/blazzing/tizen"
-        version="0.2.4"
+        version="0.2.5"
         viewmodes="maximized">
     <tizen:application id="Blazzing01.tizen"
                        package="Blazzing01"
