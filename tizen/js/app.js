@@ -38,6 +38,8 @@
     var imageQueue = [];
     var activeImageLoads = 0;
     var MAX_IMAGE_LOADS = 6;
+    var cardShardCache = {};
+    var cardShardPromises = {};
 
 
     function showToast(message) {
@@ -901,6 +903,54 @@
         }
     }
 
+    function resolveCardLogo(item) {
+        var base = String(item.cardIndexBase || "").replace(/\/$/, "");
+        var key = String(item.cardKey || "");
+        var version = String(item.cardIndexVersion || "");
+        var prefix;
+        var cacheKey;
+        var url;
+
+        if (item.logo) {
+            return Promise.resolve(item.logo);
+        }
+        if (!base || !key) {
+            return Promise.resolve("");
+        }
+
+        prefix = key.charAt(0);
+        cacheKey = base + "|" + version + "|" + prefix;
+
+        if (cardShardCache[cacheKey]) {
+            item.logo = cardShardCache[cacheKey][key] || "";
+            return Promise.resolve(item.logo);
+        }
+
+        if (!cardShardPromises[cacheKey]) {
+            url = base + "/" + prefix + ".json";
+            if (version) {
+                url += "?v=" + encodeURIComponent(version);
+            }
+
+            cardShardPromises[cacheKey] = window.BlazzingNet.json(url, {
+                timeout: 20000,
+                maxBytes: 16 * 1024 * 1024
+            }).then(function (rows) {
+                cardShardCache[cacheKey] =
+                    rows && typeof rows === "object" ? rows : {};
+                return cardShardCache[cacheKey];
+            }).catch(function () {
+                cardShardCache[cacheKey] = {};
+                return cardShardCache[cacheKey];
+            });
+        }
+
+        return cardShardPromises[cacheKey].then(function (rows) {
+            item.logo = rows[key] || "";
+            return item.logo;
+        });
+    }
+
     function makeCard(item, index) {
         var card = document.createElement("article");
         var main = document.createElement("button");
@@ -923,14 +973,24 @@
         poster.className = "poster";
         poster.appendChild(fallback);
 
-        if (imageUrl) {
+        if (imageUrl || item.cardKey) {
             var image = document.createElement("img");
             image.alt = "";
             image.className = "poster-image";
             image.setAttribute("draggable", "false");
             image.setAttribute("referrerpolicy", "no-referrer");
             poster.appendChild(image);
-            observeImage(image, imageUrl);
+
+            if (imageUrl) {
+                observeImage(image, imageUrl);
+            } else {
+                resolveCardLogo(item).then(function (resolvedUrl) {
+                    resolvedUrl = safeImageUrl(resolvedUrl);
+                    if (resolvedUrl) {
+                        observeImage(image, resolvedUrl);
+                    }
+                });
+            }
         }
 
         copy.className = "card-copy";
