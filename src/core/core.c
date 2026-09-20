@@ -238,6 +238,9 @@ static void channel_clear(vip_channel_t *channel) {
     free(channel->logo_url);
     free(channel->stream_url);
     free(channel->epg_channel_id);
+    free(channel->fallback_id);
+    free(channel->fallback_base);
+    free(channel->fallback_version);
     memset(channel, 0, sizeof(*channel));
 }
 
@@ -284,9 +287,17 @@ vip_status_t vip_channel_list_push(vip_channel_list_t *list, const vip_channel_t
         .logo_url = vip_strdup_nullable(channel->logo_url),
         .stream_url = vip_strdup(channel->stream_url),
         .epg_channel_id = vip_strdup_nullable(channel->epg_channel_id),
+        .fallback_id = vip_strdup_nullable(channel->fallback_id),
+        .fallback_base = vip_strdup_nullable(channel->fallback_base),
+        .fallback_version = vip_strdup_nullable(channel->fallback_version),
+        .fallback_shard_length = channel->fallback_shard_length,
         .position = channel->position,
     };
-    if (!copy.id || !copy.name || !copy.stream_url || (channel->provider_id && !copy.provider_id)) {
+    if (!copy.id || !copy.name || !copy.stream_url ||
+        (channel->provider_id && !copy.provider_id) ||
+        (channel->fallback_id && channel->fallback_id[0] && !copy.fallback_id) ||
+        (channel->fallback_base && channel->fallback_base[0] && !copy.fallback_base) ||
+        (channel->fallback_version && channel->fallback_version[0] && !copy.fallback_version)) {
         channel_clear(&copy);
         vip_error_set(error, VIP_ERR_NOMEM, "sem memória para canal");
         return VIP_ERR_NOMEM;
