@@ -75,6 +75,7 @@ var withCards = [
     "#EXTM3U",
     "#EXT-X-LISTA-CARDS:https://raw.example/cards",
     "#EXT-X-LISTA-CARDS-VERSION:abc123",
+    "#EXT-X-LISTA-CARDS-SHARD-LEN:2",
     "#EXTINF:-1 group-title=\"Filmes | Ação\",Filme X",
     "https://example.com/x.mp4"
 ].join("\n");
@@ -89,3 +90,6 @@ assert(cardItem.cardIndexBase === "https://raw.example/cards",
     "base do índice de cards deveria ser preservada");
 assert(cardItem.cardIndexVersion === "abc123",
     "versão do índice de cards deveria ser preservada");
+
+assert(cardItem.cardIndexShardLength === 2,
+    "comprimento do prefixo dos shards deveria ser preservado");
