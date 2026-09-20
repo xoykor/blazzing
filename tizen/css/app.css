@@ -348,7 +348,35 @@ label input { margin-top: 9px; color: #f6f7fb; }
     border-radius: 22px;
     overflow: hidden;
     background: #11151f;
-    border: 1px solid rgba(255,255,255,.10);
+    border: 2px solid rgba(255,255,255,.10);
+    transition:
+        transform 110ms ease,
+        border-color 110ms ease,
+        box-shadow 110ms ease,
+        background 110ms ease;
+    transform-origin: center center;
+}
+
+.media-card.focused {
+    z-index: 30;
+    transform: scale(1.055);
+    border-color: #ffffff;
+    background: #171d29;
+    box-shadow:
+        0 0 0 5px #ff5f2e,
+        0 16px 34px rgba(0,0,0,.58);
+}
+
+.media-card.focused::after {
+    content: "";
+    position: absolute;
+    left: 18px;
+    right: 18px;
+    bottom: 0;
+    height: 5px;
+    border-radius: 6px 6px 0 0;
+    background: #ff5f2e;
+    pointer-events: none;
 }
 .media-card .card-main {
     display: block;
@@ -361,6 +389,12 @@ label input { margin-top: 9px; color: #f6f7fb; }
     background: transparent;
     text-align: left;
     overflow: hidden;
+}
+
+.media-card .card-main:focus {
+    outline: none;
+    outline-offset: 0;
+    transform: none;
 }
 .media-card .poster {
     position: relative;
@@ -412,17 +446,28 @@ label input { margin-top: 9px; color: #f6f7fb; }
     position: absolute;
     top: 12px;
     right: 12px;
-    width: 50px;
-    height: 50px;
+    width: 46px;
+    height: 46px;
     padding: 0;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 25px;
+    font-size: 24px;
+    color: rgba(255,255,255,.50);
     background: rgba(0,0,0,.72);
+    border: 1px solid rgba(255,255,255,.14);
+    pointer-events: none;
+    transition: transform 110ms ease, color 110ms ease, background 110ms ease;
 }
-.favorite.on { color: #ffd65a; }
+.favorite.on {
+    color: #ffd65a;
+    background: rgba(0,0,0,.86);
+}
+.media-card.focused .favorite {
+    transform: scale(1.10);
+    border-color: rgba(255,255,255,.34);
+}
 
 .episode-grid {
     display: flex;
@@ -519,4 +564,42 @@ body:not(.avplay-active) #player-view { background: black; }
     .home-signature { right: 42px; bottom: 18px; font-size: 15px; }
     .brand h1 { font-size: 48px; }
     .card-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+
+.content-heading-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.remote-hint {
+    display: inline-flex;
+    align-items: center;
+    min-height: 42px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    color: #c4cad7;
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.10);
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.remote-yellow-key {
+    display: inline-block;
+    width: 17px;
+    height: 17px;
+    margin-right: 9px;
+    border-radius: 50%;
+    background: #ffd62a;
+    box-shadow: 0 0 0 2px rgba(255,255,255,.16);
+}
+
+.media-card.focused .card-copy strong {
+    color: #ffffff;
+}
+
+.media-card.focused .card-copy small {
+    color: #d6dbe5;
 }
