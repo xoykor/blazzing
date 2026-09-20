@@ -35,33 +35,61 @@ static uint64_t fnv_text(const char *text) {
     return fnv_update(UINT64_C(14695981039346656037), text ? text : "");
 }
 
+/* Hash UTF-8 text using the same UTF-16 code units that JavaScript's
+ * charCodeAt() sees. This keeps Linux lookup keys identical to Lista/Tizen,
+ * including accented titles and astral Unicode characters. */
+static uint32_t card_hash_js_text(uint32_t hash, const char *text) {
+    const unsigned char *p = (const unsigned char *)(text ? text : "");
+    while (*p) {
+        uint32_t cp;
+        if (*p < 0x80u) {
+            cp = *p++;
+        } else if ((*p & 0xe0u) == 0xc0u && p[1]) {
+            cp = ((uint32_t)(p[0] & 0x1fu) << 6) |
+                 (uint32_t)(p[1] & 0x3fu);
+            p += 2;
+        } else if ((*p & 0xf0u) == 0xe0u && p[1] && p[2]) {
+            cp = ((uint32_t)(p[0] & 0x0fu) << 12) |
+                 ((uint32_t)(p[1] & 0x3fu) << 6) |
+                 (uint32_t)(p[2] & 0x3fu);
+            p += 3;
+        } else if ((*p & 0xf8u) == 0xf0u && p[1] && p[2] && p[3]) {
+            cp = ((uint32_t)(p[0] & 0x07u) << 18) |
+                 ((uint32_t)(p[1] & 0x3fu) << 12) |
+                 ((uint32_t)(p[2] & 0x3fu) << 6) |
+                 (uint32_t)(p[3] & 0x3fu);
+            p += 4;
+        } else {
+            /* Invalid UTF-8: preserve the raw byte deterministically. */
+            cp = *p++;
+        }
+
+        if (cp <= 0xffffu) {
+            hash = hash * 31u + cp;
+        } else {
+            cp -= 0x10000u;
+            uint32_t high = 0xd800u + (cp >> 10);
+            uint32_t low = 0xdc00u + (cp & 0x3ffu);
+            hash = hash * 31u + high;
+            hash = hash * 31u + low;
+        }
+    }
+    return hash;
+}
+
 /* Build the 16-hex card lookup key from canonical group + item name. */
 static void card_lookup_key(char out[17], const char *name, const char *group) {
-    const char *safe_group = group ? group : "";
-    const char *safe_name = name ? name : "";
-    size_t group_len = strlen(safe_group);
-    size_t name_len = strlen(safe_name);
-    size_t total = group_len + 1u + name_len;
-    char *joined = malloc(total + 1u);
-    if (!joined) {
-        out[0] = '\0';
-        return;
-    }
-    memcpy(joined, safe_group, group_len);
-    joined[group_len] = '\0';
-    memcpy(joined + group_len + 1u, safe_name, name_len);
-    joined[total] = '\0';
-
-    /* Hashes must include the embedded NUL separator, so iterate by length. */
     uint32_t a = UINT32_C(0x13579bdf);
     uint32_t b = UINT32_C(0x2468ace1);
-    for (size_t i = 0u; i < total; ++i) {
-        uint32_t ch = (uint32_t)(unsigned char)joined[i];
-        a = a * 31u + ch;
-        b = b * 31u + ch;
-    }
+
+    a = card_hash_js_text(a, group);
+    b = card_hash_js_text(b, group);
+    a = a * 31u; /* embedded NUL separator */
+    b = b * 31u;
+    a = card_hash_js_text(a, name);
+    b = card_hash_js_text(b, name);
+
     snprintf(out, 17u, "%08x%08x", a, b);
-    free(joined);
 }
 
 /* Format a deterministic short identifier derived from text. */
