@@ -4799,6 +4799,13 @@ static void handle_click(app_t *a, int x, int y) {
                 if (point_in(x, y, list_x, row_y, list_w, 52)) {
                     a->profile_focus = idx;
                     load_profile_into_form(a, (size_t)idx);
+
+                    /* If this is the M3U that is already in memory, a click on
+                     * the saved profile means Continue rather than another
+                     * network download. Other profiles keep the existing
+                     * behavior and are only loaded into the form. */
+                    if (cached_m3u_matches(a))
+                        start_login(a, false);
                     return;
                 }
                 row_y += 60;
