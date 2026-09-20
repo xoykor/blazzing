@@ -77,6 +77,11 @@ typedef struct {
     char *logo_url;
     char *stream_url;
     char *epg_channel_id;
+    /* Optional static failover metadata published by compatible M3U lists. */
+    char *fallback_id;
+    char *fallback_base;
+    char *fallback_version;
+    int fallback_shard_length;
     int position;
 } vip_channel_t;
 
