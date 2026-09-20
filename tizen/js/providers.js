@@ -429,15 +429,80 @@
         return catalogs;
     }
 
-    function loadM3u(url) {
-        return window.BlazzingNet.text(url, {
-            timeout: 60000,
-            maxBytes: window.BlazzingNet.MAX_RESPONSE_BYTES
-        }).then(function (text) {
-            if (text.indexOf("#EXTM3U") === -1 && text.indexOf("#EXTINF:") === -1) {
-                throw new Error("O conteúdo recebido não parece ser uma playlist M3U.");
-            }
+    function validateM3uText(text) {
+        if (String(text || "").indexOf("#EXTM3U") === -1 &&
+                String(text || "").indexOf("#EXTINF:") === -1) {
+            throw new Error("O conteúdo recebido não parece ser uma playlist M3U.");
+        }
+        return text;
+    }
+
+    function readPersistentM3u(url) {
+        if (!window.BlazzingStorage ||
+                typeof window.BlazzingStorage.readM3uCache !== "function") {
+            return Promise.resolve("");
+        }
+
+        return window.BlazzingStorage.readM3uCache(url)
+            .catch(function () { return ""; });
+    }
+
+    function writePersistentM3u(url, text) {
+        if (!window.BlazzingStorage ||
+                typeof window.BlazzingStorage.writeM3uCache !== "function") {
+            return Promise.resolve(false);
+        }
+
+        return window.BlazzingStorage.writeM3uCache(url, text)
+            .catch(function () { return false; });
+    }
+
+    function loadM3u(url, options) {
+        options = options || {};
+
+        function parse(text) {
+            validateM3uText(text);
             return parseM3u(text, url);
+        }
+
+        function fromNetwork() {
+            return window.BlazzingNet.text(url, {
+                timeout: 60000,
+                maxBytes: window.BlazzingNet.MAX_RESPONSE_BYTES
+            }).then(function (text) {
+                var catalogs = parse(text);
+
+                /*
+                 * Await the write so a successful connection is already durable
+                 * before the UI reports the catalog as loaded. Storage failures
+                 * never prevent playback; they only disable restart caching.
+                 */
+                return writePersistentM3u(url, text).then(function () {
+                    return catalogs;
+                });
+            });
+        }
+
+        if (options.forceNetwork) {
+            return fromNetwork().catch(function (networkError) {
+                return readPersistentM3u(url).then(function (cachedText) {
+                    if (!cachedText) {
+                        throw networkError;
+                    }
+                    return parse(cachedText);
+                });
+            });
+        }
+
+        return readPersistentM3u(url).then(function (cachedText) {
+            if (cachedText) {
+                try {
+                    return parse(cachedText);
+                } catch (cacheError) {
+                    /* Corrupt/old cache: transparently replace it from network. */
+                }
+            }
+            return fromNetwork();
         });
     }
 
