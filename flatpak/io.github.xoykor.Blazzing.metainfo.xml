@@ -20,6 +20,12 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.4.1" date="2026-09-19">
+      <description>
+        <p>Reduces phone-pairing traffic with 5-second polling and 45-second QR sessions, and adds an explicit retry flow after expiration on Linux and Samsung Tizen.</p>
+        <p xml:lang="pt-BR">Reduz o tráfego do pareamento pelo celular com polling a cada 5 segundos e sessões de QR de 45 segundos, além de adicionar uma opção explícita para tentar novamente após a expiração no Linux e Samsung Tizen.</p>
+      </description>
+    </release>
     <release version="1.4.0" date="2026-09-18">
       <description>
         <p>Replaces LAN phone pairing with an encrypted Internet pairing flow backed by a Cloudflare Worker and short-lived Durable Objects. Playlist data is encrypted in the phone browser with AES-256-GCM and decrypted locally by Blazzing.</p>
