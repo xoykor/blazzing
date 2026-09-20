@@ -15,7 +15,7 @@ end
 mkdir -p "$out_dir"
 
 echo "Empacotando $app_dir ..."
-ares-package "$app_dir" -o "$out_dir"
+ares-package -o "$out_dir" -e tests -e README.md "$app_dir"
 or exit $status
 
 echo
