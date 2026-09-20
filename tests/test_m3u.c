@@ -131,6 +131,45 @@ int main(void) {
 
     vip_channel_list_clear(&channels);
     vip_category_list_clear(&cats);
+
+    /* Lista publishes provider artwork in compact shards instead of duplicating
+       hundreds of thousands of tvg-logo attributes inside the ~100 MiB M3U.
+       Linux must resolve those shards and expose the original logo_url. */
+    char cards_dir[] = "/tmp/visual-iptv-card-shards-XXXXXX";
+    TEST_CHECK(mkdtemp(cards_dir) != NULL);
+
+    char shard_path[512];
+    snprintf(shard_path, sizeof(shard_path), "%s/0.json", cards_dir);
+    fp = fopen(shard_path, "w");
+    TEST_CHECK(fp != NULL);
+    fputs("{\"0199221e91077fdc\":\"https://img/card-filme.jpg\"}\n", fp);
+    TEST_CHECK(fclose(fp) == 0);
+
+    fp = fopen(path, "w");
+    TEST_CHECK(fp != NULL);
+    fprintf(fp,
+            "#EXTM3U\n"
+            "#EXT-X-LISTA-CARDS:file://%s\n"
+            "#EXT-X-LISTA-CARDS-VERSION:test-v1\n"
+            "#EXTINF:-1 group-title=\"Filmes | Ação\",Filme Exemplo\n"
+            "https://stream/movie.mp4\n",
+            cards_dir);
+    TEST_CHECK(fclose(fp) == 0);
+
+    vip_channel_list_clear(&channels);
+    vip_category_list_clear(&cats);
+    vip_category_list_init(&cats);
+    vip_channel_list_init(&channels);
+    TEST_STATUS(vip_m3u_load(path, &cats, &channels, provider_id, &error), VIP_OK, &error);
+    TEST_CHECK(channels.len == 1);
+    TEST_CHECK(channels.items[0].logo_url != NULL);
+    TEST_CHECK(strcmp(channels.items[0].logo_url, "https://img/card-filme.jpg") == 0);
+
+    vip_channel_list_clear(&channels);
+    vip_category_list_clear(&cats);
+    TEST_CHECK(unlink(shard_path) == 0);
+    TEST_CHECK(rmdir(cards_dir) == 0);
+
     unlink(path);
     return 0;
 }
