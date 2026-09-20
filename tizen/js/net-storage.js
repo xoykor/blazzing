@@ -197,7 +197,7 @@
                     try {
                         dir.moveTo(
                             tmp.fullPath,
-                            name,
+                            "wgt-private/" + PLAYLIST_DIR + "/" + name,
                             true,
                             function () { resolve(true); },
                             function (error) {
