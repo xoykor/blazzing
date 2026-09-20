@@ -231,6 +231,7 @@
             setView("catalog");
         } else if (state.view === "catalog") {
             setView("home");
+            renderSavedProfiles();
         } else {
             exitApplication();
         }
