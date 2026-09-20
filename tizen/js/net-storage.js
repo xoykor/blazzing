@@ -4,6 +4,118 @@
 
     var MAX_RESPONSE_BYTES = 128 * 1024 * 1024;
     var STORAGE_PREFIX = "blazzing.tizen.";
+    var PLAYLIST_DB_NAME = "blazzing-tizen-playlists";
+    var PLAYLIST_DB_VERSION = 1;
+    var PLAYLIST_STORE = "playlists";
+    var playlistDbPromise = null;
+
+    function indexedDbFactory() {
+        return window.indexedDB || window.webkitIndexedDB || window.mozIndexedDB || null;
+    }
+
+    function openPlaylistDb() {
+        var factory = indexedDbFactory();
+
+        if (playlistDbPromise) {
+            return playlistDbPromise;
+        }
+        if (!factory) {
+            return Promise.reject(new Error("Armazenamento persistente de playlists indisponível."));
+        }
+
+        playlistDbPromise = new Promise(function (resolve, reject) {
+            var request;
+            try {
+                request = factory.open(PLAYLIST_DB_NAME, PLAYLIST_DB_VERSION);
+            } catch (error) {
+                reject(error);
+                return;
+            }
+
+            request.onupgradeneeded = function () {
+                var db = request.result;
+                if (!db.objectStoreNames.contains(PLAYLIST_STORE)) {
+                    db.createObjectStore(PLAYLIST_STORE, { keyPath: "url" });
+                }
+            };
+            request.onsuccess = function () { resolve(request.result); };
+            request.onerror = function () {
+                reject(request.error || new Error("Falha ao abrir cache de playlists."));
+            };
+        });
+
+        return playlistDbPromise;
+    }
+
+    function cachedPlaylist(url) {
+        url = String(url || "").replace(/^\s+|\s+$/g, "");
+        if (!url) {
+            return Promise.resolve(null);
+        }
+
+        return openPlaylistDb().then(function (db) {
+            return new Promise(function (resolve, reject) {
+                var tx = db.transaction(PLAYLIST_STORE, "readonly");
+                var request = tx.objectStore(PLAYLIST_STORE).get(url);
+
+                request.onsuccess = function () {
+                    var row = request.result;
+                    resolve(row && typeof row.text === "string" ? row : null);
+                };
+                request.onerror = function () {
+                    reject(request.error || new Error("Falha ao ler playlist salva."));
+                };
+            });
+        });
+    }
+
+    function saveCachedPlaylist(url, text) {
+        url = String(url || "").replace(/^\s+|\s+$/g, "");
+        text = String(text || "");
+
+        if (!url || !text) {
+            return Promise.reject(new Error("Playlist inválida para armazenamento."));
+        }
+
+        return openPlaylistDb().then(function (db) {
+            return new Promise(function (resolve, reject) {
+                var tx = db.transaction(PLAYLIST_STORE, "readwrite");
+                tx.objectStore(PLAYLIST_STORE).put({
+                    url: url,
+                    text: text,
+                    updatedAt: Date.now()
+                });
+                tx.oncomplete = function () { resolve(true); };
+                tx.onerror = function () {
+                    reject(tx.error || new Error("Falha ao salvar playlist na TV."));
+                };
+                tx.onabort = function () {
+                    reject(tx.error || new Error("Armazenamento da playlist foi cancelado."));
+                };
+            });
+        });
+    }
+
+    function deleteCachedPlaylist(url) {
+        url = String(url || "").replace(/^\s+|\s+$/g, "");
+        if (!url) {
+            return Promise.resolve();
+        }
+
+        return openPlaylistDb().then(function (db) {
+            return new Promise(function (resolve, reject) {
+                var tx = db.transaction(PLAYLIST_STORE, "readwrite");
+                tx.objectStore(PLAYLIST_STORE).delete(url);
+                tx.oncomplete = function () { resolve(); };
+                tx.onerror = function () {
+                    reject(tx.error || new Error("Falha ao remover playlist salva."));
+                };
+            });
+        }).catch(function () {
+            /* Removing a profile should still work if IndexedDB is unavailable. */
+        });
+    }
+
 
     function requestText(url, options) {
         options = options || {};
@@ -117,10 +229,32 @@
             return copy;
         },
         removeProfile: function (id) {
-            writeJson("profiles", storage.profiles().filter(function (profile) {
-                return profile.id !== id;
-            }));
+            var removed = null;
+            var profiles = storage.profiles().filter(function (profile) {
+                if (profile.id === id) {
+                    removed = profile;
+                    return false;
+                }
+                return true;
+            });
+            writeJson("profiles", profiles);
+
+            if (removed && removed.type === "m3u" && removed.url) {
+                deleteCachedPlaylist(removed.url);
+            }
+            if (storage.lastOpenedProfileId() === id) {
+                storage.setLastOpenedProfileId("");
+            }
         },
+        lastOpenedProfileId: function () {
+            return String(readJson("lastOpenedProfileId", "") || "");
+        },
+        setLastOpenedProfileId: function (id) {
+            writeJson("lastOpenedProfileId", String(id || ""));
+        },
+        cachedPlaylist: cachedPlaylist,
+        saveCachedPlaylist: saveCachedPlaylist,
+        deleteCachedPlaylist: deleteCachedPlaylist,
         favorites: function () {
             return readJson("favorites", {});
         },
