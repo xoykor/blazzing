@@ -229,6 +229,7 @@
                 cardLookupKey(name, rawGroup) : "",
             cardIndexBase: pending.cardIndexBase || "",
             cardIndexVersion: pending.cardIndexVersion || "",
+            cardIndexShardLength: pending.cardIndexShardLength || 1,
             url: resolved,
             episodeInfo: episode
         };
@@ -245,6 +246,7 @@
         var pending = null;
         var cardIndexBase = "";
         var cardIndexVersion = "";
+        var cardIndexShardLength = 1;
         var cursor = 0;
         var next;
 
@@ -280,13 +282,25 @@
                 return;
             }
 
+            if (line.indexOf("#EXT-X-LISTA-CARDS-SHARD-LEN:") === 0) {
+                var parsedShardLength = parseInt(
+                    line.slice("#EXT-X-LISTA-CARDS-SHARD-LEN:".length),
+                    10
+                );
+                if (parsedShardLength >= 1 && parsedShardLength <= 4) {
+                    cardIndexShardLength = parsedShardLength;
+                }
+                return;
+            }
+
             if (line.indexOf("#EXTINF:") === 0) {
                 pending = {
                     name: extinfName(line),
                     group: parseAttribute(line, "group-title") || "Sem grupo",
                     logo: parseAttribute(line, "tvg-logo"),
                     cardIndexBase: cardIndexBase,
-                    cardIndexVersion: cardIndexVersion
+                    cardIndexVersion: cardIndexVersion,
+                    cardIndexShardLength: cardIndexShardLength
                 };
                 return;
             }
@@ -301,7 +315,8 @@
                     group: "Sem grupo",
                     logo: "",
                     cardIndexBase: cardIndexBase,
-                    cardIndexVersion: cardIndexVersion
+                    cardIndexVersion: cardIndexVersion,
+                    cardIndexShardLength: cardIndexShardLength
                 };
             }
 
@@ -341,6 +356,7 @@
                     cardKey: item.cardKey || "",
                     cardIndexBase: item.cardIndexBase || "",
                     cardIndexVersion: item.cardIndexVersion || "",
+                    cardIndexShardLength: item.cardIndexShardLength || 1,
                     episodes: []
                 };
                 seriesMap[key] = series;
@@ -356,6 +372,7 @@
                 series.cardKey = item.cardKey;
                 series.cardIndexBase = item.cardIndexBase || "";
                 series.cardIndexVersion = item.cardIndexVersion || "";
+                series.cardIndexShardLength = item.cardIndexShardLength || 1;
             }
 
             series.episodes.push({
@@ -371,6 +388,7 @@
                 cardKey: item.cardKey || "",
                 cardIndexBase: item.cardIndexBase || "",
                 cardIndexVersion: item.cardIndexVersion || "",
+                cardIndexShardLength: item.cardIndexShardLength || 1,
                 url: item.url
             });
         }
