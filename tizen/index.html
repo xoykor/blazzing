@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=1920, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <meta name="theme-color" content="#090b11">
+    <title>Blazzing</title>
+    <link rel="stylesheet" href="css/app.css">
+    <script src="js/boot.js"></script>
+    <script src="$WEBAPIS/webapis/webapis.js"></script>
+</head>
+<body>
+    <object id="av-player-object" type="application/avplayer" aria-hidden="true"></object>
+    <main id="app">
+        <section id="home-view" class="view">
+            <div class="hero">
+                <div class="brand">
+                    <div class="brand-mark">B</div>
+                    <div>
+                        <h1>Blazzing</h1>
+                        <p>IPTV para Samsung Tizen</p>
+                    </div>
+                </div>
+                <div id="platform-badge" class="pill">Tizen Web App</div>
+            </div>
+
+            <div id="pairing-modal" class="pairing-modal hidden" aria-live="polite">
+                <div class="pairing-card">
+                    <div id="pairing-qr" class="pairing-qr"></div>
+                    <div class="pairing-copy">
+                        <p class="eyebrow">Adicionar pelo celular</p>
+                        <h2>Escaneie o QR</h2>
+                        <p id="pairing-status">Preparando sessão segura…</p>
+                        <p class="pairing-help">Abra a câmera do celular, escaneie o código e cole a URL M3U/M3U8. A URL é cifrada no navegador antes de ser enviada.</p>
+                        <p id="pairing-url" class="pairing-url"></p>
+                        <button id="pairing-cancel" data-focusable="true" type="button">Cancelar</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="home-signature">Para sempre gratuito · Feito por Fernando</div>
+
+            <div class="home-grid">
+                <section class="panel">
+                    <div class="mode-tabs">
+                        <button id="mode-m3u" class="tab active" data-focusable="true">M3U / M3U8</button>
+                        <button id="mode-xtream" class="tab" data-focusable="true">Xtream Codes</button>
+                    </div>
+
+                    <form id="connect-form" autocomplete="off">
+                        <label>
+                            Nome do perfil
+                            <input id="profile-name" data-focusable="true" type="text" maxlength="80" placeholder="Minha lista">
+                        </label>
+
+                        <div id="m3u-fields">
+                            <label>
+                                URL da playlist
+                                <input id="m3u-url" data-focusable="true" type="url" placeholder="https://servidor/lista.m3u8">
+                            </label>
+                        </div>
+
+                        <div id="xtream-fields" class="hidden">
+                            <label>
+                                Servidor principal
+                                <input id="xtream-server" data-focusable="true" type="url" placeholder="https://servidor:porta/">
+                            </label>
+                            <label>
+                                Servidor alternativo
+                                <input id="xtream-alternate" data-focusable="true" type="url" placeholder="Opcional">
+                            </label>
+                            <div class="two-cols">
+                                <label>
+                                    Usuário
+                                    <input id="xtream-user" data-focusable="true" type="text">
+                                </label>
+                                <label>
+                                    Senha
+                                    <input id="xtream-password" data-focusable="true" type="password">
+                                </label>
+                            </div>
+                        </div>
+
+                        <label class="check-row">
+                            <input id="save-profile" data-focusable="true" type="checkbox">
+                            <span>Salvar este perfil nesta TV</span>
+                        </label>
+
+                        <label id="save-secret-row" class="check-row hidden">
+                            <input id="save-secret" data-focusable="true" type="checkbox">
+                            <span>Salvar também a senha Xtream</span>
+                        </label>
+
+                        <button id="connect-button" class="primary" data-focusable="true" type="submit">Conectar</button>
+                        <button id="pair-button" class="secondary wide" data-focusable="true" type="button">Adicionar pelo celular (QR)</button>
+                    </form>
+
+                    <p class="privacy-note">Use apenas listas e servidores que você tenha autorização para acessar.</p>
+                </section>
+
+                <section class="panel saved-panel">
+                    <div class="panel-title-row">
+                        <h2>Suas listas</h2>
+                        <span id="saved-count" class="pill">0</span>
+                    </div>
+                    <div id="saved-profiles" class="saved-list"></div>
+                </section>
+            </div>
+        </section>
+
+        <section id="catalog-view" class="view hidden">
+            <header class="topbar">
+                <div class="brand compact">
+                    <div class="brand-mark">B</div>
+                    <strong>Blazzing</strong>
+                </div>
+                <nav class="topnav">
+                    <button data-section="live" data-focusable="true">TV</button>
+                    <button data-section="vod" data-focusable="true">Filmes</button>
+                    <button data-section="series" data-focusable="true">Séries</button>
+                    <button id="favorites-button" data-focusable="true">Favoritos</button>
+                    <button id="lists-button" data-focusable="true">Listas</button>
+                </nav>
+                <div class="search-box">
+                    <input id="catalog-search" data-focusable="true" type="search" placeholder="Buscar">
+                </div>
+            </header>
+
+            <div class="catalog-layout">
+                <aside id="categories" class="sidebar"></aside>
+                <section class="content">
+                    <div class="content-heading">
+                        <div>
+                            <p id="content-eyebrow" class="eyebrow">Catálogo</p>
+                            <h2 id="content-title">TV ao vivo</h2>
+                        </div>
+                        <div id="item-count" class="pill">0 itens</div>
+                    </div>
+                    <div id="catalog-grid" class="card-grid"></div>
+                    <div id="catalog-empty" class="empty hidden">Nenhum item encontrado.</div>
+                </section>
+            </div>
+        </section>
+
+        <section id="series-view" class="view hidden">
+            <header class="topbar">
+                <button id="series-back" data-focusable="true" class="back-button">← Voltar</button>
+                <div class="series-heading">
+                    <p class="eyebrow">Série</p>
+                    <h2 id="series-title"></h2>
+                </div>
+            </header>
+            <div class="catalog-layout">
+                <aside id="season-list" class="sidebar"></aside>
+                <section class="content">
+                    <div id="episode-grid" class="episode-grid"></div>
+                    <div id="episodes-empty" class="empty hidden">Nenhum episódio encontrado.</div>
+                </section>
+            </div>
+        </section>
+
+        <section id="player-view" class="view hidden">
+            <video id="html5-player" class="html5-player hidden" playsinline></video>
+            <div id="player-hud" class="player-hud">
+                <div>
+                    <p class="eyebrow">Reproduzindo</p>
+                    <h2 id="player-title"></h2>
+                    <p id="player-status">Preparando…</p>
+                </div>
+                <div class="player-help">
+                    <span>OK: play/pause</span>
+                    <span>←/→: seek ou canal</span>
+                    <span>Voltar: catálogo</span>
+                </div>
+            </div>
+        </section>
+
+        <div id="toast" class="toast hidden"></div>
+        <div id="busy" class="busy hidden">
+            <div class="spinner"></div>
+            <p id="busy-text">Carregando…</p>
+        </div>
+    </main>
+
+    <script src="js/net-storage.js"></script>
+    <script src="js/pairing.js"></script>
+    <script src="js/providers.js"></script>
+    <script src="js/player.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

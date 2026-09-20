@@ -1,0 +1,101 @@
+name: Tizen Web
+
+on:
+  push:
+    branches:
+      - main
+      - feature/tizen-web-port
+    paths:
+      - "tizen/**"
+      - "worker/**"
+      - ".github/workflows/tizen.yml"
+  pull_request:
+    paths:
+      - "tizen/**"
+      - "worker/**"
+      - ".github/workflows/tizen.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in tizen/js/*.js tizen/tests/*.js; do
+            node --check "$file"
+          done
+
+      - name: Run Tizen tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in tizen/tests/*.test.js; do
+            node "$file"
+          done
+
+      - name: Validate Worker JavaScript syntax
+        run: node --check worker/src/index.js && node --check worker/public/pair.js
+
+      - name: Smoke test pairing Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd worker
+          npm install
+          npm run smoke
+
+      - name: Validate config.xml
+        shell: bash
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("tizen/config.xml").getroot()
+          assert root.tag.endswith("widget")
+          ns = {"t": "http://tizen.org/ns/widgets"}
+          app = root.find("t:application", ns)
+          assert app is not None
+          assert app.attrib["id"] == "Blazzing01.tizen"
+          assert app.attrib["package"] == "Blazzing01"
+          assert app.attrib["required_version"] == "2.3"
+          assert root.find("t:profile", ns).attrib["name"] == "tv-samsung"
+          privileges = {p.attrib["name"] for p in root.findall("t:privilege", ns)}
+          print("config.xml: OK")
+          PY
+
+      - name: Check required project files
+        shell: bash
+        run: |
+          test -s tizen/index.html
+          test -s tizen/css/app.css
+          test -s tizen/js/boot.js
+          test -s tizen/js/app.js
+          test -s tizen/js/player.js
+          test -s tizen/js/providers.js
+          test -s tizen/js/net-storage.js
+          test -s tizen/js/pairing.js
+          test -s tizen/.tproject
+          grep -q '"js/boot.js"' tizen/index.html
+          grep -q '"js/pairing.js"' tizen/index.html
+          grep -q '"pair-button"' tizen/index.html
+
+      - name: Package unsigned WGT
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          (
+            cd tizen
+            zip -r ../dist/Blazzing-Tizen-unsigned.wgt \
+              config.xml index.html icon.png css js
+          )
+
+      - name: Upload unsigned WGT
+        uses: actions/upload-artifact@v4
+        with:
+          name: blazzing-tizen-unsigned
+          path: dist/Blazzing-Tizen-unsigned.wgt
+          if-no-files-found: error

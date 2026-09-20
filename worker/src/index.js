@@ -26,6 +26,9 @@ function harden(input, contentSecurityPolicy = null) {
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("X-Frame-Options", "DENY");
   headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  headers.set("Access-Control-Allow-Origin", "*");
+  headers.set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+  headers.set("Access-Control-Allow-Headers", "Content-Type");
   if (contentSecurityPolicy) headers.set("Content-Security-Policy", contentSecurityPolicy);
   return new Response(input.body, {
     status: input.status,
@@ -170,6 +173,10 @@ async function staticAsset(request, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    if (request.method === "OPTIONS" && url.pathname.startsWith("/api/v1/sessions/")) {
+      return harden(response(204));
+    }
 
     if (url.pathname === "/healthz") {
       if (request.method !== "GET" && request.method !== "HEAD") {
