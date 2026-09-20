@@ -63,6 +63,10 @@ void vip_mpv_player_destroy(vip_mpv_player_t *player);
 vip_status_t vip_mpv_player_load(vip_mpv_player_t *player, const char *url, vip_error_t *error);
 /** Load a known HLS stream, forcing the HLS demuxer for non-standard URLs/MIME. */
 vip_status_t vip_mpv_player_load_hls(vip_mpv_player_t *player, const char *url, vip_error_t *error);
+/** Load HTTP media with optional per-item Referer/User-Agent headers. */
+vip_status_t vip_mpv_player_load_http(vip_mpv_player_t *player, const char *url,
+                                      const char *referer, const char *user_agent,
+                                      vip_error_t *error);
 /** Load media and request an initial absolute seek after file load. */
 vip_status_t vip_mpv_player_load_at(vip_mpv_player_t *player, const char *url, double start_seconds,
                                     vip_error_t *error);
