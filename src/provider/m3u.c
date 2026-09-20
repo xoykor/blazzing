@@ -4,6 +4,7 @@
 #include "visual_iptv/provider_m3u.h"
 
 #include <curl/curl.h>
+#include <json-c/json.h>
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -32,6 +33,35 @@ static uint64_t fnv_update(uint64_t h, const char *text) {
 /* Return a stable FNV hash for the supplied text. */
 static uint64_t fnv_text(const char *text) {
     return fnv_update(UINT64_C(14695981039346656037), text ? text : "");
+}
+
+/* Build the 16-hex card lookup key from canonical group + item name. */
+static void card_lookup_key(char out[17], const char *name, const char *group) {
+    const char *safe_group = group ? group : "";
+    const char *safe_name = name ? name : "";
+    size_t group_len = strlen(safe_group);
+    size_t name_len = strlen(safe_name);
+    size_t total = group_len + 1u + name_len;
+    char *joined = malloc(total + 1u);
+    if (!joined) {
+        out[0] = '\0';
+        return;
+    }
+    memcpy(joined, safe_group, group_len);
+    joined[group_len] = '\0';
+    memcpy(joined + group_len + 1u, safe_name, name_len);
+    joined[total] = '\0';
+
+    /* Hashes must include the embedded NUL separator, so iterate by length. */
+    uint32_t a = UINT32_C(0x13579bdf);
+    uint32_t b = UINT32_C(0x2468ace1);
+    for (size_t i = 0u; i < total; ++i) {
+        uint32_t ch = (uint32_t)(unsigned char)joined[i];
+        a = a * 31u + ch;
+        b = b * 31u + ch;
+    }
+    snprintf(out, 17u, "%08x%08x", a, b);
+    free(joined);
 }
 
 /* Format a deterministic short identifier derived from text. */
@@ -148,6 +178,95 @@ static vip_status_t load_file(const char *path, char **body_out, vip_error_t *er
     body[got] = '\0';
     *body_out = body;
     return VIP_OK;
+}
+
+/* Best-effort text fetch for optional metadata such as card shards. */
+static vip_status_t load_optional_text(const char *source, char **body_out) {
+    vip_error_t ignored = {0};
+    if (!source || !source[0] || !body_out)
+        return VIP_ERR_INVALID_ARGUMENT;
+    *body_out = NULL;
+    if (strncmp(source, "http://", 7u) == 0 || strncmp(source, "https://", 8u) == 0)
+        return load_http(source, body_out, &ignored);
+    return load_file(source, body_out, &ignored);
+}
+
+/* Resolve a category name from its stable category id. */
+static const char *category_name_by_id(const vip_category_list_t *categories, const char *id) {
+    if (!categories || !id)
+        return "";
+    for (size_t i = 0u; i < categories->len; ++i) {
+        if (categories->items[i].id && strcmp(categories->items[i].id, id) == 0)
+            return categories->items[i].name ? categories->items[i].name : "";
+    }
+    return "";
+}
+
+/* Fill missing logo_url values from the compact card-artwork shards published
+ * beside xoykor/Lista. This is optional metadata: failures never make an M3U
+ * unusable and standard playlists without the custom header do zero requests. */
+static void apply_external_card_artwork(const char *base, const char *version,
+                                        const vip_category_list_t *categories,
+                                        vip_channel_list_t *channels) {
+    if (!base || !base[0] || !channels || channels->len == 0u)
+        return;
+
+    char (*keys)[17] = calloc(channels->len, sizeof(*keys));
+    if (!keys)
+        return;
+
+    for (size_t i = 0u; i < channels->len; ++i) {
+        if (channels->items[i].logo_url && channels->items[i].logo_url[0])
+            continue;
+        const char *group = category_name_by_id(categories, channels->items[i].category_id);
+        card_lookup_key(keys[i], channels->items[i].name, group);
+    }
+
+    size_t base_len = strlen(base);
+    bool slash = base_len > 0u && base[base_len - 1u] == '/';
+    for (unsigned shard = 0u; shard < 16u; ++shard) {
+        char prefix = "0123456789abcdef"[shard];
+        size_t version_len = version ? strlen(version) : 0u;
+        size_t url_len = base_len + (slash ? 0u : 1u) + 6u +
+                         (version_len ? 3u + version_len : 0u) + 1u;
+        char *url = malloc(url_len);
+        if (!url)
+            break;
+        if (version_len)
+            snprintf(url, url_len, "%s%s%c.json?v=%s", base, slash ? "" : "/", prefix, version);
+        else
+            snprintf(url, url_len, "%s%s%c.json", base, slash ? "" : "/", prefix);
+
+        char *body = NULL;
+        if (load_optional_text(url, &body) == VIP_OK && body) {
+            struct json_object *root = json_tokener_parse(body);
+            if (root && json_object_is_type(root, json_type_object)) {
+                for (size_t i = 0u; i < channels->len; ++i) {
+                    if (!keys[i][0] || keys[i][0] != prefix)
+                        continue;
+                    if (channels->items[i].logo_url && channels->items[i].logo_url[0])
+                        continue;
+                    struct json_object *value = NULL;
+                    if (json_object_object_get_ex(root, keys[i], &value) &&
+                        json_object_is_type(value, json_type_string)) {
+                        const char *logo = json_object_get_string(value);
+                        if (logo && (strncmp(logo, "http://", 7u) == 0 ||
+                                     strncmp(logo, "https://", 8u) == 0 ||
+                                     strncmp(logo, "file://", 7u) == 0)) {
+                            char *copy = vip_strdup(logo);
+                            if (copy)
+                                channels->items[i].logo_url = copy;
+                        }
+                    }
+                }
+            }
+            if (root)
+                json_object_put(root);
+            free(body);
+        }
+        free(url);
+    }
+    free(keys);
 }
 
 /* Trim trim. */
@@ -316,12 +435,24 @@ vip_status_t vip_m3u_load(const char *source, vip_category_list_t *categories_ou
     char *pending_logo = NULL;
     char *pending_group = NULL;
     char *pending_tvg_id = NULL;
+    char *card_index_base = NULL;
+    char *card_index_version = NULL;
     int position = 0;
     char *saveptr = NULL;
     for (char *line = strtok_r(body, "\n", &saveptr); line; line = strtok_r(NULL, "\n", &saveptr)) {
         line = trim(line);
         if (!line[0] || strcmp(line, "#EXTM3U") == 0)
             continue;
+        if (strncmp(line, "#EXT-X-LISTA-CARDS:", 19u) == 0) {
+            free(card_index_base);
+            card_index_base = vip_strdup(trim(line + 19u));
+            continue;
+        }
+        if (strncmp(line, "#EXT-X-LISTA-CARDS-VERSION:", 27u) == 0) {
+            free(card_index_version);
+            card_index_version = vip_strdup(trim(line + 27u));
+            continue;
+        }
         if (strncmp(line, "#EXTINF", 7u) == 0) {
             free(pending_name);
             free(pending_logo);
@@ -381,6 +512,13 @@ vip_status_t vip_m3u_load(const char *source, vip_category_list_t *categories_ou
     free(pending_logo);
     free(pending_group);
     free(pending_tvg_id);
+
+    if (st == VIP_OK && card_index_base && card_index_base[0])
+        apply_external_card_artwork(card_index_base, card_index_version,
+                                    categories_out, channels_out);
+
+    free(card_index_base);
+    free(card_index_version);
     free(body);
 
     if (st != VIP_OK) {
