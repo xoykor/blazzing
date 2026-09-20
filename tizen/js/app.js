@@ -335,9 +335,21 @@
 
     function setPairingStatus(message, kind) {
         var target = byId("pairing-status");
+        var retry = byId("pairing-retry");
         if (!target) { return; }
         target.textContent = message || "";
         target.setAttribute("data-state", kind || "");
+
+        if (retry) {
+            retry.classList.toggle("hidden", kind !== "expired");
+        }
+        if (kind === "expired") {
+            byId("pairing-qr").innerHTML = "";
+            byId("pairing-url").textContent = "";
+            setTimeout(function () {
+                if (state.pairingActive && retry) { retry.focus(); }
+            }, 0);
+        }
     }
 
     function cancelPairing() {
@@ -399,6 +411,7 @@
     }
 
     byId("pair-button").addEventListener("click", startPairing);
+    byId("pairing-retry").addEventListener("click", startPairing);
     byId("pairing-cancel").addEventListener("click", cancelPairing);
 
     function profileFromForm() {

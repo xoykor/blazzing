@@ -18,6 +18,11 @@ function assert(condition, message) {
     }
 }
 
+assert(pairing._timing.pollMs === 5000,
+    "polling do pareamento deve ocorrer a cada 5 segundos");
+assert(pairing._timing.ttlMs === 45000,
+    "sessão do QR deve expirar após 45 segundos");
+
 var url = "https://blazzing-pairing.vsxk.workers.dev/pair/" +
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#" +
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";

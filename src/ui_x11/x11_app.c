@@ -243,6 +243,7 @@ struct app {
     char pairing_pending_name[128];
     char pairing_page_url[1024];
     QRcode *pairing_qr;
+    bool pairing_retry_ready;
 
     pthread_t login_thread;
     bool login_thread_started;
@@ -2107,6 +2108,8 @@ static void start_phone_pairing(app_t *a) {
         return;
     }
 
+    a->pairing_retry_ready = false;
+
     const char *base_url = pairing_base_url();
     if (!base_url[0]) {
         snprintf(a->status, sizeof(a->status),
@@ -2138,7 +2141,7 @@ static void start_phone_pairing(app_t *a) {
     }
 
     snprintf(a->status, sizeof(a->status),
-             "Escaneie o QR Code; a sessão expira em 5 minutos");
+             "Escaneie o QR Code; a sessão expira em 45 segundos");
     fprintf(stderr, "[pairing] sessão HTTPS criada; aguardando celular\n");
 }
 
@@ -3592,6 +3595,10 @@ static void draw_login(app_t *a) {
         int phone_y = y + 314;
         bool waiting_phone = a->pairing_relay != NULL;
         bool phone_focused = a->input_focus == INPUT_PHONE;
+        const char *phone_label = waiting_phone ? "Aguardando celular..."
+                                  : (a->pairing_retry_ready
+                                         ? "Tentar novamente (QR)"
+                                         : "Adicionar pelo celular");
         if (a->renderer.active) {
             vip_ui_render_round_rect(&a->renderer, form_x, phone_y, form_w, 46, 12,
                                      waiting_phone ? 0x183E6Bu : 0x151E2Du, 1.0);
@@ -3600,7 +3607,7 @@ static void draw_login(app_t *a) {
                                                      : (waiting_phone ? 0x62A9FFu : 0x2B3950u),
                                        1.0, phone_focused ? 2.5 : 1.0);
             vip_ui_render_text(&a->renderer, form_x, phone_y + 13, form_w,
-                               waiting_phone ? "Aguardando celular..." : "Adicionar pelo celular",
+                               phone_label,
                                waiting_phone ? "Sans Bold 10" : "Sans 10",
                                waiting_phone ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
             if (waiting_phone)
@@ -3614,7 +3621,7 @@ static void draw_login(app_t *a) {
                               phone_focused ? a->colors.text
                                             : (waiting_phone ? a->colors.accent : a->colors.border));
             draw_centered(a, form_x, phone_y + 29, form_w,
-                          waiting_phone ? "Aguardando celular..." : "Adicionar pelo celular",
+                          phone_label,
                           waiting_phone ? a->colors.text : a->colors.muted);
             if (waiting_phone)
                 draw_text(a, form_x, phone_y + 69,
@@ -5146,6 +5153,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
     }
     if (a->pairing_relay && (is_navigation_back(sym) || sym == XK_BackSpace)) {
         stop_phone_pairing(a);
+        a->pairing_retry_ready = false;
         snprintf(a->status, sizeof(a->status), "Pareamento cancelado");
         a->input_focus = INPUT_PHONE;
         return;
@@ -5551,6 +5559,7 @@ static void handle_async(app_t *a) {
         pthread_mutex_unlock(&a->data_mutex);
 
         stop_phone_pairing(a);
+        a->pairing_retry_ready = false;
         a->login_mode = LOGIN_M3U;
         snprintf(a->server, sizeof(a->server), "%s", url);
         snprintf(a->profile_name, sizeof(a->profile_name), "%s", name);
@@ -5558,9 +5567,10 @@ static void handle_async(app_t *a) {
         start_login(a);
     } else if (a->pairing_relay && vip_pairing_relay_finished(a->pairing_relay)) {
         stop_phone_pairing(a);
+        a->pairing_retry_ready = true;
         a->input_focus = INPUT_PHONE;
         snprintf(a->status, sizeof(a->status),
-                 "Sessão de pareamento expirou; gere um novo QR Code");
+                 "Sessão expirou após 45 s; selecione Tentar novamente (QR)");
     }
     if (atomic_exchange(&a->login_done, false)) {
         if (a->login_thread_started) {

@@ -259,8 +259,13 @@ label input { margin-top: 9px; color: #f6f7fb; }
     font-size: 15px;
     word-break: break-all;
 }
-#pairing-cancel {
+#pairing-retry, #pairing-cancel {
     min-width: 200px;
+}
+#pairing-retry {
+    margin-right: 12px;
+    background: #25588f;
+    font-weight: 700;
 }
 
 .saved-panel { display: flex; flex-direction: column; }

@@ -16,8 +16,8 @@
     "use strict";
 
     var DEFAULT_BASE_URL = "https://blazzing-pairing.vsxk.workers.dev";
-    var POLL_MS = 1000;
-    var TTL_MS = 5 * 60 * 1000;
+    var POLL_MS = 5000;
+    var TTL_MS = 45 * 1000;
     var current = null;
 
     function randomBytes(size) {
@@ -495,7 +495,7 @@
         if (Date.now() >= session.deadline) {
             current = null;
             cleanupRemote(session);
-            onState("A sessão expirou. Gere um novo QR.", "error");
+            onState("A sessão expirou após 45 segundos.", "expired");
             return;
         }
 
@@ -519,7 +519,7 @@
 
             if (response.status === 410) {
                 current = null;
-                onState("A sessão expirou. Gere um novo QR.", "error");
+                onState("A sessão expirou após 45 segundos.", "expired");
                 return;
             }
 
@@ -543,7 +543,7 @@
             onState(error.message || "Falha temporária no pareamento.", "error");
             session.timer = setTimeout(function () {
                 poll(session, onSubmit, onState);
-            }, 1800);
+            }, POLL_MS);
         });
     }
 
@@ -575,7 +575,7 @@
             key: key,
             baseUrl: baseUrl,
             pageUrl: pageUrl,
-            deadline: Date.now() + TTL_MS,
+            deadline: 0,
             timer: 0,
             cancelled: false
         };
@@ -597,7 +597,8 @@
                     response.status + ").");
             }
 
-            onState("Aponte a câmera do celular para o QR.", "ready");
+            session.deadline = Date.now() + TTL_MS;
+            onState("Aponte a câmera do celular para o QR. Expira em 45 s.", "ready");
             poll(session, onSubmit, onState);
 
             return {
@@ -618,6 +619,7 @@
         start: start,
         stop: stop,
         qrSvg: qrSvg,
-        _qrMatrix: qrMatrix
+        _qrMatrix: qrMatrix,
+        _timing: { pollMs: POLL_MS, ttlMs: TTL_MS }
     };
 }());
