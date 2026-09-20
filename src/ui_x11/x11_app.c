@@ -315,7 +315,8 @@ struct app {
     int64_t player_open_ms;
     int64_t player_last_progress_save_ms;
     int64_t player_hud_until_ms;
-    bool player_alt_attempted;
+    size_t player_fallback_attempt;
+    bool player_xtream_alt_attempted;
     bool timeline_dragging;
     bool player_item_live;
 
@@ -3411,7 +3412,8 @@ static void enter_player(app_t *a, size_t channel_index) {
     a->player_open_ms = monotonic_ms();
     a->player_last_progress_save_ms = a->player_open_ms;
     a->player_hud_until_ms = a->player_open_ms + 3000;
-    a->player_alt_attempted = false;
+    a->player_fallback_attempt = 0u;
+    a->player_xtream_alt_attempted = false;
     a->timeline_dragging = false;
     /* O player não pausa mais o pipeline de thumbnails: o cache continua
        sendo preenchido mesmo durante a reprodução. */
@@ -3506,17 +3508,71 @@ static char *alternate_stream_url(app_t *a, const char *url) {
 
 /* Handle the maybe failover player operation. */
 static void maybe_failover_player(app_t *a) {
-    if (!a || a->screen != SCREEN_PLAYER || !a->player || a->player_alt_attempted)
+    if (!a || a->screen != SCREEN_PLAYER || !a->player)
         return;
     if (vip_mpv_player_state(a->player) != VIP_PLAYER_ERROR)
         return;
     if (a->current_channel >= ACTIVE_CHANNELS(a).len)
         return;
-    char *url = alternate_stream_url(a, ACTIVE_CHANNELS(a).items[a->current_channel].stream_url);
-    a->player_alt_attempted = true;
+
+    vip_channel_t *channel = &ACTIVE_CHANNELS(a).items[a->current_channel];
+
+    /*
+     * Lista static failover: fetch only the shard for this item, then try one
+     * direct source at a time. No playback proxy/Worker is involved.
+     */
+    if (channel->fallback_id && channel->fallback_id[0] &&
+        channel->fallback_base && channel->fallback_base[0]) {
+        char *url = NULL;
+        char *referer = NULL;
+        char *user_agent = NULL;
+        vip_error_t fallback_error = {0};
+
+        if (vip_m3u_fallback_variant(channel, a->player_fallback_attempt,
+                                     &url, &referer, &user_agent,
+                                     &fallback_error) == VIP_OK &&
+            url && url[0]) {
+            ++a->player_fallback_attempt;
+            fprintf(stderr, "[player] fonte falhou; tentando fallback estático %zu\n",
+                    a->player_fallback_attempt);
+            snprintf(a->player_status, sizeof(a->player_status),
+                     "Fonte indisponível; tentando alternativa %zu...",
+                     a->player_fallback_attempt);
+            a->player_open_ms = monotonic_ms();
+
+            vip_error_t error = {0};
+            vip_status_t st;
+            if (a->player_item_live && stream_needs_forced_hls(url) &&
+                (!referer || !referer[0]) && (!user_agent || !user_agent[0])) {
+                st = vip_mpv_player_load_hls(a->player, url, &error);
+            } else {
+                st = vip_mpv_player_load_http(a->player, url, referer, user_agent, &error);
+            }
+            if (st != VIP_OK)
+                snprintf(a->player_status, sizeof(a->player_status), "%s", error.message);
+
+            free(url);
+            free(referer);
+            free(user_agent);
+            return;
+        }
+
+        free(url);
+        free(referer);
+        free(user_agent);
+    }
+
+    /* Existing Xtream mirror fallback remains available for Xtream profiles. */
+    if (a->player_xtream_alt_attempted)
+        return;
+    char *url = alternate_stream_url(a, channel->stream_url);
+    a->player_xtream_alt_attempted = true;
     if (!url)
         return;
-    fprintf(stderr, "[player] stream primário falhou; tentando servidor alternativo\n");
+
+    fprintf(stderr, "[player] stream primário falhou; tentando servidor Xtream alternativo\n");
+    snprintf(a->player_status, sizeof(a->player_status),
+             "Servidor indisponível; tentando espelho...");
     a->player_open_ms = monotonic_ms();
     vip_error_t error = {0};
     if (vip_mpv_player_load(a->player, url, &error) != VIP_OK)
