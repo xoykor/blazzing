@@ -93,3 +93,28 @@ assert(cardItem.cardIndexVersion === "abc123",
 
 assert(cardItem.cardIndexShardLength === 2,
     "comprimento do prefixo dos shards deveria ser preservado");
+
+
+var withFallback = [
+    "#EXTM3U",
+    "#EXT-X-LISTA-FALLBACK:https://raw.example/fallback",
+    "#EXT-X-LISTA-FALLBACK-VERSION:v123",
+    "#EXT-X-LISTA-FALLBACK-SHARD-LEN:2",
+    "#EXTINF:-1 group-title=\"Filmes | Ação\" x-lista-fallback=\"abcdef0123456789abcd\",Filme F",
+    "https://primary.example/f.mp4"
+].join("\n");
+var fallbackCatalog = providers.parseM3u(
+    withFallback,
+    "https://example.com/list.m3u8"
+);
+var fallbackItem = fallbackCatalog.vod.items[0];
+assert(fallbackItem.url === "https://primary.example/f.mp4",
+    "URL primária direta deveria ser preservada");
+assert(fallbackItem.fallbackId === "abcdef0123456789abcd",
+    "fallbackId deveria ser preservado");
+assert(fallbackItem.fallbackIndexBase === "https://raw.example/fallback",
+    "base estática de fallback deveria ser preservada");
+assert(fallbackItem.fallbackIndexVersion === "v123",
+    "versão do fallback deveria ser preservada");
+assert(fallbackItem.fallbackIndexShardLength === 2,
+    "comprimento do shard de fallback deveria ser preservado");
