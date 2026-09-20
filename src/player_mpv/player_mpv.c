@@ -353,7 +353,8 @@ static void send_observers(vip_mpv_player_t *player) {
 }
 
 /* Send loadfile. */
-static int send_loadfile(vip_mpv_player_t *player, const char *url, bool force_hls) {
+static int send_loadfile(vip_mpv_player_t *player, const char *url, bool force_hls,
+                         const char *referer, const char *user_agent) {
     json_object *cmd = command_array("loadfile");
     if (!cmd)
         return -1;
@@ -367,13 +368,18 @@ static int send_loadfile(vip_mpv_player_t *player, const char *url, bool force_h
      * us force HLS for only the affected item instead of changing detection
      * globally and breaking ordinary MP4/MPEG-TS media.
      */
-    if (force_hls) {
+    if (force_hls || (referer && referer[0]) || (user_agent && user_agent[0])) {
         json_object *options = json_object_new_object();
         if (!options) {
             json_object_put(cmd);
             return -1;
         }
-        json_object_object_add(options, "demuxer-lavf-format", json_object_new_string("hls"));
+        if (force_hls)
+            json_object_object_add(options, "demuxer-lavf-format", json_object_new_string("hls"));
+        if (referer && referer[0])
+            json_object_object_add(options, "referrer", json_object_new_string(referer));
+        if (user_agent && user_agent[0])
+            json_object_object_add(options, "user-agent", json_object_new_string(user_agent));
         json_object_array_add(cmd, json_object_new_int(-1));
         json_object_array_add(cmd, options);
     }
@@ -1133,6 +1139,7 @@ void vip_mpv_player_destroy(vip_mpv_player_t *player) {
 /* Load at using the mpv player. */
 static vip_status_t player_load_at_internal(vip_mpv_player_t *player, const char *url,
                                             double start_seconds, bool force_hls,
+                                            const char *referer, const char *user_agent,
                                             vip_error_t *error) {
     if (!player || !url || !url[0]) {
         vip_error_set(error, VIP_ERR_INVALID_ARGUMENT, "URL de reprodução inválida");
@@ -1157,7 +1164,7 @@ static vip_status_t player_load_at_internal(vip_mpv_player_t *player, const char
     touch_state_locked(player, VIP_PLAYER_OPENING);
     pthread_mutex_unlock(&player->mutex);
 
-    if (send_loadfile(player, url, force_hls) != 0) {
+    if (send_loadfile(player, url, force_hls, referer, user_agent) != 0) {
         pthread_mutex_lock(&player->mutex);
         if (player->pending_load_starts > 0u)
             --player->pending_load_starts;
@@ -1177,17 +1184,23 @@ static vip_status_t player_load_at_internal(vip_mpv_player_t *player, const char
 
 vip_status_t vip_mpv_player_load_at(vip_mpv_player_t *player, const char *url, double start_seconds,
                                     vip_error_t *error) {
-    return player_load_at_internal(player, url, start_seconds, false, error);
+    return player_load_at_internal(player, url, start_seconds, false, NULL, NULL, error);
 }
 
 /* Load a known HLS stream while bypassing extension/MIME auto-detection. */
 vip_status_t vip_mpv_player_load_hls(vip_mpv_player_t *player, const char *url, vip_error_t *error) {
-    return player_load_at_internal(player, url, 0.0, true, error);
+    return player_load_at_internal(player, url, 0.0, true, NULL, NULL, error);
 }
 
 /* Load the requested state using the mpv player. */
 vip_status_t vip_mpv_player_load(vip_mpv_player_t *player, const char *url, vip_error_t *error) {
-    return player_load_at_internal(player, url, 0.0, false, error);
+    return player_load_at_internal(player, url, 0.0, false, NULL, NULL, error);
+}
+
+vip_status_t vip_mpv_player_load_http(vip_mpv_player_t *player, const char *url,
+                                      const char *referer, const char *user_agent,
+                                      vip_error_t *error) {
+    return player_load_at_internal(player, url, 0.0, false, referer, user_agent, error);
 }
 
 /* Set paused in the mpv player. */
