@@ -255,12 +255,14 @@ static void apply_external_card_artwork(const char *base, const char *version,
     for (unsigned shard = 0u; shard < 16u; ++shard) {
         char prefix = "0123456789abcdef"[shard];
         size_t version_len = version ? strlen(version) : 0u;
+        bool remote = strncmp(base, "http://", 7u) == 0 ||
+                      strncmp(base, "https://", 8u) == 0;
         size_t url_len = base_len + (slash ? 0u : 1u) + 6u +
-                         (version_len ? 3u + version_len : 0u) + 1u;
+                         (remote && version_len ? 3u + version_len : 0u) + 1u;
         char *url = malloc(url_len);
         if (!url)
             break;
-        if (version_len)
+        if (remote && version_len)
             snprintf(url, url_len, "%s%s%c.json?v=%s", base, slash ? "" : "/", prefix, version);
         else
             snprintf(url, url_len, "%s%s%c.json", base, slash ? "" : "/", prefix);
