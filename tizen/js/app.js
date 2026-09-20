@@ -534,7 +534,13 @@
     function saveProfileIfRequested(profile) {
         var copy;
 
-        if (!byId("save-profile").checked) {
+        /*
+         * M3U profiles are intentionally lightweight: persist only the profile
+         * metadata (name + URL), never the downloaded playlist contents.
+         * This lets the link survive a full TV restart while the catalog is
+         * fetched fresh on the next app launch.
+         */
+        if (profile.type !== "m3u" && !byId("save-profile").checked) {
             return;
         }
 
