@@ -26,3 +26,8 @@ compile_commands.json
 .idea/
 .DS_Store
 *~
+
+
+# Samsung Tizen local build/signing outputs
+/tizen/.buildResult/
+*.wgt
