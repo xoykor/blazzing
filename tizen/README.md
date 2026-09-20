@@ -56,7 +56,7 @@ Pré-requisitos:
 A partir da raiz do repositório, use de preferência o helper que limpa qualquer
 build incremental antiga antes de empacotar:
 
-    ./tizen/build-package.fish NOME_DO_CERTIFICADO
+    fish ./tizen/build-package.fish NOME_DO_CERTIFICADO
 
 Manual, se preferir:
 
