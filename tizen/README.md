@@ -18,7 +18,10 @@ Este diretório contém o porte do Blazzing para Samsung Smart TV como **Tizen W
 - retomada simples de filmes e episódios;
 - AVPlay como backend principal;
 - HTML5 video como fallback de desenvolvimento;
-- grid carregado em lotes para não inflar o DOM em catálogos muito grandes.
+- grid carregado em lotes para não inflar o DOM em catálogos muito grandes;
+- playlist M3U persistida localmente em IndexedDB;
+- reabertura automática da última playlist M3U usada;
+- nova transferência da M3U somente pela aquisição inicial ou pelo botão **Atualizar playlist**.
 
 O código Linux/C17 continua independente. O porte Tizen não depende de X11, Cairo, SQLite ou mpv.
 
@@ -87,6 +90,7 @@ A instalação em TV exige Developer Mode habilitado na televisão, PC autorizad
 - Back: voltar.
 - TV / Filmes / Séries: trocar catálogo.
 - Favoritos: filtrar favoritos.
+- Atualizar playlist: baixa novamente a M3U aberta e substitui a cópia local.
 - Listas: voltar aos perfis.
 
 ### Player
@@ -99,7 +103,16 @@ A instalação em TV exige Developer Mode habilitado na televisão, PC autorizad
 
 ## Armazenamento
 
-Perfis, favoritos e retomada usam localStorage da aplicação Tizen.
+Perfis, favoritos, retomada e o identificador da última playlist aberta usam
+localStorage da aplicação Tizen. O conteúdo bruto das playlists M3U usa
+IndexedDB, para comportar listas grandes sem depender do limite pequeno do
+localStorage.
+
+Depois da primeira aquisição, abrir um perfil M3U ou reiniciar a TV usa a
+cópia persistida e **não faz download da playlist**. A M3U só é transferida
+novamente ao escolher **Atualizar playlist** no catálogo. Se a cópia persistida
+estiver inválida, o aplicativo pede atualização em vez de baixar
+automaticamente.
 
 A senha Xtream **não é salva por padrão**. Ela só é persistida quando o usuário marca explicitamente a opção de salvar a senha. Diferentemente do desktop Linux, esta primeira versão não possui integração equivalente ao Secret Service.
 
