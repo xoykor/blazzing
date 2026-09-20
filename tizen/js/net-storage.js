@@ -77,6 +77,170 @@
         localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value));
     }
 
+    /*
+     * Samsung TV Web Storage is limited to roughly 5 MB. Playlists can be much
+     * larger, so keep their raw M3U text in the application's private
+     * persistent filesystem. "wgt-private" survives app termination and TV
+     * power cycles, but is removed when the application is uninstalled.
+     */
+    function playlistCacheName(url) {
+        var hash = 2166136261;
+        var text = String(url || "");
+        var i;
+
+        for (i = 0; i < text.length; i += 1) {
+            hash ^= text.charCodeAt(i);
+            hash = (hash * 16777619) >>> 0;
+        }
+
+        return "playlist-" +
+            ("00000000" + hash.toString(16)).slice(-8) +
+            ".m3u";
+    }
+
+    function hasPersistentFilesystem() {
+        return !!(
+            window.tizen &&
+            window.tizen.filesystem &&
+            window.tizen.filesystem.resolve
+        );
+    }
+
+    function readM3uCache(url) {
+        return new Promise(function (resolve) {
+            var fileName = playlistCacheName(url);
+
+            if (!hasPersistentFilesystem()) {
+                resolve("");
+                return;
+            }
+
+            try {
+                window.tizen.filesystem.resolve(
+                    "wgt-private",
+                    function (dir) {
+                        var file;
+
+                        try {
+                            file = dir.resolve(fileName);
+                        } catch (error) {
+                            resolve("");
+                            return;
+                        }
+
+                        file.readAsText(
+                            function (text) {
+                                resolve(text || "");
+                            },
+                            function () {
+                                resolve("");
+                            },
+                            "UTF-8"
+                        );
+                    },
+                    function () {
+                        resolve("");
+                    },
+                    "r"
+                );
+            } catch (error) {
+                resolve("");
+            }
+        });
+    }
+
+    function writeM3uCache(url, text) {
+        return new Promise(function (resolve) {
+            var fileName = playlistCacheName(url);
+
+            if (!hasPersistentFilesystem() || !text) {
+                resolve(false);
+                return;
+            }
+
+            try {
+                window.tizen.filesystem.resolve(
+                    "wgt-private",
+                    function (dir) {
+                        var file;
+
+                        try {
+                            file = dir.resolve(fileName);
+                        } catch (resolveError) {
+                            try {
+                                file = dir.createFile(fileName);
+                            } catch (createError) {
+                                resolve(false);
+                                return;
+                            }
+                        }
+
+                        file.openStream(
+                            "w",
+                            function (stream) {
+                                try {
+                                    stream.write(text);
+                                    stream.close();
+                                    resolve(true);
+                                } catch (writeError) {
+                                    try { stream.close(); } catch (ignoreClose) {}
+                                    resolve(false);
+                                }
+                            },
+                            function () {
+                                resolve(false);
+                            },
+                            "UTF-8"
+                        );
+                    },
+                    function () {
+                        resolve(false);
+                    },
+                    "rw"
+                );
+            } catch (error) {
+                resolve(false);
+            }
+        });
+    }
+
+    function removeM3uCache(url) {
+        return new Promise(function (resolve) {
+            var fileName = playlistCacheName(url);
+
+            if (!hasPersistentFilesystem()) {
+                resolve(false);
+                return;
+            }
+
+            try {
+                window.tizen.filesystem.resolve(
+                    "wgt-private",
+                    function (dir) {
+                        var file;
+
+                        try {
+                            file = dir.resolve(fileName);
+                        } catch (error) {
+                            resolve(true);
+                            return;
+                        }
+
+                        dir.deleteFile(
+                            file.fullPath,
+                            function () { resolve(true); },
+                            function () { resolve(false); }
+                        );
+                    },
+                    function () { resolve(false); },
+                    "rw"
+                );
+            } catch (error) {
+                resolve(false);
+            }
+        });
+    }
+
     var storage = {
         profiles: function () {
             return readJson("profiles", []);
@@ -99,10 +263,24 @@
             return copy;
         },
         removeProfile: function (id) {
-            writeJson("profiles", storage.profiles().filter(function (profile) {
-                return profile.id !== id;
+            var profiles = storage.profiles();
+            var removed = null;
+
+            writeJson("profiles", profiles.filter(function (profile) {
+                if (profile.id === id) {
+                    removed = profile;
+                    return false;
+                }
+                return true;
             }));
+
+            if (removed && removed.type === "m3u" && removed.url) {
+                removeM3uCache(removed.url);
+            }
         },
+        readM3uCache: readM3uCache,
+        writeM3uCache: writeM3uCache,
+        removeM3uCache: removeM3uCache,
         favorites: function () {
             return readJson("favorites", {});
         },
