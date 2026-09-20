@@ -3332,6 +3332,22 @@ static void maybe_enforce_fullscreen(app_t *a) {
     apply_borderless_fullscreen(a);
 }
 
+/* Some live entries in the unified Lista resolve through the failover Worker
+ * to Saimo manifests intentionally published with a .txt suffix. FFmpeg will
+ * not auto-detect those as HLS when the origin also returns text/plain. Keep
+ * the workaround narrowly scoped to live playback from that facade (or a
+ * direct .txt URL), so ordinary VOD/TS/MP4 detection is unchanged. */
+static bool stream_needs_forced_hls(const char *url) {
+    if (!url || !url[0])
+        return false;
+    if (strstr(url, "://l.vsxk.workers.dev/channel/") != NULL)
+        return true;
+
+    const char *end = strpbrk(url, "?#");
+    size_t n = end ? (size_t)(end - url) : strlen(url);
+    return n >= 4u && strncasecmp(url + n - 4u, ".txt", 4u) == 0;
+}
+
 /* Enter playback without destroying the mpv process: loadfile is sent over
  * IPC and optional resume position is applied after the file is loaded. */
 static void enter_player(app_t *a, size_t channel_index) {
@@ -3374,8 +3390,14 @@ static void enter_player(app_t *a, size_t channel_index) {
             resume = saved.position_seconds;
     }
     vip_error_t error = {0};
-    vip_status_t st = resume > 0.0 ? vip_mpv_player_load_at(a->player, ch->stream_url, resume, &error)
-                                   : vip_mpv_player_load(a->player, ch->stream_url, &error);
+    vip_status_t st;
+    if (a->player_item_live && stream_needs_forced_hls(ch->stream_url)) {
+        st = vip_mpv_player_load_hls(a->player, ch->stream_url, &error);
+    } else if (resume > 0.0) {
+        st = vip_mpv_player_load_at(a->player, ch->stream_url, resume, &error);
+    } else {
+        st = vip_mpv_player_load(a->player, ch->stream_url, &error);
+    }
     if (st != VIP_OK)
         snprintf(a->player_status, sizeof(a->player_status), "%s", error.message);
     fprintf(stderr, "[player] %s%s\n", ch->name, resume > 0.0 ? " (retomado)" : "");
