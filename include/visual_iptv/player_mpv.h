@@ -61,6 +61,8 @@ void vip_mpv_player_destroy(vip_mpv_player_t *player);
 
 /** Load media at the beginning into the persistent runtime. */
 vip_status_t vip_mpv_player_load(vip_mpv_player_t *player, const char *url, vip_error_t *error);
+/** Load a known HLS stream, forcing the HLS demuxer for non-standard URLs/MIME. */
+vip_status_t vip_mpv_player_load_hls(vip_mpv_player_t *player, const char *url, vip_error_t *error);
 /** Load media and request an initial absolute seek after file load. */
 vip_status_t vip_mpv_player_load_at(vip_mpv_player_t *player, const char *url, double start_seconds,
                                     vip_error_t *error);
