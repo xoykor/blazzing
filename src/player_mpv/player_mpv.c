@@ -42,6 +42,13 @@ struct vip_mpv_player {
     bool runtime_running;
     bool shutting_down;
     bool media_running;
+    /*
+     * Number of loadfile commands that have been queued but whose start-file
+     * event has not arrived yet. mpv emits end-file for the previous item
+     * before start-file for a replacement; those stale end-file events must
+     * not overwrite the state of the newly requested item.
+     */
+    unsigned pending_load_starts;
     bool paused;
     bool buffering;
     bool seekable;
@@ -639,6 +646,8 @@ static void handle_ipc_line(vip_mpv_player_t *player, const char *line) {
     if (event)
         set_last_event_locked(player, event);
     if (event && strcmp(event, "start-file") == 0) {
+        if (player->pending_load_starts > 0u)
+            --player->pending_load_starts;
         player->media_running = true;
         touch_state_locked(player, VIP_PLAYER_OPENING);
     } else if (event && strcmp(event, "file-loaded") == 0) {
@@ -655,24 +664,36 @@ static void handle_ipc_line(vip_mpv_player_t *player, const char *line) {
         const char *reason = json_object_object_get_ex(root, "reason", &reason_obj) && reason_obj
                                  ? json_object_get_string(reason_obj)
                                  : NULL;
-        player->media_running = false;
-        player->buffering = false;
-        player->paused = false;
-        if (reason && strcmp(reason, "eof") == 0) {
-            player->natural_end = true;
-            touch_state_locked(player, VIP_PLAYER_STOPPED);
-        } else if (reason && (strcmp(reason, "stop") == 0 || strcmp(reason, "quit") == 0)) {
-            touch_state_locked(player, VIP_PLAYER_STOPPED);
-        } else {
-            trim_text(player->recent_log);
-            if (player->recent_log[0])
-                snprintf(player->last_error, sizeof(player->last_error), "%.511s", player->recent_log);
-            else if (reason)
-                snprintf(player->last_error, sizeof(player->last_error), "mpv encerrou o arquivo: %s",
-                         reason);
-            else
-                snprintf(player->last_error, sizeof(player->last_error), "mpv não conseguiu abrir a mídia");
-            touch_state_locked(player, VIP_PLAYER_ERROR);
+
+        /*
+         * loadfile replace emits end-file for the item being replaced before
+         * start-file for the queued item. The public load call already moved
+         * the snapshot to the newly requested item, so applying that stale
+         * end-file here would incorrectly clear pause/running state.
+         *
+         * A real failure for the new item is still handled normally because
+         * mpv emits start-file first, which consumes pending_load_starts.
+         */
+        if (player->pending_load_starts == 0u) {
+            player->media_running = false;
+            player->buffering = false;
+            player->paused = false;
+            if (reason && strcmp(reason, "eof") == 0) {
+                player->natural_end = true;
+                touch_state_locked(player, VIP_PLAYER_STOPPED);
+            } else if (reason && (strcmp(reason, "stop") == 0 || strcmp(reason, "quit") == 0)) {
+                touch_state_locked(player, VIP_PLAYER_STOPPED);
+            } else {
+                trim_text(player->recent_log);
+                if (player->recent_log[0])
+                    snprintf(player->last_error, sizeof(player->last_error), "%.511s", player->recent_log);
+                else if (reason)
+                    snprintf(player->last_error, sizeof(player->last_error), "mpv encerrou o arquivo: %s",
+                             reason);
+                else
+                    snprintf(player->last_error, sizeof(player->last_error), "mpv não conseguiu abrir a mídia");
+                touch_state_locked(player, VIP_PLAYER_ERROR);
+            }
         }
     } else if (event && strcmp(event, "property-change") == 0) {
         json_object *name_obj = NULL, *data = NULL;
@@ -1081,6 +1102,7 @@ void vip_mpv_player_stop(vip_mpv_player_t *player) {
     bool media_running = player->media_running;
     bool runtime_running = player->runtime_running;
     player->media_running = false;
+    player->pending_load_starts = 0u;
     player->pending_start_seconds = 0.0;
     player->paused = false;
     player->buffering = false;
@@ -1122,20 +1144,23 @@ static vip_status_t player_load_at_internal(vip_mpv_player_t *player, const char
     if (ready != VIP_OK)
         return ready;
 
-    pthread_mutex_lock(&player->mutex);
-    bool had_media = player->media_running;
-    pthread_mutex_unlock(&player->mutex);
-    if (had_media)
-        (void)send_stop(player);
-
+    /*
+     * loadfile "replace" already replaces the active media. Sending a separate
+     * stop first creates a race where the old end-file event can arrive after
+     * state has been initialized for the new item. Track queued starts instead
+     * and let mpv perform the replacement atomically in its command stream.
+     */
     pthread_mutex_lock(&player->mutex);
     reset_media_snapshot_locked(player, start_seconds);
     player->media_running = true;
+    ++player->pending_load_starts;
     touch_state_locked(player, VIP_PLAYER_OPENING);
     pthread_mutex_unlock(&player->mutex);
 
     if (send_loadfile(player, url, force_hls) != 0) {
         pthread_mutex_lock(&player->mutex);
+        if (player->pending_load_starts > 0u)
+            --player->pending_load_starts;
         player->media_running = false;
         snprintf(player->last_error, sizeof(player->last_error), "falha ao enviar loadfile ao mpv via IPC");
         touch_state_locked(player, VIP_PLAYER_ERROR);
