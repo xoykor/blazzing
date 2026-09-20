@@ -230,6 +230,10 @@
             cardIndexBase: pending.cardIndexBase || "",
             cardIndexVersion: pending.cardIndexVersion || "",
             cardIndexShardLength: pending.cardIndexShardLength || 1,
+            fallbackId: pending.fallbackId || "",
+            fallbackIndexBase: pending.fallbackIndexBase || "",
+            fallbackIndexVersion: pending.fallbackIndexVersion || "",
+            fallbackIndexShardLength: pending.fallbackIndexShardLength || 2,
             url: resolved,
             episodeInfo: episode
         };
@@ -247,6 +251,9 @@
         var cardIndexBase = "";
         var cardIndexVersion = "";
         var cardIndexShardLength = 1;
+        var fallbackIndexBase = "";
+        var fallbackIndexVersion = "";
+        var fallbackIndexShardLength = 2;
         var cursor = 0;
         var next;
 
@@ -267,6 +274,29 @@
             var series;
 
             if (!line) {
+                return;
+            }
+
+            if (line.indexOf("#EXT-X-LISTA-FALLBACK:") === 0) {
+                fallbackIndexBase = line.slice("#EXT-X-LISTA-FALLBACK:".length)
+                    .replace(/^\s+|\s+$/g, "");
+                return;
+            }
+
+            if (line.indexOf("#EXT-X-LISTA-FALLBACK-VERSION:") === 0) {
+                fallbackIndexVersion = line.slice("#EXT-X-LISTA-FALLBACK-VERSION:".length)
+                    .replace(/^\s+|\s+$/g, "");
+                return;
+            }
+
+            if (line.indexOf("#EXT-X-LISTA-FALLBACK-SHARD-LEN:") === 0) {
+                var parsedFallbackShardLength = parseInt(
+                    line.slice("#EXT-X-LISTA-FALLBACK-SHARD-LEN:".length),
+                    10
+                );
+                if (parsedFallbackShardLength >= 1 && parsedFallbackShardLength <= 4) {
+                    fallbackIndexShardLength = parsedFallbackShardLength;
+                }
                 return;
             }
 
@@ -298,6 +328,10 @@
                     name: extinfName(line),
                     group: parseAttribute(line, "group-title") || "Sem grupo",
                     logo: parseAttribute(line, "tvg-logo"),
+                    fallbackId: parseAttribute(line, "x-lista-fallback"),
+                    fallbackIndexBase: fallbackIndexBase,
+                    fallbackIndexVersion: fallbackIndexVersion,
+                    fallbackIndexShardLength: fallbackIndexShardLength,
                     cardIndexBase: cardIndexBase,
                     cardIndexVersion: cardIndexVersion,
                     cardIndexShardLength: cardIndexShardLength
@@ -314,6 +348,10 @@
                     name: "Canal",
                     group: "Sem grupo",
                     logo: "",
+                    fallbackId: "",
+                    fallbackIndexBase: fallbackIndexBase,
+                    fallbackIndexVersion: fallbackIndexVersion,
+                    fallbackIndexShardLength: fallbackIndexShardLength,
                     cardIndexBase: cardIndexBase,
                     cardIndexVersion: cardIndexVersion,
                     cardIndexShardLength: cardIndexShardLength
@@ -389,6 +427,10 @@
                 cardIndexBase: item.cardIndexBase || "",
                 cardIndexVersion: item.cardIndexVersion || "",
                 cardIndexShardLength: item.cardIndexShardLength || 1,
+                fallbackId: item.fallbackId || "",
+                fallbackIndexBase: item.fallbackIndexBase || "",
+                fallbackIndexVersion: item.fallbackIndexVersion || "",
+                fallbackIndexShardLength: item.fallbackIndexShardLength || 2,
                 url: item.url
             });
         }
