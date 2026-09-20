@@ -230,8 +230,12 @@
         } else if (state.view === "series") {
             setView("catalog");
         } else if (state.view === "catalog") {
-            setView("home");
-            renderSavedProfiles();
+            /*
+             * O botão Back do controle não abandona a playlist ativa.
+             * A troca/saída para a tela de perfis é uma ação explícita pelo
+             * botão "Listas" no topo do catálogo.
+             */
+            showToast("Use “Listas” para trocar de playlist.");
         } else {
             exitApplication();
         }
