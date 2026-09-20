@@ -41,6 +41,9 @@
     var cardShardCache = {};
     var cardShardPromises = {};
     var cardShardFailureAt = {};
+    var cardShardQueue = [];
+    var activeCardShardLoads = 0;
+    var MAX_CARD_SHARD_LOADS = 4;
 
 
     function showToast(message) {
@@ -305,8 +308,41 @@
         }
     }
 
+    function focusCatalogIndex(index) {
+        var grid = byId("catalog-grid");
+        var target;
+        var safeIndex;
+
+        if (!grid || !state.filtered.length) {
+            return;
+        }
+
+        safeIndex = Math.max(
+            0,
+            Math.min(Number(index) || 0, state.filtered.length - 1)
+        );
+
+        while (state.visibleCount <= safeIndex &&
+                state.visibleCount < state.filtered.length) {
+            appendGridBatch();
+        }
+
+        target = grid.querySelector(
+            '.card-main[data-card-index="' + safeIndex + '"]'
+        );
+
+        if (target) {
+            target.focus();
+            try { target.scrollIntoView(false); } catch (ignoreScroll) {}
+            maybeAppendCards(target);
+        }
+    }
+
     function toggleFocusedFavorite() {
+        var active = document.activeElement;
         var item = focusedCatalogItem();
+        var index = active ?
+            parseInt(active.getAttribute("data-card-index"), 10) : 0;
         var on;
         if (!item) {
             showToast("Selecione um card para favoritar.");
@@ -319,6 +355,9 @@
 
         if (state.favoritesOnly && !on) {
             applyFilters();
+            setTimeout(function () {
+                focusCatalogIndex(isNaN(index) ? 0 : index);
+            }, 0);
         }
     }
 
@@ -928,8 +967,12 @@
     }
 
     function resetImagePipeline() {
+        /*
+         * Do not zero activeImageLoads here. Requests from the previous render
+         * can still be in flight; resetting the counter would let a second
+         * batch start on top of them and overload older Tizen networking.
+         */
         imageQueue = [];
-        activeImageLoads = 0;
 
         if (imageObserver) {
             try { imageObserver.disconnect(); } catch (ignoreDisconnect) {}
@@ -954,6 +997,47 @@
         } else {
             imageObserver = null;
         }
+    }
+
+    function pumpCardShardQueue() {
+        while (activeCardShardLoads < MAX_CARD_SHARD_LOADS &&
+                cardShardQueue.length) {
+            (function (task) {
+                activeCardShardLoads += 1;
+
+                window.BlazzingNet.json(task.url, {
+                    timeout: 20000,
+                    maxBytes: 4 * 1024 * 1024
+                }).then(function (rows) {
+                    task.resolve(rows);
+                }).catch(function (error) {
+                    task.reject(error);
+                }).then(function () {
+                    activeCardShardLoads = Math.max(
+                        0,
+                        activeCardShardLoads - 1
+                    );
+                    setTimeout(pumpCardShardQueue, 0);
+                }, function () {
+                    activeCardShardLoads = Math.max(
+                        0,
+                        activeCardShardLoads - 1
+                    );
+                    setTimeout(pumpCardShardQueue, 0);
+                });
+            }(cardShardQueue.shift()));
+        }
+    }
+
+    function queueCardShard(url) {
+        return new Promise(function (resolve, reject) {
+            cardShardQueue.push({
+                url: url,
+                resolve: resolve,
+                reject: reject
+            });
+            pumpCardShardQueue();
+        });
     }
 
     function resolveCardLogo(item) {
@@ -996,10 +1080,8 @@
                 url += "?v=" + encodeURIComponent(version);
             }
 
-            cardShardPromises[cacheKey] = window.BlazzingNet.json(url, {
-                timeout: 20000,
-                maxBytes: 16 * 1024 * 1024
-            }).then(function (rows) {
+            cardShardPromises[cacheKey] = queueCardShard(url)
+            .then(function (rows) {
                 cardShardCache[cacheKey] =
                     rows && typeof rows === "object" ? rows : {};
                 delete cardShardFailureAt[cacheKey];
@@ -1024,7 +1106,7 @@
         var copy = document.createElement("div");
         var title = document.createElement("strong");
         var meta = document.createElement("small");
-        var favorite = document.createElement("button");
+        var favorite = document.createElement("span");
         var imageUrl = safeImageUrl(item.logo);
         var fallback = posterFallback(item.name);
 
@@ -1078,24 +1160,26 @@
             }
         });
 
+        main.addEventListener("focus", function () {
+            card.classList.add("focused");
+            state.returnFocusUid = item.uid || "";
+            maybeAppendCards(main);
+        });
+        main.addEventListener("blur", function () {
+            card.classList.remove("focused");
+        });
+
         favorite.className = "favorite" +
             (window.BlazzingStorage.isFavorite(item.uid) ? " on" : "");
         favorite.textContent = "★";
-        favorite.setAttribute("aria-label", "Favorito");
-        favorite.setAttribute("tabindex", "-1");
+        favorite.setAttribute("aria-hidden", "true");
         favorite.setAttribute("data-item-uid", item.uid);
-        favorite.setAttribute("data-card-index", String(index));
-
-        favorite.addEventListener("click", function (event) {
-            var on;
-            event.stopPropagation();
-            on = window.BlazzingStorage.toggleFavorite(item.uid);
-            favorite.classList.toggle("on", on);
-
-            if (state.favoritesOnly && !on) {
-                applyFilters();
-            }
-        });
+        /*
+         * The star is display-only on TV. Making it a real button introduced
+         * a second focus stop inside every card and caused Samsung remotes to
+         * get trapped between the card and its favorite control. Favorites
+         * are toggled with the yellow remote key instead.
+         */
 
         card.appendChild(main);
         card.appendChild(favorite);
