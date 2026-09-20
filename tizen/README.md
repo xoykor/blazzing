@@ -92,6 +92,7 @@ A instalação em TV exige Developer Mode habilitado na televisão, PC autorizad
 - Favoritos: filtrar favoritos.
 - Atualizar playlist: baixa novamente a M3U aberta e substitui a cópia local.
 - Listas: voltar aos perfis.
+- Back no catálogo: permanece na playlist aberta; para trocar de lista use **Listas**.
 
 ### Player
 
