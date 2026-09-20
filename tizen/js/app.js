@@ -602,6 +602,10 @@
         var catalogs;
 
         try {
+            if (row.text.indexOf("#EXTM3U") === -1 &&
+                    row.text.indexOf("#EXTINF:") === -1) {
+                throw new Error("cache M3U inválido");
+            }
             catalogs = window.BlazzingProviders.parseM3u(row.text, profile.url);
         } catch (error) {
             setBusy(false);
