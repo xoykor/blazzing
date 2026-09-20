@@ -533,15 +533,10 @@
 
     function saveProfileIfRequested(profile) {
         var copy;
+        var saved;
 
-        /*
-         * M3U profiles are intentionally lightweight: persist only the profile
-         * metadata (name + URL), never the downloaded playlist contents.
-         * This lets the link survive a full TV restart while the catalog is
-         * fetched fresh on the next app launch.
-         */
         if (profile.type !== "m3u" && !byId("save-profile").checked) {
-            return;
+            return profile;
         }
 
         copy = JSON.parse(JSON.stringify(profile));
@@ -549,12 +544,26 @@
             copy.password = "";
         }
 
-        window.BlazzingStorage.saveProfile(copy);
+        saved = window.BlazzingStorage.saveProfile(copy);
         renderSavedProfiles();
+        return saved || profile;
     }
 
     function normalizedM3uUrl(value) {
         return String(value || "").replace(/^\s+|\s+$/g, "");
+    }
+
+    function setPlaylistRefreshVisible(visible) {
+        var button = byId("refresh-playlist-button");
+        if (button) {
+            button.classList.toggle("hidden", !visible);
+        }
+    }
+
+    function rememberOpenedM3u(profile) {
+        if (profile && profile.id) {
+            window.BlazzingStorage.setLastOpenedProfileId(profile.id);
+        }
     }
 
     function sameM3uSession(profile) {
@@ -568,20 +577,58 @@
         );
     }
 
-    function resumeM3uSession(profile) {
-        /*
-         * Returning to the home/profile screen must not download and parse a
-         * huge playlist again. Keep the already parsed catalogs in RAM for the
-         * lifetime of the app and simply reopen them when the same profile is
-         * selected again.
-         */
-        state.profile = profile;
+    function activateM3u(profile, catalogs, kind) {
+        var saved = saveProfileIfRequested(profile) || profile;
+
+        state.profile = saved;
+        state.m3uCatalogs = catalogs;
         state.xtream = null;
-        saveProfileIfRequested(profile);
+        rememberOpenedM3u(saved);
+        setPlaylistRefreshVisible(true);
+        setBusy(false);
+        openCatalog(kind || "live");
+    }
+
+    function resumeM3uSession(profile) {
+        var saved = saveProfileIfRequested(profile) || profile;
+        state.profile = saved;
+        state.xtream = null;
+        rememberOpenedM3u(saved);
+        setPlaylistRefreshVisible(true);
         openCatalog(state.kind || "live");
     }
 
-    function connectM3u(profile, forceReload) {
+    function parseStoredM3u(profile, row, kind) {
+        var catalogs;
+
+        try {
+            catalogs = window.BlazzingProviders.parseM3u(row.text, profile.url);
+        } catch (error) {
+            setBusy(false);
+            showToast("Playlist salva inválida. Use Atualizar playlist.");
+            return;
+        }
+
+        activateM3u(profile, catalogs, kind);
+    }
+
+    function downloadAndStoreM3u(profile, kind, refreshing) {
+        setBusy(true, refreshing ? "Atualizando playlist…" : "Baixando playlist pela primeira vez…");
+
+        window.BlazzingProviders.downloadM3u(profile.url).then(function (result) {
+            return window.BlazzingStorage.saveCachedPlaylist(profile.url, result.text)
+                .then(function () {
+                    activateM3u(profile, result.catalogs, kind);
+                });
+        }).catch(function (error) {
+            setBusy(false);
+            showToast(error.message || "Falha ao baixar ou armazenar a playlist.");
+        });
+    }
+
+    function connectM3u(profile, forceReload, kind) {
+        profile.url = normalizedM3uUrl(profile.url);
+
         if (!/^https?:\/\//i.test(profile.url)) {
             showToast("Informe uma URL M3U/M3U8 HTTP ou HTTPS.");
             return;
@@ -592,18 +639,27 @@
             return;
         }
 
-        setBusy(true, "Baixando playlist…");
+        if (forceReload) {
+            downloadAndStoreM3u(profile, kind || state.kind || "live", true);
+            return;
+        }
 
-        window.BlazzingProviders.loadM3u(profile.url).then(function (catalogs) {
-            state.profile = profile;
-            state.m3uCatalogs = catalogs;
-            state.xtream = null;
-            saveProfileIfRequested(profile);
-            setBusy(false);
-            openCatalog("live");
+        setBusy(true, "Abrindo playlist salva…");
+        window.BlazzingStorage.cachedPlaylist(profile.url).then(function (row) {
+            if (row && typeof row.text === "string" && row.text.length) {
+                parseStoredM3u(profile, row, kind || "live");
+                return;
+            }
+
+            /*
+             * Sem cópia persistida ainda: esta é a aquisição inicial.
+             * Depois disso, abrir/conectar usa somente o armazenamento local;
+             * uma nova requisição só acontece pelo botão Atualizar playlist.
+             */
+            downloadAndStoreM3u(profile, kind || "live", false);
         }).catch(function (error) {
             setBusy(false);
-            showToast(error.message || "Falha ao carregar a playlist.");
+            showToast(error.message || "Não foi possível ler a playlist salva.");
         });
     }
 
@@ -619,10 +675,10 @@
         setBusy(true, "Autenticando no Xtream…");
 
         client.authenticate().then(function () {
-            state.profile = profile;
+            state.profile = saveProfileIfRequested(profile) || profile;
             state.xtream = client;
             state.m3uCatalogs = null;
-            saveProfileIfRequested(profile);
+            setPlaylistRefreshVisible(false);
             return loadCatalog("live");
         }).then(function () {
             setBusy(false);
@@ -641,11 +697,7 @@
         profile = profileFromForm();
 
         if (profile.type === "m3u") {
-            /*
-             * The explicit Connect action is also the user's way to refresh a
-             * playlist whose server contents may have changed.
-             */
-            connectM3u(profile, true);
+            connectM3u(profile, false, "live");
         } else {
             connectXtream(profile);
         }
@@ -657,7 +709,7 @@
 
         if (profile.type === "m3u") {
             byId("m3u-url").value = profile.url || "";
-            connectM3u(profile, false);
+            connectM3u(profile, false, "live");
             return;
         }
 
@@ -702,7 +754,7 @@
             card.className = "saved-card";
             name.textContent = profile.name || "Perfil";
             meta.textContent = profile.type === "m3u" ?
-                "M3U / M3U8" : "Xtream Codes";
+                "M3U / M3U8 · armazenada na TV" : "Xtream Codes";
 
             info.appendChild(name);
             info.appendChild(meta);
@@ -790,6 +842,14 @@
             state.favoritesOnly
         );
         applyFilters();
+    });
+
+    byId("refresh-playlist-button").addEventListener("click", function () {
+        if (!state.profile || state.profile.type !== "m3u") {
+            showToast("Nenhuma playlist M3U aberta.");
+            return;
+        }
+        connectM3u(state.profile, true, state.kind || "live");
     });
 
     byId("lists-button").addEventListener("click", function () {
@@ -1566,10 +1626,36 @@
         if (window.BlazzingPlayer) { window.BlazzingPlayer.stop(); }
     });
 
+    function restoreLastOpenedPlaylist() {
+        var lastId = window.BlazzingStorage.lastOpenedProfileId();
+        var profiles;
+        var i;
+
+        if (!lastId) {
+            return false;
+        }
+
+        profiles = window.BlazzingStorage.profiles();
+        for (i = 0; i < profiles.length; i += 1) {
+            if (profiles[i].id === lastId && profiles[i].type === "m3u") {
+                setMode("m3u");
+                byId("profile-name").value = profiles[i].name || "";
+                byId("m3u-url").value = profiles[i].url || "";
+                connectM3u(profiles[i], false, "live");
+                return true;
+            }
+        }
+
+        window.BlazzingStorage.setLastOpenedProfileId("");
+        return false;
+    }
+
     registerRemoteKeys();
     renderSavedProfiles();
     setMode("m3u");
-    focusFirst();
+    if (!restoreLastOpenedPlaylist()) {
+        focusFirst();
+    }
 
     if (window.BlazzingBoot) { window.BlazzingBoot.markReady(); }
 
