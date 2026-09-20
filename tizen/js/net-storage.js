@@ -197,7 +197,7 @@
                     try {
                         dir.moveTo(
                             tmp.fullPath,
-                            PLAYLIST_DIR + "/" + name,
+                            name,
                             true,
                             function () { resolve(true); },
                             function (error) {
