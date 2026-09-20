@@ -14,6 +14,22 @@
         return ("00000000" + hash.toString(16)).slice(-8);
     }
 
+    function stableHash32(text, seed) {
+        var hash = seed | 0;
+        var i;
+        text = String(text || "");
+        for (i = 0; i < text.length; i += 1) {
+            hash = (((hash << 5) - hash) + text.charCodeAt(i)) | 0;
+        }
+        return ("00000000" + (hash >>> 0).toString(16)).slice(-8);
+    }
+
+    function cardLookupKey(name, group) {
+        var value = String(group || "") + "\u0000" + String(name || "");
+        return stableHash32(value, 0x13579bdf) +
+            stableHash32(value, 0x2468ace1);
+    }
+
     function normalizeWords(text) {
         return String(text || "")
             .toLowerCase()
@@ -209,6 +225,10 @@
             categoryId: categoryId(group, kind),
             categoryName: group,
             logo: pending.logo ? resolveUrl(source, pending.logo) : "",
+            cardKey: pending.cardIndexBase && !pending.logo ?
+                cardLookupKey(name, rawGroup) : "",
+            cardIndexBase: pending.cardIndexBase || "",
+            cardIndexVersion: pending.cardIndexVersion || "",
             url: resolved,
             episodeInfo: episode
         };
@@ -223,6 +243,8 @@
         var categoryMaps = { live: {}, vod: {}, series: {} };
         var seriesMap = {};
         var pending = null;
+        var cardIndexBase = "";
+        var cardIndexVersion = "";
         var cursor = 0;
         var next;
 
@@ -246,11 +268,25 @@
                 return;
             }
 
+            if (line.indexOf("#EXT-X-LISTA-CARDS:") === 0) {
+                cardIndexBase = line.slice("#EXT-X-LISTA-CARDS:".length)
+                    .replace(/^\s+|\s+$/g, "");
+                return;
+            }
+
+            if (line.indexOf("#EXT-X-LISTA-CARDS-VERSION:") === 0) {
+                cardIndexVersion = line.slice("#EXT-X-LISTA-CARDS-VERSION:".length)
+                    .replace(/^\s+|\s+$/g, "");
+                return;
+            }
+
             if (line.indexOf("#EXTINF:") === 0) {
                 pending = {
                     name: extinfName(line),
                     group: parseAttribute(line, "group-title") || "Sem grupo",
-                    logo: parseAttribute(line, "tvg-logo")
+                    logo: parseAttribute(line, "tvg-logo"),
+                    cardIndexBase: cardIndexBase,
+                    cardIndexVersion: cardIndexVersion
                 };
                 return;
             }
@@ -260,7 +296,13 @@
             }
 
             if (!pending) {
-                pending = { name: "Canal", group: "Sem grupo", logo: "" };
+                pending = {
+                    name: "Canal",
+                    group: "Sem grupo",
+                    logo: "",
+                    cardIndexBase: cardIndexBase,
+                    cardIndexVersion: cardIndexVersion
+                };
             }
 
             item = makeM3uItem(source, pending, line);
@@ -296,6 +338,9 @@
                     categoryId: categoryId(item.group, "series"),
                     categoryName: item.group,
                     logo: item.logo,
+                    cardKey: item.cardKey || "",
+                    cardIndexBase: item.cardIndexBase || "",
+                    cardIndexVersion: item.cardIndexVersion || "",
                     episodes: []
                 };
                 seriesMap[key] = series;
@@ -306,6 +351,11 @@
             series = seriesMap[key];
             if (!series.logo && item.logo) {
                 series.logo = item.logo;
+            }
+            if (!series.cardKey && item.cardKey) {
+                series.cardKey = item.cardKey;
+                series.cardIndexBase = item.cardIndexBase || "";
+                series.cardIndexVersion = item.cardIndexVersion || "";
             }
 
             series.episodes.push({
@@ -318,6 +368,9 @@
                 episode: info.episode,
                 group: item.group,
                 logo: item.logo,
+                cardKey: item.cardKey || "",
+                cardIndexBase: item.cardIndexBase || "",
+                cardIndexVersion: item.cardIndexVersion || "",
                 url: item.url
             });
         }
@@ -641,6 +694,7 @@
 
     window.BlazzingProviders = {
         hashText: hashText,
+        cardLookupKey: cardLookupKey,
         normalizeWords: normalizeWords,
         classifyGroup: classifyGroup,
         cleanCategoryName: cleanCategoryName,
