@@ -84,7 +84,25 @@
         saveProfile: function (profile) {
             var profiles = storage.profiles();
             var copy = JSON.parse(JSON.stringify(profile));
+            var normalizedUrl = String(copy.url || "").replace(/^\s+|\s+$/g, "");
             var i;
+
+            /*
+             * A manually entered/QR M3U profile has no id yet. Reuse an
+             * existing profile with the same URL instead of creating another
+             * card every time the playlist is opened.
+             */
+            if (!copy.id && copy.type === "m3u" && normalizedUrl) {
+                for (i = 0; i < profiles.length; i += 1) {
+                    if (profiles[i].type === "m3u" &&
+                            String(profiles[i].url || "").replace(/^\s+|\s+$/g, "") ===
+                                normalizedUrl) {
+                        copy.id = profiles[i].id;
+                        break;
+                    }
+                }
+            }
+
             copy.id = copy.id || ("profile-" + Date.now());
 
             for (i = 0; i < profiles.length; i += 1) {
