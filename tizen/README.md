@@ -19,7 +19,7 @@ Este diretório contém o porte do Blazzing para Samsung Smart TV como **Tizen W
 - AVPlay como backend principal;
 - HTML5 video como fallback de desenvolvimento;
 - grid carregado em lotes para não inflar o DOM em catálogos muito grandes;
-- playlist M3U persistida localmente em IndexedDB;
+- playlist M3U persistida como arquivo no diretório privado `wgt-private` da aplicação;
 - reabertura automática da última playlist M3U usada;
 - nova transferência da M3U somente pela aquisição inicial ou pelo botão **Atualizar playlist**.
 
@@ -105,9 +105,9 @@ A instalação em TV exige Developer Mode habilitado na televisão, PC autorizad
 ## Armazenamento
 
 Perfis, favoritos, retomada e o identificador da última playlist aberta usam
-localStorage da aplicação Tizen. O conteúdo bruto das playlists M3U usa
-IndexedDB, para comportar listas grandes sem depender do limite pequeno do
-localStorage.
+localStorage da aplicação Tizen. O conteúdo bruto das playlists M3U usa o
+Filesystem API do Tizen e é gravado em `wgt-private/playlists`, evitando a
+quota pequena do IndexedDB/Web Storage para listas grandes.
 
 Depois da primeira aquisição, abrir um perfil M3U ou reiniciar a TV usa a
 cópia persistida e **não faz download da playlist**. A M3U só é transferida
