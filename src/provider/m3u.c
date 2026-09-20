@@ -443,6 +443,141 @@ static char *resolve_url(const char *source, const char *stream) {
     return out;
 }
 
+
+/* Resolve one alternative URL from a static fallback shard. */
+vip_status_t vip_m3u_fallback_variant(const vip_channel_t *channel, size_t alternative_index,
+                                      char **url_out, char **referer_out, char **user_agent_out,
+                                      vip_error_t *error) {
+    if (url_out)
+        *url_out = NULL;
+    if (referer_out)
+        *referer_out = NULL;
+    if (user_agent_out)
+        *user_agent_out = NULL;
+
+    if (!channel || !url_out || !channel->fallback_id || !channel->fallback_id[0] ||
+        !channel->fallback_base || !channel->fallback_base[0]) {
+        vip_error_set(error, VIP_ERR_INVALID_ARGUMENT, "item sem fallback estático");
+        return VIP_ERR_INVALID_ARGUMENT;
+    }
+
+    size_t id_len = strlen(channel->fallback_id);
+    int shard_len = channel->fallback_shard_length;
+    if (shard_len < 1 || shard_len > 4)
+        shard_len = 2;
+    if ((size_t)shard_len > id_len)
+        shard_len = (int)id_len;
+
+    size_t base_len = strlen(channel->fallback_base);
+    bool slash = base_len > 0u && channel->fallback_base[base_len - 1u] == '/';
+    size_t version_len = channel->fallback_version ? strlen(channel->fallback_version) : 0u;
+    size_t need = base_len + (slash ? 0u : 1u) + (size_t)shard_len + 5u +
+                  (version_len ? 3u + version_len : 0u) + 1u;
+    char *shard_url = malloc(need);
+    if (!shard_url) {
+        vip_error_set(error, VIP_ERR_NOMEM, "sem memória para URL de fallback");
+        return VIP_ERR_NOMEM;
+    }
+
+    if (version_len) {
+        snprintf(shard_url, need, "%s%s%.*s.json?v=%s", channel->fallback_base,
+                 slash ? "" : "/", shard_len, channel->fallback_id, channel->fallback_version);
+    } else {
+        snprintf(shard_url, need, "%s%s%.*s.json", channel->fallback_base,
+                 slash ? "" : "/", shard_len, channel->fallback_id);
+    }
+
+    char *body = NULL;
+    vip_status_t st = load_optional_text(shard_url, &body);
+    free(shard_url);
+    if (st != VIP_OK || !body) {
+        free(body);
+        vip_error_set(error, VIP_ERR_NETWORK, "não foi possível carregar shard de fallback");
+        return VIP_ERR_NETWORK;
+    }
+
+    struct json_object *root = json_tokener_parse(body);
+    free(body);
+    if (!root || !json_object_is_type(root, json_type_object)) {
+        if (root)
+            json_object_put(root);
+        vip_error_set(error, VIP_ERR_MALFORMED, "shard de fallback inválido");
+        return VIP_ERR_MALFORMED;
+    }
+
+    struct json_object *rows = NULL;
+    if (!json_object_object_get_ex(root, channel->fallback_id, &rows) ||
+        !rows || !json_object_is_type(rows, json_type_array)) {
+        json_object_put(root);
+        vip_error_set(error, VIP_ERR_MALFORMED, "fallback não encontrado no shard");
+        return VIP_ERR_MALFORMED;
+    }
+
+    size_t seen = 0u;
+    size_t count = json_object_array_length(rows);
+    for (size_t i = 0u; i < count; ++i) {
+        struct json_object *row = json_object_array_get_idx(rows, i);
+        if (!row || !json_object_is_type(row, json_type_array) ||
+            json_object_array_length(row) < 1u)
+            continue;
+
+        struct json_object *url_obj = json_object_array_get_idx(row, 0u);
+        if (!url_obj || !json_object_is_type(url_obj, json_type_string))
+            continue;
+        const char *url = json_object_get_string(url_obj);
+        if (!url || (strncmp(url, "http://", 7u) != 0 &&
+                     strncmp(url, "https://", 8u) != 0))
+            continue;
+        if (channel->stream_url && strcmp(url, channel->stream_url) == 0)
+            continue;
+
+        if (seen++ != alternative_index)
+            continue;
+
+        char *url_copy = vip_strdup(url);
+        char *referer_copy = NULL;
+        char *ua_copy = NULL;
+        if (!url_copy) {
+            json_object_put(root);
+            vip_error_set(error, VIP_ERR_NOMEM, "sem memória para fallback");
+            return VIP_ERR_NOMEM;
+        }
+
+        if (json_object_array_length(row) > 2u) {
+            struct json_object *ref_obj = json_object_array_get_idx(row, 2u);
+            if (ref_obj && json_object_is_type(ref_obj, json_type_string)) {
+                const char *ref = json_object_get_string(ref_obj);
+                referer_copy = vip_strdup_nullable(ref);
+            }
+        }
+        if (json_object_array_length(row) > 3u) {
+            struct json_object *ua_obj = json_object_array_get_idx(row, 3u);
+            if (ua_obj && json_object_is_type(ua_obj, json_type_string)) {
+                const char *ua = json_object_get_string(ua_obj);
+                ua_copy = vip_strdup_nullable(ua);
+            }
+        }
+
+        *url_out = url_copy;
+        if (referer_out)
+            *referer_out = referer_copy;
+        else
+            free(referer_copy);
+        if (user_agent_out)
+            *user_agent_out = ua_copy;
+        else
+            free(ua_copy);
+
+        json_object_put(root);
+        vip_error_clear(error);
+        return VIP_OK;
+    }
+
+    json_object_put(root);
+    vip_error_set(error, VIP_ERR_MALFORMED, "nenhuma alternativa de fallback restante");
+    return VIP_ERR_MALFORMED;
+}
+
 /* Load the requested state using the M3U provider. */
 vip_status_t vip_m3u_load(const char *source, vip_category_list_t *categories_out,
                           vip_channel_list_t *channels_out, char provider_id_out[17], vip_error_t *error) {
@@ -465,6 +600,10 @@ vip_status_t vip_m3u_load(const char *source, vip_category_list_t *categories_ou
     char *pending_logo = NULL;
     char *pending_group = NULL;
     char *pending_tvg_id = NULL;
+    char *pending_fallback_id = NULL;
+    char *fallback_index_base = NULL;
+    char *fallback_index_version = NULL;
+    int fallback_index_shard_length = 2;
     char *card_index_base = NULL;
     char *card_index_version = NULL;
     int position = 0;
@@ -473,6 +612,26 @@ vip_status_t vip_m3u_load(const char *source, vip_category_list_t *categories_ou
         line = trim(line);
         if (!line[0] || strcmp(line, "#EXTM3U") == 0)
             continue;
+        if (strncmp(line, "#EXT-X-LISTA-FALLBACK:", sizeof("#EXT-X-LISTA-FALLBACK:") - 1u) == 0) {
+            free(fallback_index_base);
+            fallback_index_base = vip_strdup(trim(line + sizeof("#EXT-X-LISTA-FALLBACK:") - 1u));
+            continue;
+        }
+        if (strncmp(line, "#EXT-X-LISTA-FALLBACK-VERSION:",
+                    sizeof("#EXT-X-LISTA-FALLBACK-VERSION:") - 1u) == 0) {
+            free(fallback_index_version);
+            fallback_index_version =
+                vip_strdup(trim(line + sizeof("#EXT-X-LISTA-FALLBACK-VERSION:") - 1u));
+            continue;
+        }
+        if (strncmp(line, "#EXT-X-LISTA-FALLBACK-SHARD-LEN:",
+                    sizeof("#EXT-X-LISTA-FALLBACK-SHARD-LEN:") - 1u) == 0) {
+            char *value = trim(line + sizeof("#EXT-X-LISTA-FALLBACK-SHARD-LEN:") - 1u);
+            long parsed = strtol(value, NULL, 10);
+            if (parsed >= 1 && parsed <= 4)
+                fallback_index_shard_length = (int)parsed;
+            continue;
+        }
         if (strncmp(line, "#EXT-X-LISTA-CARDS:", 19u) == 0) {
             free(card_index_base);
             card_index_base = vip_strdup(trim(line + 19u));
@@ -488,10 +647,12 @@ vip_status_t vip_m3u_load(const char *source, vip_category_list_t *categories_ou
             free(pending_logo);
             free(pending_group);
             free(pending_tvg_id);
+            free(pending_fallback_id);
             pending_name = extinf_name(line);
             pending_logo = attr_dup(line, "tvg-logo");
             pending_group = attr_dup(line, "group-title");
             pending_tvg_id = attr_dup(line, "tvg-id");
+            pending_fallback_id = attr_dup(line, "x-lista-fallback");
             continue;
         }
         if (line[0] == '#')
@@ -521,6 +682,10 @@ vip_status_t vip_m3u_load(const char *source, vip_category_list_t *categories_ou
             .logo_url = pending_logo,
             .stream_url = stream_url,
             .epg_channel_id = NULL,
+            .fallback_id = pending_fallback_id,
+            .fallback_base = pending_fallback_id ? fallback_index_base : NULL,
+            .fallback_version = pending_fallback_id ? fallback_index_version : NULL,
+            .fallback_shard_length = pending_fallback_id ? fallback_index_shard_length : 0,
             .position = position,
         };
         st = vip_channel_list_push(channels_out, &item, error);
@@ -535,6 +700,8 @@ vip_status_t vip_m3u_load(const char *source, vip_category_list_t *categories_ou
         pending_group = NULL;
         free(pending_tvg_id);
         pending_tvg_id = NULL;
+        free(pending_fallback_id);
+        pending_fallback_id = NULL;
         if (st != VIP_OK)
             break;
     }
@@ -542,11 +709,14 @@ vip_status_t vip_m3u_load(const char *source, vip_category_list_t *categories_ou
     free(pending_logo);
     free(pending_group);
     free(pending_tvg_id);
+    free(pending_fallback_id);
 
     if (st == VIP_OK && card_index_base && card_index_base[0])
         apply_external_card_artwork(card_index_base, card_index_version,
                                     categories_out, channels_out);
 
+    free(fallback_index_base);
+    free(fallback_index_version);
     free(card_index_base);
     free(card_index_version);
     free(body);
