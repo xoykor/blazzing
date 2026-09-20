@@ -346,12 +346,30 @@ static void send_observers(vip_mpv_player_t *player) {
 }
 
 /* Send loadfile. */
-static int send_loadfile(vip_mpv_player_t *player, const char *url) {
+static int send_loadfile(vip_mpv_player_t *player, const char *url, bool force_hls) {
     json_object *cmd = command_array("loadfile");
     if (!cmd)
         return -1;
     json_object_array_add(cmd, json_object_new_string(url));
     json_object_array_add(cmd, json_object_new_string("replace"));
+
+    /*
+     * Some IPTV providers expose valid HLS manifests through .txt or
+     * extensionless endpoints with text/plain MIME. FFmpeg deliberately
+     * refuses to auto-detect those as HLS. mpv's loadfile options object lets
+     * us force HLS for only the affected item instead of changing detection
+     * globally and breaking ordinary MP4/MPEG-TS media.
+     */
+    if (force_hls) {
+        json_object *options = json_object_new_object();
+        if (!options) {
+            json_object_put(cmd);
+            return -1;
+        }
+        json_object_object_add(options, "demuxer-lavf-format", json_object_new_string("hls"));
+        json_object_array_add(cmd, json_object_new_int(-1));
+        json_object_array_add(cmd, options);
+    }
     return player_send_command(player, cmd);
 }
 
@@ -519,6 +537,12 @@ static int spawn_runtime(vip_mpv_player_t *player, int *log_read_fd) {
         argv[ai++] = "--osd-level=0";
         argv[ai++] = "--input-terminal=no";
         argv[ai++] = "--input-default-bindings=no";
+        /*
+         * Blazzing plays direct provider URLs. If a malformed/non-standard
+         * stream fails, mpv's default ytdl hook only adds a misleading
+         * "yt-dlp/youtube-dl not found" error. Never invoke that hook here.
+         */
+        argv[ai++] = "--ytdl=no";
         argv[ai++] = player->debug ? "--msg-level=all=info" : "--msg-level=all=warn";
         argv[ai++] = (char *)vo_arg;
         if (context_arg)
@@ -1085,8 +1109,9 @@ void vip_mpv_player_destroy(vip_mpv_player_t *player) {
 }
 
 /* Load at using the mpv player. */
-vip_status_t vip_mpv_player_load_at(vip_mpv_player_t *player, const char *url, double start_seconds,
-                                    vip_error_t *error) {
+static vip_status_t player_load_at_internal(vip_mpv_player_t *player, const char *url,
+                                            double start_seconds, bool force_hls,
+                                            vip_error_t *error) {
     if (!player || !url || !url[0]) {
         vip_error_set(error, VIP_ERR_INVALID_ARGUMENT, "URL de reprodução inválida");
         return VIP_ERR_INVALID_ARGUMENT;
@@ -1109,7 +1134,7 @@ vip_status_t vip_mpv_player_load_at(vip_mpv_player_t *player, const char *url, d
     touch_state_locked(player, VIP_PLAYER_OPENING);
     pthread_mutex_unlock(&player->mutex);
 
-    if (send_loadfile(player, url) != 0) {
+    if (send_loadfile(player, url, force_hls) != 0) {
         pthread_mutex_lock(&player->mutex);
         player->media_running = false;
         snprintf(player->last_error, sizeof(player->last_error), "falha ao enviar loadfile ao mpv via IPC");
@@ -1118,15 +1143,26 @@ vip_status_t vip_mpv_player_load_at(vip_mpv_player_t *player, const char *url, d
         vip_error_set(error, VIP_ERR_PLAYER, "falha ao enviar mídia ao mpv via IPC");
         return VIP_ERR_PLAYER;
     }
-    debug_log(player, "loadfile enviado via IPC%s",
+    debug_log(player, "loadfile enviado via IPC%s%s",
+              force_hls ? " com demuxer HLS forçado" : "",
               start_seconds > 0.0 ? "; retomada será aplicada após file-loaded" : "");
     vip_error_clear(error);
     return VIP_OK;
 }
 
+vip_status_t vip_mpv_player_load_at(vip_mpv_player_t *player, const char *url, double start_seconds,
+                                    vip_error_t *error) {
+    return player_load_at_internal(player, url, start_seconds, false, error);
+}
+
+/* Load a known HLS stream while bypassing extension/MIME auto-detection. */
+vip_status_t vip_mpv_player_load_hls(vip_mpv_player_t *player, const char *url, vip_error_t *error) {
+    return player_load_at_internal(player, url, 0.0, true, error);
+}
+
 /* Load the requested state using the mpv player. */
 vip_status_t vip_mpv_player_load(vip_mpv_player_t *player, const char *url, vip_error_t *error) {
-    return vip_mpv_player_load_at(player, url, 0.0, error);
+    return player_load_at_internal(player, url, 0.0, false, error);
 }
 
 /* Set paused in the mpv player. */
