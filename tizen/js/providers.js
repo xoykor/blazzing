@@ -471,15 +471,28 @@
         return catalogs;
     }
 
-    function loadM3u(url) {
+    function parseDownloadedM3u(text, url) {
+        if (text.indexOf("#EXTM3U") === -1 && text.indexOf("#EXTINF:") === -1) {
+            throw new Error("O conteúdo recebido não parece ser uma playlist M3U.");
+        }
+        return parseM3u(text, url);
+    }
+
+    function downloadM3u(url) {
         return window.BlazzingNet.text(url, {
             timeout: 60000,
             maxBytes: window.BlazzingNet.MAX_RESPONSE_BYTES
         }).then(function (text) {
-            if (text.indexOf("#EXTM3U") === -1 && text.indexOf("#EXTINF:") === -1) {
-                throw new Error("O conteúdo recebido não parece ser uma playlist M3U.");
-            }
-            return parseM3u(text, url);
+            return {
+                text: text,
+                catalogs: parseDownloadedM3u(text, url)
+            };
+        });
+    }
+
+    function loadM3u(url) {
+        return downloadM3u(url).then(function (result) {
+            return result.catalogs;
         });
     }
 
@@ -761,6 +774,7 @@
         inferKind: inferKind,
         parseEpisodeLabel: parseEpisodeLabel,
         loadM3u: loadM3u,
+        downloadM3u: downloadM3u,
         parseM3u: parseM3u,
         XtreamClient: XtreamClient
     };
