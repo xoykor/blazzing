@@ -6,6 +6,12 @@
     var avSurface = document.getElementById("av-player-object");
     var currentItem = null;
     var usingAvPlay = false;
+    var activeUrl = "";
+    var fallbackRows = null;
+    var fallbackCursor = 0;
+    var fallbackPromise = null;
+    var failoverBusy = false;
+    var playGeneration = 0;
     var onState = function () {};
     var onTime = function () {};
 
@@ -61,15 +67,132 @@
     }
 
     function stop() {
+        playGeneration += 1;
         closeAvPlay();
         stopHtml5();
         setAvSurfaceActive(false);
         setScreenSaver(true);
         currentItem = null;
         usingAvPlay = false;
+        activeUrl = "";
+        fallbackRows = null;
+        fallbackCursor = 0;
+        fallbackPromise = null;
+        failoverBusy = false;
     }
 
-    function openAvPlay(item, resumeMs) {
+    function fallbackShardUrl(item) {
+        var id = String(item && item.fallbackId || "");
+        var base = String(item && item.fallbackIndexBase || "").replace(/\/+$/, "");
+        var shardLength = parseInt(item && item.fallbackIndexShardLength, 10) || 2;
+        var version = String(item && item.fallbackIndexVersion || "");
+
+        if (!id || !base || !/^https?:\/\//i.test(base)) {
+            return "";
+        }
+
+        shardLength = Math.max(1, Math.min(4, shardLength));
+        return base + "/" + id.slice(0, shardLength) + ".json" +
+            (version ? "?v=" + encodeURIComponent(version) : "");
+    }
+
+    function loadFallbackRows(item) {
+        var shardUrl;
+        var id;
+
+        if (fallbackRows) {
+            return Promise.resolve(fallbackRows);
+        }
+        if (fallbackPromise) {
+            return fallbackPromise;
+        }
+
+        shardUrl = fallbackShardUrl(item);
+        id = String(item && item.fallbackId || "");
+        if (!shardUrl || !id || !window.BlazzingNet || !window.BlazzingNet.json) {
+            return Promise.resolve([]);
+        }
+
+        fallbackPromise = window.BlazzingNet.json(shardUrl, {
+            timeout: 10000,
+            maxBytes: 4 * 1024 * 1024
+        }).then(function (payload) {
+            var rows = payload && Array.isArray(payload[id]) ? payload[id] : [];
+            var seen = {};
+            fallbackRows = [];
+
+            rows.forEach(function (row) {
+                var url;
+                if (!Array.isArray(row) || !row.length) { return; }
+                url = String(row[0] || "");
+                if (!/^https?:\/\//i.test(url)) { return; }
+                if (/workers\.dev/i.test(url)) { return; }
+                if (url === String(item.url || "") || seen[url]) { return; }
+                seen[url] = true;
+                fallbackRows.push({
+                    url: url,
+                    referer: String(row[2] || ""),
+                    userAgent: String(row[3] || "")
+                });
+            });
+
+            return fallbackRows;
+        }).catch(function () {
+            fallbackRows = [];
+            return fallbackRows;
+        });
+
+        return fallbackPromise;
+    }
+
+    function attemptPlayback(item, resumeMs, url) {
+        activeUrl = url;
+        failoverBusy = false;
+
+        if (avPlayAvailable()) {
+            try {
+                openAvPlay(item, resumeMs || 0, url);
+                return;
+            } catch (error) {
+                closeAvPlay();
+                usingAvPlay = false;
+                setAvSurfaceActive(false);
+            }
+        }
+        openHtml5(item, resumeMs || 0, url);
+    }
+
+    function tryNextFallback(item, resumeMs, reason) {
+        var generation = playGeneration;
+
+        if (!item || failoverBusy) { return; }
+        failoverBusy = true;
+
+        loadFallbackRows(item).then(function (rows) {
+            var row;
+
+            if (generation !== playGeneration || currentItem !== item) {
+                return;
+            }
+
+            while (fallbackCursor < rows.length) {
+                row = rows[fallbackCursor++];
+                if (row && row.url && row.url !== activeUrl) {
+                    emitState("Fonte indisponível; tentando alternativa " +
+                        fallbackCursor + "…");
+                    closeAvPlay();
+                    stopHtml5();
+                    attemptPlayback(item, resumeMs || 0, row.url);
+                    return;
+                }
+            }
+
+            failoverBusy = false;
+            emitState(reason || "Não foi possível reproduzir nenhuma fonte disponível.");
+        });
+    }
+
+    function openAvPlay(item, resumeMs, url) {
         var listener = {
             onbufferingstart: function () { emitState("Buffering…"); },
             onbufferingprogress: function (percent) { emitState("Buffering " + percent + "%"); },
@@ -79,7 +202,9 @@
                 setScreenSaver(true);
                 emitState("Concluído");
             },
-            onerror: function (eventType) { emitState("Erro de reprodução: " + eventType); },
+            onerror: function (eventType) {
+                tryNextFallback(item, currentTime(), "Erro de reprodução: " + eventType);
+            },
             onevent: function () {},
             ondrmevent: function () {},
             onsubtitlechange: function () {}
@@ -88,7 +213,7 @@
         usingAvPlay = true;
         video.classList.add("hidden");
         setAvSurfaceActive(true);
-        window.webapis.avplay.open(item.url);
+        window.webapis.avplay.open(url || item.url);
         window.webapis.avplay.setListener(listener);
         window.webapis.avplay.setDisplayRect(0, 0, 1920, 1080);
         try {
@@ -114,16 +239,16 @@
             usingAvPlay = false;
             setAvSurfaceActive(false);
             emitState("AVPlay falhou; tentando player alternativo…");
-            openHtml5(item, resumeMs || 0);
+            openHtml5(item, resumeMs || 0, url || item.url);
         });
     }
 
-    function openHtml5(item, resumeMs) {
+    function openHtml5(item, resumeMs, url) {
         var promise;
         usingAvPlay = false;
         setAvSurfaceActive(false);
         video.classList.remove("hidden");
-        video.src = item.url;
+        video.src = url || item.url;
         emitState("Preparando…");
         video.addEventListener("loadedmetadata", function resumeOnce() {
             video.removeEventListener("loadedmetadata", resumeOnce);
@@ -134,7 +259,7 @@
         promise = video.play();
         if (promise && promise.catch) {
             promise.catch(function () {
-                emitState("Falha no player HTML5.");
+                tryNextFallback(item, resumeMs || 0, "Falha no player HTML5.");
             });
         }
     }
@@ -142,17 +267,11 @@
     function open(item, resumeMs) {
         stop();
         currentItem = item;
-        if (avPlayAvailable()) {
-            try {
-                openAvPlay(item, resumeMs || 0);
-                return;
-            } catch (error) {
-                closeAvPlay();
-                usingAvPlay = false;
-                setAvSurfaceActive(false);
-            }
-        }
-        openHtml5(item, resumeMs || 0);
+        fallbackRows = null;
+        fallbackCursor = 0;
+        fallbackPromise = null;
+        failoverBusy = false;
+        attemptPlayback(item, resumeMs || 0, item.url);
     }
 
     function togglePause() {
@@ -211,6 +330,11 @@
     });
     video.addEventListener("waiting", function () {
         if (!usingAvPlay) { emitState("Buffering…"); }
+    });
+    video.addEventListener("error", function () {
+        if (!usingAvPlay && currentItem) {
+            tryNextFallback(currentItem, currentTime(), "Falha no player HTML5.");
+        }
     });
     video.addEventListener("playing", function () {
         if (!usingAvPlay) {
