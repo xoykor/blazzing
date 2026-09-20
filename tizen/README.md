@@ -53,15 +53,24 @@ Pré-requisitos:
 - Samsung Certificate Extension;
 - um certificate profile configurado.
 
-A partir da raiz do repositório:
+A partir da raiz do repositório, use de preferência o helper que limpa qualquer
+build incremental antiga antes de empacotar:
 
+    ./tizen/build-package.fish NOME_DO_CERTIFICADO
+
+Manual, se preferir:
+
+    rm -rf tizen/.buildResult
     tizen build-web -- tizen
+    tizen package -t wgt -s NOME_DO_CERTIFICADO -- tizen/.buildResult/Debug/projects/tizen
 
-Depois assine o conteúdo gerado:
+**Importante:** não empacote diretamente `tizen/.buildResult`. O Tizen CLI/RDS
+pode manter arquivos antigos na raiz desse diretório, enquanto a build nova fica
+em `tizen/.buildResult/Debug/projects/tizen`. Isso pode gerar um WGT assinado
+com código antigo mesmo após um build aparentemente bem-sucedido.
 
-    tizen package -t wgt -s NOME_DO_CERTIFICADO -- tizen/.buildResult
-
-O WGT assinado ficará no diretório de build.
+O helper também confere se a versão de `config.xml` dentro do WGT é a mesma
+versão do fonte antes de considerar o pacote válido.
 
 Para conferir os dispositivos conectados:
 
