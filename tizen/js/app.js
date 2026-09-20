@@ -40,6 +40,7 @@
     var MAX_IMAGE_LOADS = 6;
     var cardShardCache = {};
     var cardShardPromises = {};
+    var cardShardFailureAt = {};
 
 
     function showToast(message) {
@@ -182,7 +183,8 @@
             "MediaStop",
             "MediaPlayPause",
             "MediaFastForward",
-            "MediaRewind"
+            "MediaRewind",
+            "ColorF2Yellow"
         ];
 
         if (!window.tizen || !window.tizen.tvinputdevice) {
@@ -276,6 +278,50 @@
         return false;
     }
 
+    function focusedCatalogItem() {
+        var active = document.activeElement;
+        var index;
+        if (state.view !== "catalog" || !active) {
+            return null;
+        }
+        index = parseInt(active.getAttribute("data-card-index"), 10);
+        if (isNaN(index) || index < 0 || index >= state.filtered.length) {
+            return null;
+        }
+        return state.filtered[index];
+    }
+
+    function refreshFavoriteBadge(uid, on) {
+        var selector = '.media-card[data-item-uid="' +
+            String(uid || "").replace(/"/g, '\\"') + '"] .favorite';
+        var button;
+        try {
+            button = document.querySelector(selector);
+        } catch (ignoreSelector) {
+            button = null;
+        }
+        if (button) {
+            button.classList.toggle("on", !!on);
+        }
+    }
+
+    function toggleFocusedFavorite() {
+        var item = focusedCatalogItem();
+        var on;
+        if (!item) {
+            showToast("Selecione um card para favoritar.");
+            return;
+        }
+
+        on = window.BlazzingStorage.toggleFavorite(item.uid);
+        refreshFavoriteBadge(item.uid, on);
+        showToast(on ? "Adicionado aos favoritos." : "Removido dos favoritos.");
+
+        if (state.favoritesOnly && !on) {
+            applyFilters();
+        }
+    }
+
     document.addEventListener("keydown", function (event) {
         var code = event.keyCode || event.which;
         var name = supportedKeys[code] || event.key || "";
@@ -293,6 +339,13 @@
         if (name === "Back" || code === 10009 || code === 27) {
             event.preventDefault();
             goBack();
+            return;
+        }
+
+        if (state.view === "catalog" &&
+                (name === "ColorF2Yellow" || code === 405)) {
+            event.preventDefault();
+            toggleFocusedFavorite();
             return;
         }
 
@@ -908,8 +961,10 @@
         var key = String(item.cardKey || "");
         var version = String(item.cardIndexVersion || "");
         var prefix;
+        var prefixLength;
         var cacheKey;
         var url;
+        var failedAt;
 
         if (item.logo) {
             return Promise.resolve(item.logo);
@@ -918,12 +973,21 @@
             return Promise.resolve("");
         }
 
-        prefix = key.charAt(0);
+        prefixLength = parseInt(item.cardIndexShardLength || 1, 10);
+        if (!(prefixLength >= 1 && prefixLength <= 4)) {
+            prefixLength = 1;
+        }
+        prefix = key.slice(0, prefixLength);
         cacheKey = base + "|" + version + "|" + prefix;
 
         if (cardShardCache[cacheKey]) {
             item.logo = cardShardCache[cacheKey][key] || "";
             return Promise.resolve(item.logo);
+        }
+
+        failedAt = cardShardFailureAt[cacheKey] || 0;
+        if (failedAt && Date.now() - failedAt < 30000) {
+            return Promise.resolve("");
         }
 
         if (!cardShardPromises[cacheKey]) {
@@ -938,10 +1002,12 @@
             }).then(function (rows) {
                 cardShardCache[cacheKey] =
                     rows && typeof rows === "object" ? rows : {};
+                delete cardShardFailureAt[cacheKey];
                 return cardShardCache[cacheKey];
             }).catch(function () {
-                cardShardCache[cacheKey] = {};
-                return cardShardCache[cacheKey];
+                cardShardFailureAt[cacheKey] = Date.now();
+                delete cardShardPromises[cacheKey];
+                return {};
             });
         }
 
@@ -1016,7 +1082,7 @@
             (window.BlazzingStorage.isFavorite(item.uid) ? " on" : "");
         favorite.textContent = "★";
         favorite.setAttribute("aria-label", "Favorito");
-        favorite.setAttribute("data-focusable", "true");
+        favorite.setAttribute("tabindex", "-1");
         favorite.setAttribute("data-item-uid", item.uid);
         favorite.setAttribute("data-card-index", String(index));
 
