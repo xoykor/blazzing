@@ -2,7 +2,7 @@
 <widget xmlns="http://www.w3.org/ns/widgets"
         xmlns:tizen="http://tizen.org/ns/widgets"
         id="http://xoykor.github.io/blazzing/tizen"
-        version="0.2.7"
+        version="0.2.8"
         viewmodes="maximized">
     <tizen:application id="Blazzing01.tizen"
                        package="Blazzing01"
@@ -15,7 +15,8 @@
     <tizen:profile name="tv-samsung"/>
 
     <tizen:privilege name="http://tizen.org/privilege/internet"/>
-    <tizen:privilege name="http://tizen.org/privilege/unlimitedstorage"/>
+    <tizen:privilege name="http://tizen.org/privilege/filesystem.read"/>
+    <tizen:privilege name="http://tizen.org/privilege/filesystem.write"/>
     <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
 
     <access origin="*" subdomains="true"/>
