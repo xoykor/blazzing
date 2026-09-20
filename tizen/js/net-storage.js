@@ -40,7 +40,12 @@
             };
             request.onsuccess = function () { resolve(request.result); };
             request.onerror = function () {
-                reject(request.error || new Error("Falha ao abrir cache de playlists."));
+                var error = request.error;
+                reject(new Error(
+                    "Falha ao abrir armazenamento de playlists" +
+                    (error && error.name ? " (" + error.name + ")" : "") +
+                    (error && error.message ? ": " + error.message : ".")
+                ));
             };
         });
 
@@ -87,10 +92,20 @@
                 });
                 tx.oncomplete = function () { resolve(true); };
                 tx.onerror = function () {
-                    reject(tx.error || new Error("Falha ao salvar playlist na TV."));
+                    var error = tx.error;
+                    reject(new Error(
+                        "Falha ao salvar playlist na TV" +
+                        (error && error.name ? " (" + error.name + ")" : "") +
+                        (error && error.message ? ": " + error.message : ".")
+                    ));
                 };
                 tx.onabort = function () {
-                    reject(tx.error || new Error("Armazenamento da playlist foi cancelado."));
+                    var error = tx.error;
+                    reject(new Error(
+                        "Armazenamento da playlist foi cancelado" +
+                        (error && error.name ? " (" + error.name + ")" : "") +
+                        (error && error.message ? ": " + error.message : ".")
+                    ));
                 };
             });
         });
