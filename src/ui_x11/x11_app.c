@@ -3683,7 +3683,7 @@ static void draw_login(app_t *a) {
         draw_pairing_qr(a, qr_x, qr_y, qr_size);
 
         char session_hint[96];
-        snprintf(session_hint, sizeof(session_hint), "Sessão %.8s • expira em 5 min",
+        snprintf(session_hint, sizeof(session_hint), "Sessão %.8s • expira em 45 s",
                  vip_pairing_relay_session_id(a->pairing_relay));
         if (a->renderer.active) {
             vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 16, list_w,

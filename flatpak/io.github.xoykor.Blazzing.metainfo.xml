@@ -20,6 +20,12 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.4.2" date="2026-09-19">
+      <description>
+        <p>Fixes the Linux QR pairing caption so the displayed expiration matches the actual 45-second session timeout.</p>
+        <p xml:lang="pt-BR">Corrige a legenda do QR de pareamento no Linux para exibir os mesmos 45 segundos usados pelo timeout real da sessão.</p>
+      </description>
+    </release>
     <release version="1.4.1" date="2026-09-19">
       <description>
         <p>Reduces phone-pairing traffic with 5-second polling and 45-second QR sessions, and adds an explicit retry flow after expiration on Linux and Samsung Tizen.</p>
