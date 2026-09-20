@@ -43,7 +43,7 @@ de frontend divergentes.
 
 Com o webOS TV CLI instalado, a partir da raiz do repositório:
 
-    ares-package webos
+    ares-package -e tests -e README.md webos
 
 Ou use o helper em Fish:
 
