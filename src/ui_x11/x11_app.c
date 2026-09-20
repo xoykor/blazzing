@@ -225,6 +225,10 @@ struct app {
     login_mode_t login_mode;
     char profile_name[128];
     char active_profile_id[64];
+    /* Keep the already parsed M3U catalog alive while this app instance is
+     * running. Returning to the Lists screen must not force another download. */
+    char cached_m3u_server[512];
+    bool cached_m3u_valid;
     char server[512];
     char server_alt[512];
     char username[256];
@@ -1950,6 +1954,13 @@ static void *login_worker(void *userdata) {
         a->series_episode_mode = false;
         a->series_season_select = false;
         snprintf(a->active_profile_id, sizeof(a->active_profile_id), "%s", provider_id);
+        if (job->mode == LOGIN_M3U) {
+            snprintf(a->cached_m3u_server, sizeof(a->cached_m3u_server), "%s", job->server);
+            a->cached_m3u_valid = true;
+        } else {
+            a->cached_m3u_server[0] = '\0';
+            a->cached_m3u_valid = false;
+        }
         if (job->mode == LOGIN_XTREAM) {
             fprintf(stderr, "[catalog] filmes: %zu itens/%zu categorias; séries: %zu itens/%zu categorias\n",
                     a->catalogs[CONTENT_VOD].channels.len, a->catalogs[CONTENT_VOD].categories.len,
@@ -1994,8 +2005,35 @@ static void *login_worker(void *userdata) {
     return NULL;
 }
 
-/* Start login. */
-static void start_login(app_t *a) {
+/* Return whether the form points at the M3U playlist already parsed in RAM. */
+static bool cached_m3u_matches(const app_t *a) {
+    if (!a || a->login_mode != LOGIN_M3U || !a->cached_m3u_valid ||
+        !a->server[0] || !a->cached_m3u_server[0])
+        return false;
+    return strcmp(a->server, a->cached_m3u_server) == 0;
+}
+
+/* Reopen the in-memory catalog without network or reparsing. */
+static void resume_cached_m3u(app_t *a) {
+    if (!a)
+        return;
+    recalc_category_counts(a);
+    load_media_state(a);
+    a->favorites_only = false;
+    a->selected_category = -1;
+    a->category_scroll = 0;
+    a->search[0] = '\0';
+    rebuild_filter(a);
+    a->screen = SCREEN_BROWSE;
+    a->browse_top_focus = (int)a->content_kind;
+    a->browse_sidebar_focus = -1;
+    browse_focus_grid(a);
+    snprintf(a->status, sizeof(a->status), "Playlist já carregada; usando sessão atual");
+    fprintf(stderr, "[catalog] reutilizando M3U já carregado em memória\n");
+}
+
+/* Start login. force_reload is used only by an explicit Connect action. */
+static void start_login(app_t *a, bool force_reload) {
     if (atomic_load(&a->login_running) || a->login_thread_started)
         return;
     if (!a->server[0]) {
@@ -2008,6 +2046,12 @@ static void start_login(app_t *a) {
         snprintf(a->status, sizeof(a->status), "Preencha servidor, usuário e senha");
         return;
     }
+
+    if (!force_reload && cached_m3u_matches(a)) {
+        resume_cached_m3u(a);
+        return;
+    }
+
     login_job_t *job = calloc(1, sizeof(*job));
     if (!job) {
         snprintf(a->status, sizeof(a->status), "Sem memória");
@@ -4744,7 +4788,7 @@ static void handle_click(app_t *a, int x, int y) {
             start_phone_pairing(a);
         } else if (point_in(x, y, form_x, py + 430, form_w, 50)) {
             a->input_focus = INPUT_CONNECT;
-            start_login(a);
+            start_login(a, true);
         }
         else {
             int row_y = py + 154;
@@ -5211,7 +5255,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
             load_profile_into_form(a, index);
             if (a->server[0] &&
                 (a->login_mode == LOGIN_M3U || (a->username[0] && a->password[0])))
-                start_login(a);
+                start_login(a, false);
             return;
         }
         return;
@@ -5252,7 +5296,7 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
         else if (a->input_focus == INPUT_MODE)
             return;
         else
-            start_login(a);
+            start_login(a, true);
         return;
     }
     if (sym == XK_BackSpace) {
@@ -5589,7 +5633,7 @@ static void handle_async(app_t *a) {
         snprintf(a->server, sizeof(a->server), "%s", url);
         snprintf(a->profile_name, sizeof(a->profile_name), "%s", name);
         snprintf(a->status, sizeof(a->status), "Playlist recebida do celular; carregando...");
-        start_login(a);
+        start_login(a, false);
     } else if (a->pairing_relay && vip_pairing_relay_finished(a->pairing_relay)) {
         stop_phone_pairing(a);
         a->pairing_retry_ready = true;
@@ -5674,7 +5718,7 @@ static void init_test_env(app_t *a) {
         const char *exit_ms = getenv("VIPTV_TEST_EXIT_MS");
         if (exit_ms)
             a->test_exit_at_ms = monotonic_ms() + strtoll(exit_ms, NULL, 10);
-        start_login(a);
+        start_login(a, true);
     }
 }
 
