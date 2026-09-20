@@ -129,6 +129,7 @@ int main(void) {
     TEST_CHECK(file_contains(args_path, "--gpu-context=x11"));
     TEST_CHECK(file_contains(args_path, "--hwdec=auto-safe"));
     TEST_CHECK(file_contains(args_path, "--force-window=immediate"));
+    TEST_CHECK(file_contains(args_path, "--ytdl=no"));
     TEST_CHECK(file_contains(args_path, "--no-border"));
     TEST_CHECK(file_contains(args_path, "--wid=123"));
     TEST_CHECK(!file_contains(args_path, "--geometry="));
@@ -146,6 +147,19 @@ int main(void) {
     }
     TEST_CHECK(saw_load);
     TEST_CHECK(saw_seek);
+
+    /* Non-standard IPTV HLS endpoints must use a per-file demuxer hint
+       instead of changing libavformat detection globally. */
+    TEST_CHECK(vip_mpv_player_load_hls(
+        player, "https://example.invalid/nonstandard-live.txt", &error) == VIP_OK);
+    bool saw_hls_hint = false;
+    for (int i = 0; i < 80; ++i) {
+        saw_hls_hint = file_contains(cmd_path, "\"demuxer-lavf-format\":\"hls\"");
+        if (saw_hls_hint)
+            break;
+        sleep_ms(25);
+    }
+    TEST_CHECK(saw_hls_hint);
 
     vip_mpv_player_set_paused(player, true);
     TEST_CHECK(vip_mpv_player_is_paused(player));
