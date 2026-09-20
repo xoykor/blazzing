@@ -468,7 +468,7 @@
         byId("profile-name").value = normalized.name;
         byId("m3u-url").value = normalized.url;
         byId("save-profile").checked = true;
-        connectM3u(normalized);
+        connectM3u(normalized, false);
     }
 
     function startPairing() {
@@ -546,9 +546,42 @@
         renderSavedProfiles();
     }
 
-    function connectM3u(profile) {
+    function normalizedM3uUrl(value) {
+        return String(value || "").replace(/^\s+|\s+$/g, "");
+    }
+
+    function sameM3uSession(profile) {
+        return !!(
+            state.m3uCatalogs &&
+            state.profile &&
+            state.profile.type === "m3u" &&
+            profile &&
+            profile.type === "m3u" &&
+            normalizedM3uUrl(state.profile.url) === normalizedM3uUrl(profile.url)
+        );
+    }
+
+    function resumeM3uSession(profile) {
+        /*
+         * Returning to the home/profile screen must not download and parse a
+         * huge playlist again. Keep the already parsed catalogs in RAM for the
+         * lifetime of the app and simply reopen them when the same profile is
+         * selected again.
+         */
+        state.profile = profile;
+        state.xtream = null;
+        saveProfileIfRequested(profile);
+        openCatalog(state.kind || "live");
+    }
+
+    function connectM3u(profile, forceReload) {
         if (!/^https?:\/\//i.test(profile.url)) {
             showToast("Informe uma URL M3U/M3U8 HTTP ou HTTPS.");
+            return;
+        }
+
+        if (!forceReload && sameM3uSession(profile)) {
+            resumeM3uSession(profile);
             return;
         }
 
@@ -601,7 +634,11 @@
         profile = profileFromForm();
 
         if (profile.type === "m3u") {
-            connectM3u(profile);
+            /*
+             * The explicit Connect action is also the user's way to refresh a
+             * playlist whose server contents may have changed.
+             */
+            connectM3u(profile, true);
         } else {
             connectXtream(profile);
         }
@@ -613,7 +650,7 @@
 
         if (profile.type === "m3u") {
             byId("m3u-url").value = profile.url || "";
-            connectM3u(profile);
+            connectM3u(profile, false);
             return;
         }
 
@@ -665,7 +702,7 @@
 
             actions.className = "saved-actions";
 
-            open.textContent = "Abrir";
+            open.textContent = sameM3uSession(profile) ? "Continuar" : "Abrir";
             open.setAttribute("data-focusable", "true");
             open.addEventListener("click", function () {
                 loadProfile(profile);
