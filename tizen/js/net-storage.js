@@ -4,52 +4,138 @@
 
     var MAX_RESPONSE_BYTES = 128 * 1024 * 1024;
     var STORAGE_PREFIX = "blazzing.tizen.";
-    var PLAYLIST_DB_NAME = "blazzing-tizen-playlists";
-    var PLAYLIST_DB_VERSION = 1;
-    var PLAYLIST_STORE = "playlists";
-    var playlistDbPromise = null;
+    var PLAYLIST_DIR = "playlists";
+    var PLAYLIST_CHUNK_CHARS = 512 * 1024;
 
-    function indexedDbFactory() {
-        return window.indexedDB || window.webkitIndexedDB || window.mozIndexedDB || null;
+    function storageError(prefix, error) {
+        return new Error(
+            prefix +
+            (error && error.name ? " (" + error.name + ")" : "") +
+            (error && error.message ? ": " + error.message : ".")
+        );
     }
 
-    function openPlaylistDb() {
-        var factory = indexedDbFactory();
+    function playlistHash(value) {
+        var text = String(value || "");
+        var h1 = 2166136261;
+        var h2 = 2246822519;
+        var i;
 
-        if (playlistDbPromise) {
-            return playlistDbPromise;
-        }
-        if (!factory) {
-            return Promise.reject(new Error("Armazenamento persistente de playlists indisponível."));
+        for (i = 0; i < text.length; i += 1) {
+            h1 ^= text.charCodeAt(i);
+            h1 = Math.imul ? Math.imul(h1, 16777619) : ((h1 * 16777619) >>> 0);
+            h2 ^= text.charCodeAt(text.length - 1 - i);
+            h2 = Math.imul ? Math.imul(h2, 3266489917) : ((h2 * 3266489917) >>> 0);
         }
 
-        playlistDbPromise = new Promise(function (resolve, reject) {
-            var request;
-            try {
-                request = factory.open(PLAYLIST_DB_NAME, PLAYLIST_DB_VERSION);
-            } catch (error) {
-                reject(error);
+        return ("00000000" + (h1 >>> 0).toString(16)).slice(-8) +
+            ("00000000" + (h2 >>> 0).toString(16)).slice(-8);
+    }
+
+    function playlistFileName(url) {
+        return "playlist-" + playlistHash(url) + ".m3u8";
+    }
+
+    function filesystemAvailable() {
+        return !!(window.tizen && window.tizen.filesystem);
+    }
+
+    function resolvePlaylistDirectory(mode) {
+        return new Promise(function (resolve, reject) {
+            if (!filesystemAvailable()) {
+                reject(new Error("Filesystem persistente do Tizen indisponível."));
                 return;
             }
 
-            request.onupgradeneeded = function () {
-                var db = request.result;
-                if (!db.objectStoreNames.contains(PLAYLIST_STORE)) {
-                    db.createObjectStore(PLAYLIST_STORE, { keyPath: "url" });
-                }
-            };
-            request.onsuccess = function () { resolve(request.result); };
-            request.onerror = function () {
-                var error = request.error;
-                reject(new Error(
-                    "Falha ao abrir armazenamento de playlists" +
-                    (error && error.name ? " (" + error.name + ")" : "") +
-                    (error && error.message ? ": " + error.message : ".")
-                ));
-            };
+            window.tizen.filesystem.resolve(
+                "wgt-private",
+                function (root) {
+                    var dir;
+                    try {
+                        dir = root.resolve(PLAYLIST_DIR);
+                    } catch (missing) {
+                        if (mode !== "rw") {
+                            resolve(null);
+                            return;
+                        }
+                        try {
+                            dir = root.createDirectory(PLAYLIST_DIR);
+                        } catch (createError) {
+                            reject(storageError(
+                                "Falha ao criar diretório privado de playlists",
+                                createError
+                            ));
+                            return;
+                        }
+                    }
+                    resolve(dir);
+                },
+                function (error) {
+                    reject(storageError(
+                        "Falha ao acessar armazenamento privado da TV",
+                        error
+                    ));
+                },
+                mode || "r"
+            );
         });
+    }
 
-        return playlistDbPromise;
+    function readPlaylistFile(file) {
+        return new Promise(function (resolve, reject) {
+            file.openStream(
+                "r",
+                function (stream) {
+                    var parts = [];
+                    try {
+                        stream.position = 0;
+                        while (stream.bytesAvailable > 0) {
+                            parts.push(stream.read(
+                                Math.min(stream.bytesAvailable, PLAYLIST_CHUNK_CHARS)
+                            ));
+                        }
+                        stream.close();
+                        resolve(parts.join(""));
+                    } catch (error) {
+                        try { stream.close(); } catch (ignoreClose) {}
+                        reject(storageError("Falha ao ler playlist salva", error));
+                    }
+                },
+                function (error) {
+                    reject(storageError("Falha ao abrir playlist salva", error));
+                },
+                "UTF-8"
+            );
+        });
+    }
+
+    function writePlaylistFile(file, text) {
+        return new Promise(function (resolve, reject) {
+            file.openStream(
+                "w",
+                function (stream) {
+                    var offset = 0;
+                    try {
+                        while (offset < text.length) {
+                            stream.write(text.slice(
+                                offset,
+                                offset + PLAYLIST_CHUNK_CHARS
+                            ));
+                            offset += PLAYLIST_CHUNK_CHARS;
+                        }
+                        stream.close();
+                        resolve(true);
+                    } catch (error) {
+                        try { stream.close(); } catch (ignoreClose) {}
+                        reject(storageError("Falha ao gravar playlist na TV", error));
+                    }
+                },
+                function (error) {
+                    reject(storageError("Falha ao abrir arquivo de playlist", error));
+                },
+                "UTF-8"
+            );
+        });
     }
 
     function cachedPlaylist(url) {
@@ -58,17 +144,21 @@
             return Promise.resolve(null);
         }
 
-        return openPlaylistDb().then(function (db) {
-            return new Promise(function (resolve, reject) {
-                var tx = db.transaction(PLAYLIST_STORE, "readonly");
-                var request = tx.objectStore(PLAYLIST_STORE).get(url);
-
-                request.onsuccess = function () {
-                    var row = request.result;
-                    resolve(row && typeof row.text === "string" ? row : null);
-                };
-                request.onerror = function () {
-                    reject(request.error || new Error("Falha ao ler playlist salva."));
+        return resolvePlaylistDirectory("r").then(function (dir) {
+            var file;
+            if (!dir) {
+                return null;
+            }
+            try {
+                file = dir.resolve(playlistFileName(url));
+            } catch (missing) {
+                return null;
+            }
+            return readPlaylistFile(file).then(function (text) {
+                return {
+                    url: url,
+                    text: text,
+                    updatedAt: file.modified ? new Date(file.modified).getTime() : 0
                 };
             });
         });
@@ -82,31 +172,48 @@
             return Promise.reject(new Error("Playlist inválida para armazenamento."));
         }
 
-        return openPlaylistDb().then(function (db) {
-            return new Promise(function (resolve, reject) {
-                var tx = db.transaction(PLAYLIST_STORE, "readwrite");
-                tx.objectStore(PLAYLIST_STORE).put({
-                    url: url,
-                    text: text,
-                    updatedAt: Date.now()
+        return resolvePlaylistDirectory("rw").then(function (dir) {
+            var name = playlistFileName(url);
+            var tmpName = name + ".tmp";
+            var tmp;
+
+            try {
+                try {
+                    tmp = dir.resolve(tmpName);
+                } catch (missingTmp) {
+                    tmp = dir.createFile(tmpName);
+                }
+            } catch (error) {
+                throw storageError("Falha ao preparar arquivo temporário", error);
+            }
+
+            return writePlaylistFile(tmp, text).then(function () {
+                return new Promise(function (resolve, reject) {
+                    /*
+                     * Publica a atualização só depois da escrita completa.
+                     * moveTo substitui o arquivo antigo sem exigir uma segunda
+                     * cópia integral de ~50 MiB.
+                     */
+                    try {
+                        dir.moveTo(
+                            tmp.fullPath,
+                            PLAYLIST_DIR + "/" + name,
+                            true,
+                            function () { resolve(true); },
+                            function (error) {
+                                reject(storageError(
+                                    "Falha ao publicar playlist salva",
+                                    error
+                                ));
+                            }
+                        );
+                    } catch (error) {
+                        reject(storageError(
+                            "Falha ao substituir playlist salva",
+                            error
+                        ));
+                    }
                 });
-                tx.oncomplete = function () { resolve(true); };
-                tx.onerror = function () {
-                    var error = tx.error;
-                    reject(new Error(
-                        "Falha ao salvar playlist na TV" +
-                        (error && error.name ? " (" + error.name + ")" : "") +
-                        (error && error.message ? ": " + error.message : ".")
-                    ));
-                };
-                tx.onabort = function () {
-                    var error = tx.error;
-                    reject(new Error(
-                        "Armazenamento da playlist foi cancelado" +
-                        (error && error.name ? " (" + error.name + ")" : "") +
-                        (error && error.message ? ": " + error.message : ".")
-                    ));
-                };
             });
         });
     }
@@ -117,20 +224,32 @@
             return Promise.resolve();
         }
 
-        return openPlaylistDb().then(function (db) {
-            return new Promise(function (resolve, reject) {
-                var tx = db.transaction(PLAYLIST_STORE, "readwrite");
-                tx.objectStore(PLAYLIST_STORE).delete(url);
-                tx.oncomplete = function () { resolve(); };
-                tx.onerror = function () {
-                    reject(tx.error || new Error("Falha ao remover playlist salva."));
-                };
+        return resolvePlaylistDirectory("rw").then(function (dir) {
+            var file;
+            if (!dir) {
+                return;
+            }
+            try {
+                file = dir.resolve(playlistFileName(url));
+            } catch (missing) {
+                return;
+            }
+
+            return new Promise(function (resolve) {
+                try {
+                    dir.deleteFile(
+                        file.fullPath,
+                        function () { resolve(); },
+                        function () { resolve(); }
+                    );
+                } catch (error) {
+                    resolve();
+                }
             });
         }).catch(function () {
-            /* Removing a profile should still work if IndexedDB is unavailable. */
+            /* Excluir o perfil continua possível mesmo sem acesso ao arquivo. */
         });
     }
-
 
     function requestText(url, options) {
         options = options || {};
