@@ -69,3 +69,23 @@ assert(merged.vod.categories[0].name === "Ação",
     "categoria mesclada deveria usar nome limpo");
 
 console.log("Tizen provider tests: OK");
+
+
+var withCards = [
+    "#EXTM3U",
+    "#EXT-X-LISTA-CARDS:https://raw.example/cards",
+    "#EXT-X-LISTA-CARDS-VERSION:abc123",
+    "#EXTINF:-1 group-title=\"Filmes | Ação\",Filme X",
+    "https://example.com/x.mp4"
+].join("\n");
+var cardCatalog = providers.parseM3u(
+    withCards,
+    "https://example.com/list.m3u8"
+);
+var cardItem = cardCatalog.vod.items[0];
+assert(cardItem.cardKey === providers.cardLookupKey("Filme X", "Filmes | Ação"),
+    "item deveria preservar cardKey para lookup externo");
+assert(cardItem.cardIndexBase === "https://raw.example/cards",
+    "base do índice de cards deveria ser preservada");
+assert(cardItem.cardIndexVersion === "abc123",
+    "versão do índice de cards deveria ser preservada");
