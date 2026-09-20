@@ -37,6 +37,17 @@ bool vip_m3u_parse_episode_label(const char *name, char *series_out, size_t seri
                                  int *episode_out);
 
 /**
+ * Resolve one zero-based static fallback alternative for an M3U item.
+ *
+ * The function lazily fetches only the shard referenced by fallback_id and
+ * never contacts a playback proxy/Worker. The primary stream_url is skipped.
+ * Caller owns returned strings and must free them.
+ */
+vip_status_t vip_m3u_fallback_variant(const vip_channel_t *channel, size_t alternative_index,
+                                      char **url_out, char **referer_out, char **user_agent_out,
+                                      vip_error_t *error);
+
+/**
  * Deep-copy a flat M3U catalog into three content catalogs based on group-title.
  * All output lists must already be initialized and empty.
  */
