@@ -10,18 +10,18 @@
 
 Blazzing é um player IPTV nativo para Linux escrito em C17. Ele reúne interface X11/XWayland, renderização Cairo/Pango, reprodução persistente com mpv, carregamento assíncrono de imagens, persistência SQLite, Xtream Codes, M3U/M3U8 e Pluto TV em um único aplicativo desktop.
 
-> **Estado do projeto:** a **v1.4.0** substitui o pareamento LAN pelo celular por pareamento cifrado pela Internet via Cloudflare Worker, mantendo a descriptografia da playlist local no Blazzing.
+> **Estado do projeto:** a **v1.4.7** é a release atual do desktop Linux. O repositório também contém um porte independente para Samsung Tizen. A entrada de playlist pelo celular usa um relay cifrado via Cloudflare, mantendo a descriptografia local no cliente.
 
 > Use o Blazzing somente com listas, servidores e conteúdos que você tenha autorização para acessar.
 
 ## Download
 
-A instalação recomendada é o **Flatpak oficial da v1.4.0** disponível na [release do GitHub](https://github.com/xoykor/blazzing/releases/tag/v1.4.0).
+A instalação recomendada é o **Flatpak oficial da v1.4.7** disponível na [release do GitHub](https://github.com/xoykor/blazzing/releases/tag/v1.4.7).
 
-Depois de baixar `Blazzing-v1.4.0-x86_64.flatpak`:
+Depois de baixar `Blazzing-v1.4.7-x86_64.flatpak`:
 
 ```sh
-flatpak install --user ./Blazzing-v1.4.0-x86_64.flatpak
+flatpak install --user ./Blazzing-v1.4.7-x86_64.flatpak
 flatpak run io.github.xoykor.Blazzing
 ```
 
@@ -94,7 +94,7 @@ Na grade do catálogo, `←` na primeira coluna entra no menu lateral de categor
 ### Adicionar uma URL M3U/M3U8 pelo celular
 
 1. Abra o modo M3U e selecione **Adicionar pelo celular**.
-2. O Blazzing cria uma sessão de cinco minutos no Cloudflare Worker público.
+2. O Blazzing cria uma sessão de **45 segundos** no Cloudflare Worker público e consulta o relay a cada 5 segundos.
 3. Escaneie o QR Code no celular. O celular pode estar no Wi-Fi ou nos dados móveis.
 4. Cole o nome da lista e a URL M3U/M3U8 e envie.
 5. O navegador cifra os dados com AES-256-GCM antes do envio.
@@ -261,6 +261,8 @@ src/ui_x11/            UI X11, renderer Cairo/Pango e movimento da interface
 src/tools/             ferramentas de diagnóstico/desenvolvimento
 tests/                 testes automatizados
 flatpak/               manifesto e metadados Flatpak
+tizen/                 Web App para Samsung Tizen
+worker/                relay cifrado de pareamento
 docs/                  documentação técnica
 ```
 
@@ -272,6 +274,8 @@ docs/                  documentação técnica
 - [Dados e privacidade](docs/DATA_AND_PRIVACY.pt-BR.md)
 - [Desenvolvimento](docs/DEVELOPMENT.pt-BR.md)
 - [Flatpak](flatpak/README.md)
+- [Porte Tizen](tizen/README.md)
+- [Worker de pareamento](worker/README.md)
 - [Changelog](CHANGELOG.pt-BR.md)
 
 ## Licença
