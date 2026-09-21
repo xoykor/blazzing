@@ -275,4 +275,4 @@ docs/                  technical documentation
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+GNU General Public License v3.0 (`GPL-3.0-only`). See [LICENSE](LICENSE). Prior MIT notices for applicable portions are preserved in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
