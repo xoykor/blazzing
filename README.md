@@ -10,18 +10,18 @@
 
 Blazzing is a native Linux IPTV player written in C17. It combines an X11/XWayland interface, Cairo/Pango rendering, persistent mpv playback, asynchronous artwork loading, SQLite persistence, Xtream Codes, M3U/M3U8 and Pluto TV in one desktop application.
 
-> **Project status:** **v1.4.0** replaces LAN phone pairing with encrypted Internet pairing through a Cloudflare Worker while keeping playlist decryption local to Blazzing.
+> **Project status:** **v1.4.7** is the current Linux desktop release. The repository also contains an independent Samsung Tizen Web App port. Phone-assisted playlist entry uses an encrypted Cloudflare relay while playlist decryption remains local to the client.
 
 > Use Blazzing only with playlists, servers and content that you are authorized to access.
 
 ## Download
 
-The recommended installation is the official **v1.4.0 Flatpak bundle** from the [GitHub release](https://github.com/xoykor/blazzing/releases/tag/v1.4.0).
+The recommended installation is the official **v1.4.7 Flatpak bundle** from the [GitHub release](https://github.com/xoykor/blazzing/releases/tag/v1.4.7).
 
-After downloading `Blazzing-v1.4.0-x86_64.flatpak`:
+After downloading `Blazzing-v1.4.7-x86_64.flatpak`:
 
 ```sh
-flatpak install --user ./Blazzing-v1.4.0-x86_64.flatpak
+flatpak install --user ./Blazzing-v1.4.7-x86_64.flatpak
 flatpak run io.github.xoykor.Blazzing
 ```
 
@@ -57,11 +57,17 @@ Blazzing provides:
 
 Commercial browser wrappers are not part of Blazzing. The home screen contains the two playback paths implemented natively by the application: IPTV/Listas and Pluto TV.
 
-## Platform
+## Platforms
 
-Blazzing targets Linux with **X11 or XWayland**.
+### Linux desktop
 
-The application itself uses Xlib. mpv receives Blazzing's X11 video container directly through `--wid`, while media URLs are sent later through the private JSON IPC socket. The current Flatpak intentionally builds the X11 mpv path and does not provide a native Wayland backend.
+The native desktop application targets Linux with **X11 or XWayland**. The UI itself uses Xlib; mpv receives Blazzing's X11 video container through `--wid`, while media URLs are sent later through the private JSON IPC socket. The current Flatpak intentionally builds the X11 mpv path and does not provide a native Wayland renderer.
+
+### Samsung Tizen
+
+The repository also includes a separate **Tizen Web App** under `tizen/`. It uses HTML/CSS/JavaScript, remote-control navigation and Samsung AVPlay when available. M3U playlists can be persisted in the application's private filesystem and reopened without being downloaded again until the user explicitly chooses **Update playlist**.
+
+The Tizen port does not depend on X11, Cairo, SQLite or mpv. See [tizen/README.md](tizen/README.md) for build, installation, storage and current limitations.
 
 ## Controls
 
@@ -94,7 +100,7 @@ From the catalog grid, `←` on the first column enters the category sidebar and
 ### Add an M3U/M3U8 URL with a phone
 
 1. Open M3U mode and select **Add with phone**.
-2. Blazzing creates a five-minute session on the public Cloudflare Worker.
+2. Blazzing creates a **45-second** session on the public Cloudflare Worker and polls it every 5 seconds.
 3. Scan the QR Code from the phone. The phone can be on Wi-Fi or mobile data.
 4. Paste the playlist name and M3U/M3U8 URL and submit.
 5. The browser encrypts the data with AES-256-GCM before sending it.
@@ -232,9 +238,13 @@ Supported end-user environment overrides:
 
 See [Configuration and diagnostics](docs/CONFIGURATION.md).
 
-## Frozen scope
+## Project scope
 
-There is no feature roadmap after v1.3.0. The following are not part of the frozen feature set:
+The **Linux desktop core is mature** and changes should prioritize reliability, security, compatibility and maintainability. Large desktop feature additions are intentionally conservative.
+
+The Samsung Tizen port is maintained separately inside the same repository and may evolve independently while preserving compatibility with large playlists and TV-remote navigation.
+
+Not currently implemented in the Linux desktop UI:
 
 - full EPG interface;
 - graphical audio-track selector;
@@ -243,7 +253,7 @@ There is no feature roadmap after v1.3.0. The following are not part of the froz
 - automatic application updater;
 - native Arch/AUR package.
 
-Future code changes and releases are reserved for maintenance: bugs, security, build breakage or platform compatibility.
+See the platform-specific README for Tizen limitations rather than assuming feature parity between the two clients.
 
 ## Repository layout
 
@@ -260,6 +270,8 @@ src/ui_x11/            X11 UI, Cairo/Pango renderer and UI motion
 src/tools/             diagnostics/development utilities
 tests/                 automated tests
 flatpak/               Flatpak manifest and metadata
+tizen/                 Samsung Tizen Web App
+worker/                encrypted pairing relay
 docs/                  technical documentation
 ```
 
@@ -271,6 +283,8 @@ docs/                  technical documentation
 - [Data and privacy](docs/DATA_AND_PRIVACY.md)
 - [Development](docs/DEVELOPMENT.md)
 - [Flatpak](flatpak/README.md)
+- [Tizen port](tizen/README.md)
+- [Pairing Worker](worker/README.md)
 - [Changelog](CHANGELOG.md)
 
 ## License
