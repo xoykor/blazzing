@@ -57,11 +57,17 @@ O Blazzing oferece:
 
 Wrappers de serviços comerciais no navegador não fazem parte do Blazzing. A tela inicial mantém os dois caminhos de reprodução implementados nativamente: IPTV/Listas e Pluto TV.
 
-## Plataforma
+## Plataformas
 
-O Blazzing é voltado a Linux com **X11 ou XWayland**.
+### Desktop Linux
 
-A aplicação usa Xlib. O mpv recebe diretamente o container X11 de vídeo do Blazzing por `--wid`, enquanto a URL da mídia é enviada depois pelo socket privado de JSON IPC. O Flatpak atual compila propositalmente o caminho X11 do mpv e não possui backend Wayland nativo.
+A aplicação nativa é voltada a Linux com **X11 ou XWayland**. A interface usa Xlib; o mpv recebe diretamente o container X11 de vídeo do Blazzing por `--wid`, enquanto a URL da mídia é enviada depois pelo socket privado de JSON IPC. O Flatpak atual compila propositalmente o caminho X11 do mpv e não possui renderizador Wayland nativo.
+
+### Samsung Tizen
+
+O repositório também contém um **Tizen Web App** separado em `tizen/`. Ele usa HTML/CSS/JavaScript, navegação por controle remoto e Samsung AVPlay quando disponível. Playlists M3U podem ser persistidas no armazenamento privado do aplicativo e reabertas sem novo download até que o usuário escolha explicitamente **Atualizar playlist**.
+
+O porte Tizen não depende de X11, Cairo, SQLite ou mpv. Consulte [tizen/README.md](tizen/README.md) para build, instalação, armazenamento e limitações atuais.
 
 ## Controles
 
@@ -233,9 +239,13 @@ Overrides de ambiente destinados ao usuário:
 
 Veja [Configuração e diagnóstico](docs/CONFIGURATION.pt-BR.md).
 
-## Escopo congelado
+## Escopo do projeto
 
-Não existe roadmap de funcionalidades depois da v1.3.0. Não fazem parte do conjunto final:
+O **núcleo do desktop Linux está maduro** e mudanças devem priorizar confiabilidade, segurança, compatibilidade e manutenção. Grandes expansões de funcionalidade no desktop são deliberadamente conservadoras.
+
+O porte Samsung Tizen é mantido separadamente dentro do mesmo repositório e pode evoluir de forma independente, preservando compatibilidade com playlists grandes e navegação por controle remoto.
+
+Ainda não implementados na interface Linux:
 
 - interface EPG completa;
 - seletor gráfico de faixas de áudio;
@@ -244,7 +254,7 @@ Não existe roadmap de funcionalidades depois da v1.3.0. Não fazem parte do con
 - atualizador automático;
 - pacote Arch/AUR nativo.
 
-Mudanças futuras de código e novas releases ficam reservadas a manutenção: bugs, segurança, quebra de build ou compatibilidade de plataforma.
+Consulte o README específico do Tizen para as limitações dessa plataforma; os dois clientes não possuem paridade total de recursos.
 
 ## Estrutura do repositório
 
