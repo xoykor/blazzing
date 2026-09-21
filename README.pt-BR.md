@@ -276,4 +276,4 @@ docs/                  documentação técnica
 
 ## Licença
 
-MIT. Veja [LICENSE](LICENSE).
+GNU General Public License v3.0 (`GPL-3.0-only`). Veja [LICENSE](LICENSE). Avisos MIT anteriores aplicáveis são preservados em [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
