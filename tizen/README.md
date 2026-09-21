@@ -1,6 +1,6 @@
 # Blazzing para Samsung Tizen
 
-Este diretório contém o porte do Blazzing para Samsung Smart TV como **Tizen Web App**.
+Este diretório contém o porte do Blazzing para Samsung Smart TV como **Tizen Web App**. O manifesto atual está na versão **0.2.9** e mantém compatibilidade mínima declarada com Tizen 2.3.
 
 ## Escopo implementado
 
@@ -21,7 +21,9 @@ Este diretório contém o porte do Blazzing para Samsung Smart TV como **Tizen W
 - grid carregado em lotes para não inflar o DOM em catálogos muito grandes;
 - playlist M3U persistida como arquivo no diretório privado `wgt-private` da aplicação;
 - reabertura automática da última playlist M3U usada;
-- nova transferência da M3U somente pela aquisição inicial ou pelo botão **Atualizar playlist**.
+- nova transferência da M3U somente pela aquisição inicial ou pelo botão **Atualizar playlist**;
+- pareamento por celular via QR Code e relay cifrado do Cloudflare Worker;
+- sessão de pareamento de 45 segundos, polling a cada 5 segundos e botão **Tentar novamente** quando a sessão expira.
 
 O código Linux/C17 continua independente. O porte Tizen não depende de X11, Cairo, SQLite ou mpv.
 
@@ -81,6 +83,19 @@ Para conferir os dispositivos conectados:
 
 A instalação em TV exige Developer Mode habilitado na televisão, PC autorizado e certificado Samsung compatível com o alvo.
 
+## Pareamento pelo celular
+
+O Tizen pode receber uma URL M3U/M3U8 pelo celular sem abrir servidor HTTP na TV.
+
+1. escolha **Adicionar pelo celular (QR)**;
+2. o aplicativo cria uma sessão curta no relay público;
+3. escaneie o QR Code;
+4. o navegador cifra nome e URL da playlist com AES-256-GCM;
+5. o Worker armazena somente o payload cifrado e o estado de expiração;
+6. a TV consulta o relay a cada 5 segundos, descriptografa localmente e encerra a sessão.
+
+A sessão expira após **45 segundos**. Quando isso acontece, a interface oferece **Tentar novamente**, criando uma nova sessão.
+
 ## Controles
 
 ### Catálogo
@@ -121,12 +136,14 @@ A senha Xtream **não é salva por padrão**. Ela só é persistida quando o usu
 
 Ainda não foram portados:
 
-- pareamento por celular via Cloudflare Worker;
 - Pluto TV;
 - resolução automática de endpoints Xtream do desktop;
 - metadados ricos de VOD;
 - cache persistente de artwork;
-- EPG;
-- testes em TV Samsung física.
+- EPG.
 
-O objetivo deste corte é manter uma base instalável, navegável pelo controle e capaz de reproduzir streams suportados pela TV, sem acoplar o frontend Tizen ao backend Linux.
+O porte já é instalável e navegável em TV Samsung real. Compatibilidade final de vídeo, áudio e containers continua dependendo dos codecs e capacidades expostos pelo modelo de TV e pelo AVPlay.
+
+## Licença
+
+GNU General Public License v3.0. Consulte [../LICENSE](../LICENSE).
