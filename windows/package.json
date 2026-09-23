@@ -8,7 +8,8 @@
     "prepare-app": "node scripts/prepare-app.js",
     "start": "npm run prepare-app && electron .",
     "pack": "npm run prepare-app && electron-builder --dir --win --x64",
-    "dist": "npm run prepare-app && electron-builder --win nsis portable --x64"
+    "dist": "npm run prepare-app && electron-builder --win nsis portable --x64",
+    "test": "node tests/prepare-app.test.js"
   },
   "devDependencies": {
     "electron": "^38.0.0",
