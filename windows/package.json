@@ -1,0 +1,43 @@
+{
+  "name": "blazzing-windows",
+  "version": "1.4.7",
+  "private": true,
+  "description": "Blazzing desktop port for Windows",
+  "main": "main.js",
+  "scripts": {
+    "prepare-app": "node scripts/prepare-app.js",
+    "start": "npm run prepare-app && electron .",
+    "pack": "npm run prepare-app && electron-builder --dir --win --x64",
+    "dist": "npm run prepare-app && electron-builder --win nsis portable --x64"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "io.github.xoykor.Blazzing",
+    "productName": "Blazzing",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "js/**/*",
+      "app/**/*",
+      "package.json"
+    ],
+    "artifactName": "Blazzing-${version}-Windows-${arch}.${ext}",
+    "win": {
+      "target": ["nsis", "portable"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}
