@@ -2,7 +2,7 @@
 
 [Português (Brasil)](BUILDING.pt-BR.md)
 
-The published v1.3.0 Flatpak is the recommended end-user installation. Source builds are intended for development, auditing and maintenance.
+The published v1.4.7 Flatpak is the recommended end-user installation. Source builds are intended for development, auditing and maintenance.
 
 ## CachyOS / Arch Linux
 
@@ -67,3 +67,30 @@ The player passes its X11 video child window to mpv with `--wid`; there is no na
 ## Compile database
 
 `CMAKE_EXPORT_COMPILE_COMMANDS` is enabled. Editors and analysis tools can use `build/compile_commands.json`.
+
+
+## Windows desktop
+
+The Windows port is built separately from the native Linux CMake target.
+
+Requirements:
+
+- Windows 10 or newer, x64;
+- Node.js 20 or newer for source builds;
+- `mpv.exe` available on `PATH`, through `VIPTV_MPV_PATH`, or in one of the locations documented by `windows/README.md`.
+
+Run from source:
+
+```powershell
+cd windows
+npm install
+npm start
+```
+
+Build installer + portable artifacts:
+
+```powershell
+npm run dist
+```
+
+The generated frontend under `windows/app/` is copied from `tizen/` by `npm run prepare-app`; it must not be edited directly. Windows packaging is also validated by `.github/workflows/windows.yml`.

@@ -8,9 +8,9 @@
   <strong>English</strong> · <a href="README.pt-BR.md">Português (Brasil)</a>
 </p>
 
-Blazzing is a native Linux IPTV player written in C17. It combines an X11/XWayland interface, Cairo/Pango rendering, persistent mpv playback, asynchronous artwork loading, SQLite persistence, Xtream Codes, M3U/M3U8 and Pluto TV in one desktop application.
+Blazzing is a multi-platform IPTV player. Its Linux desktop client is native C17 with X11/XWayland, Cairo/Pango, SQLite and persistent mpv playback; the repository also contains Samsung Tizen and Windows desktop ports.
 
-> **Project status:** **v1.4.7** is the current Linux desktop release. The repository also contains an independent Samsung Tizen Web App port. Phone-assisted playlist entry uses an encrypted Cloudflare relay while playlist decryption remains local to the client.
+> **Project status:** **v1.4.7** is the current Linux desktop release. Samsung Tizen and Windows desktop ports are maintained in the same repository. The Windows port currently builds from source/CI and is not yet published as a versioned Windows release. Phone-assisted playlist entry uses an encrypted Cloudflare relay while playlist decryption remains local to the client.
 
 > Use Blazzing only with playlists, servers and content that you are authorized to access.
 
@@ -68,6 +68,12 @@ The native desktop application targets Linux with **X11 or XWayland**. The UI it
 The repository also includes a separate **Tizen Web App** under `tizen/`. It uses HTML/CSS/JavaScript, remote-control navigation and Samsung AVPlay when available. M3U playlists can be persisted in the application's private filesystem and reopened without being downloaded again until the user explicitly chooses **Update playlist**.
 
 The Tizen port does not depend on X11, Cairo, SQLite or mpv. See [tizen/README.md](tizen/README.md) for build, installation, storage and current limitations.
+
+### Windows desktop
+
+The Windows port lives under `windows/`. It reuses the Tizen catalog/provider frontend but replaces Samsung APIs with a hardened Electron bridge for networking, persistent playlist storage and native mpv playback. The mpv process is embedded through the Windows HWND and controlled over a private Windows named pipe, so media URLs are sent through JSON IPC instead of process arguments.
+
+The source build currently requires Windows 10 or newer, Node.js for packaging, and `mpv.exe` either on `PATH`, at a documented local path, or via `VIPTV_MPV_PATH`. See [windows/README.md](windows/README.md).
 
 ## Controls
 
@@ -152,6 +158,17 @@ The repository also contains a Fish helper:
 ```fish
 ./scripts/build-cachyos.fish
 ```
+
+### Windows
+
+```powershell
+git clone https://github.com/xoykor/blazzing.git
+cd blazzing\windows
+npm install
+npm start
+```
+
+Build an NSIS installer and portable package with `npm run dist`. The Windows build uses an external `mpv.exe`; see [windows/README.md](windows/README.md) for lookup locations and controls.
 
 ### Debian / Ubuntu
 
@@ -242,7 +259,7 @@ See [Configuration and diagnostics](docs/CONFIGURATION.md).
 
 The **Linux desktop core is mature** and changes should prioritize reliability, security, compatibility and maintainability. Large desktop feature additions are intentionally conservative.
 
-The Samsung Tizen port is maintained separately inside the same repository and may evolve independently while preserving compatibility with large playlists and TV-remote navigation.
+The Samsung Tizen and Windows ports are maintained separately inside the same repository. The Windows port intentionally shares the Tizen catalog/provider frontend while keeping its native desktop integration isolated under `windows/`.
 
 Not currently implemented in the Linux desktop UI:
 
@@ -271,6 +288,7 @@ src/tools/             diagnostics/development utilities
 tests/                 automated tests
 flatpak/               Flatpak manifest and metadata
 tizen/                 Samsung Tizen Web App
+windows/               Windows desktop port (Electron host + mpv IPC)
 worker/                encrypted pairing relay
 docs/                  technical documentation
 ```
@@ -284,6 +302,7 @@ docs/                  technical documentation
 - [Development](docs/DEVELOPMENT.md)
 - [Flatpak](flatpak/README.md)
 - [Tizen port](tizen/README.md)
+- [Windows port](windows/README.md)
 - [Pairing Worker](worker/README.md)
 - [Changelog](CHANGELOG.md)
 
