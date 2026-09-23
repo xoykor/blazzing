@@ -59,7 +59,7 @@ function playerTime(milliseconds) {
 
 function sanitizeLog(text) {
     return String(text || "")
-        .replace(/https?:\/\/[^\s"'<>\])]+/gi, "[URL ocultada]")
+        .replace(/https?:\/\/[^\s"'<>]+/gi, "[URL ocultada]")
         .replace(/[\r\n\t]+/g, " ")
         .trim();
 }
@@ -750,6 +750,9 @@ ipcMain.handle("player:command", (_event, request) => {
     }
     if (command === "volume") {
         return sendMpv(["set_property", "volume", Math.max(0, Math.min(130, Number(value) || 0))]);
+    }
+    if (command === "adjustVolume") {
+        return sendMpv(["add", "volume", Number(value) || 0]);
     }
     return false;
 });
