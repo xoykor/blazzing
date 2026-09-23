@@ -31,3 +31,9 @@ compile_commands.json
 # Samsung Tizen local build/signing outputs
 /tizen/.buildResult/
 *.wgt
+
+# Windows desktop port
+/windows/node_modules/
+/windows/app/
+/windows/dist/
+/windows/mpv/
