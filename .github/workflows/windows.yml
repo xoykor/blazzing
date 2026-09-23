@@ -38,11 +38,21 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Validate shared frontend
+      - name: Validate JavaScript syntax
         run: |
+          node --check main.js
+          node --check preload.js
+          node --check js/platform.js
+          node --check scripts/prepare-app.js
+
+      - name: Validate shared frontend
+        shell: bash
+        run: |
+          set -euo pipefail
           npm run prepare-app
-          node ../tizen/tests/providers.test.js
-          node ../tizen/tests/pairing.test.js
+          for file in ../tizen/tests/*.test.js; do
+            node "$file"
+          done
 
       - name: Package Windows app
         run: npm run dist
