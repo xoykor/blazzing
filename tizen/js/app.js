@@ -213,6 +213,10 @@
     }
 
     function exitApplication() {
+        if (window.BlazzingWindowsNative && window.BlazzingWindowsNative.close) {
+            window.BlazzingWindowsNative.close();
+            return;
+        }
         if (window.tizen && window.tizen.application) {
             try {
                 window.tizen.application.getCurrentApplication().exit();
@@ -384,6 +388,31 @@
             event.preventDefault();
             goBack();
             return;
+        }
+
+        if (window.BlazzingWindowsNative && event.ctrlKey && !event.altKey) {
+            if (state.view === "catalog" && code === 68) {
+                event.preventDefault();
+                toggleFocusedFavorite();
+                return;
+            }
+            if (state.view === "catalog" && code === 70) {
+                event.preventDefault();
+                byId("catalog-search").focus();
+                return;
+            }
+            if (state.view === "catalog" && code === 76) {
+                event.preventDefault();
+                byId("lists-button").click();
+                return;
+            }
+            if (state.view === "catalog" && (code === 49 || code === 50 || code === 51)) {
+                event.preventDefault();
+                var section = code === 49 ? "live" : (code === 50 ? "vod" : "series");
+                var sectionButton = document.querySelector('[data-section="' + section + '"]');
+                if (sectionButton) { sectionButton.click(); }
+                return;
+            }
         }
 
         if (state.view === "catalog" &&
@@ -1667,7 +1696,9 @@
 
     if (window.BlazzingBoot) { window.BlazzingBoot.markReady(); }
 
-    if (window.webapis && window.webapis.avplay) {
+    if (window.BlazzingWindowsNative) {
+        byId("platform-badge").textContent = "Windows · mpv";
+    } else if (window.webapis && window.webapis.avplay) {
         byId("platform-badge").textContent = "Tizen · AVPlay";
     } else {
         byId("platform-badge").textContent = "Browser · HTML5 fallback";
