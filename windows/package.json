@@ -12,8 +12,8 @@
     "test": "node tests/prepare-app.test.js"
   },
   "devDependencies": {
-    "electron": "^38.0.0",
-    "electron-builder": "^26.0.12"
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3"
   },
   "build": {
     "appId": "io.github.xoykor.Blazzing",
@@ -47,5 +47,8 @@
     "portable": {
       "artifactName": "Blazzing-${version}-Windows-${arch}-Portable.${ext}"
     }
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
