@@ -226,6 +226,11 @@
                 native.playerCommand("seek", Number(seconds) || 0);
             }
         },
+        adjustVolume: function (delta) {
+            if (currentItem) {
+                native.playerCommand("adjustVolume", Number(delta) || 0);
+            }
+        },
         currentTime: function () { return currentTimeMs; },
         item: function () { return currentItem; },
         isAvPlay: function () { return false; },
