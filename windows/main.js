@@ -516,25 +516,27 @@ async function ensureMpvRuntime() {
 
     const executable = resolveMpvPath();
 
+    let child;
     try {
-        mpvProcess = spawn(executable, args, {
+        child = spawn(executable, args, {
             windowsHide: true,
             stdio: ["ignore", "pipe", "pipe"]
         });
+        mpvProcess = child;
     } catch (error) {
         mpvProcess = null;
         throw new Error("Não foi possível iniciar mpv.exe: " + error.message);
     }
 
-    if (mpvProcess.stdout) {
-        mpvProcess.stdout.on("data", appendMpvLog);
+    if (child.stdout) {
+        child.stdout.on("data", appendMpvLog);
     }
-    if (mpvProcess.stderr) {
-        mpvProcess.stderr.on("data", appendMpvLog);
+    if (child.stderr) {
+        child.stderr.on("data", appendMpvLog);
     }
 
-    mpvProcess.on("error", (error) => {
-        if (!mpvStopping) {
+    child.on("error", (error) => {
+        if (mpvProcess === child && !mpvStopping) {
             playerState(
                 error && error.code === "ENOENT"
                     ? "mpv.exe não encontrado. Instale o mpv ou defina VIPTV_MPV_PATH."
@@ -547,7 +549,10 @@ async function ensureMpvRuntime() {
         }
     });
 
-    mpvProcess.on("exit", (code) => {
+    child.on("exit", (code) => {
+        if (mpvProcess !== child) {
+            return;
+        }
         const unexpected = !mpvStopping;
         mpvProcess = null;
         if (mpvSocket) {
