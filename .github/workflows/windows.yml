@@ -85,7 +85,7 @@ jobs:
           $tag = "v$version"
           gh release view $tag --repo "${{ github.repository }}"
           Get-ChildItem dist -File | Where-Object {
-            $_.Name -match '\.exe(\.sha256)?
+            $_.Extension -eq ".exe" -or $_.Name.EndsWith(".exe.sha256")
           } | ForEach-Object {
             gh release upload $tag $_.FullName --clobber --repo "${{ github.repository }}"
           }
