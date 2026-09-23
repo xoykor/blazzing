@@ -8,9 +8,9 @@
   <a href="README.md">English</a> · <strong>Português (Brasil)</strong>
 </p>
 
-Blazzing é um player IPTV nativo para Linux escrito em C17. Ele reúne interface X11/XWayland, renderização Cairo/Pango, reprodução persistente com mpv, carregamento assíncrono de imagens, persistência SQLite, Xtream Codes, M3U/M3U8 e Pluto TV em um único aplicativo desktop.
+Blazzing é um player IPTV multiplataforma. O cliente desktop Linux é nativo em C17, com X11/XWayland, Cairo/Pango, SQLite e reprodução persistente via mpv; o repositório também contém portes para Samsung Tizen e Windows.
 
-> **Estado do projeto:** a **v1.4.7** é a release atual do desktop Linux. O repositório também contém um porte independente para Samsung Tizen. A entrada de playlist pelo celular usa um relay cifrado via Cloudflare, mantendo a descriptografia local no cliente.
+> **Estado do projeto:** a **v1.4.7** é a release atual do desktop Linux. Os portes para Samsung Tizen e Windows são mantidos no mesmo repositório. O porte Windows atualmente é compilável pelo código-fonte/CI e ainda não possui uma release Windows versionada publicada. A entrada de playlist pelo celular usa um relay cifrado via Cloudflare, mantendo a descriptografia local no cliente.
 
 > Use o Blazzing somente com listas, servidores e conteúdos que você tenha autorização para acessar.
 
@@ -68,6 +68,12 @@ A aplicação nativa é voltada a Linux com **X11 ou XWayland**. A interface usa
 O repositório também contém um **Tizen Web App** separado em `tizen/`. Ele usa HTML/CSS/JavaScript, navegação por controle remoto e Samsung AVPlay quando disponível. Playlists M3U podem ser persistidas no armazenamento privado do aplicativo e reabertas sem novo download até que o usuário escolha explicitamente **Atualizar playlist**.
 
 O porte Tizen não depende de X11, Cairo, SQLite ou mpv. Consulte [tizen/README.md](tizen/README.md) para build, instalação, armazenamento e limitações atuais.
+
+### Desktop Windows
+
+O porte Windows fica em `windows/`. Ele reaproveita o frontend de catálogo/providers do Tizen, mas substitui as APIs Samsung por uma ponte Electron restrita para rede, armazenamento persistente de playlists e reprodução nativa com mpv. O mpv é embutido pelo HWND do Windows e controlado por um named pipe privado, então URLs de mídia são enviadas por JSON IPC em vez de argumentos do processo.
+
+O build por código-fonte requer atualmente Windows 10 ou superior, Node.js para empacotamento e `mpv.exe` no `PATH`, em um dos caminhos locais documentados ou definido por `VIPTV_MPV_PATH`. Veja [windows/README.md](windows/README.md).
 
 ## Controles
 
@@ -153,6 +159,17 @@ Também existe um helper em Fish:
 ```fish
 ./scripts/build-cachyos.fish
 ```
+
+### Windows
+
+```powershell
+git clone https://github.com/xoykor/blazzing.git
+cd blazzing\windows
+npm install
+npm start
+```
+
+Para gerar instalador NSIS e pacote portátil, use `npm run dist`. O build Windows usa um `mpv.exe` externo; consulte [windows/README.md](windows/README.md) para os caminhos aceitos e controles.
 
 ### Debian / Ubuntu
 
@@ -243,7 +260,7 @@ Veja [Configuração e diagnóstico](docs/CONFIGURATION.pt-BR.md).
 
 O **núcleo do desktop Linux está maduro** e mudanças devem priorizar confiabilidade, segurança, compatibilidade e manutenção. Grandes expansões de funcionalidade no desktop são deliberadamente conservadoras.
 
-O porte Samsung Tizen é mantido separadamente dentro do mesmo repositório e pode evoluir de forma independente, preservando compatibilidade com playlists grandes e navegação por controle remoto.
+Os portes Samsung Tizen e Windows são mantidos separadamente dentro do mesmo repositório. O porte Windows compartilha intencionalmente o frontend de catálogo/providers do Tizen, mantendo a integração nativa de desktop isolada em `windows/`.
 
 Ainda não implementados na interface Linux:
 
@@ -272,6 +289,7 @@ src/tools/             ferramentas de diagnóstico/desenvolvimento
 tests/                 testes automatizados
 flatpak/               manifesto e metadados Flatpak
 tizen/                 Web App para Samsung Tizen
+windows/               porte desktop Windows (Electron + IPC do mpv)
 worker/                relay cifrado de pareamento
 docs/                  documentação técnica
 ```
@@ -285,6 +303,7 @@ docs/                  documentação técnica
 - [Desenvolvimento](docs/DEVELOPMENT.pt-BR.md)
 - [Flatpak](flatpak/README.md)
 - [Porte Tizen](tizen/README.md)
+- [Porte Windows](windows/README.md)
 - [Worker de pareamento](worker/README.md)
 - [Changelog](CHANGELOG.pt-BR.md)
 
