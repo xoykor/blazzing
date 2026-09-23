@@ -44,12 +44,14 @@ jobs:
           node --check preload.js
           node --check js/platform.js
           node --check scripts/prepare-app.js
+          node --check tests/prepare-app.test.js
 
       - name: Validate shared frontend
         shell: bash
         run: |
           set -euo pipefail
           npm run prepare-app
+          npm test
           for file in ../tizen/tests/*.test.js; do
             node "$file"
           done
