@@ -286,6 +286,13 @@
             return true;
         }
 
+        if ((keyCode === 38 || keyCode === 40) &&
+                window.BlazzingPlayer.adjustVolume) {
+            window.BlazzingPlayer.adjustVolume(keyCode === 38 ? 5 : -5);
+            showHud();
+            return true;
+        }
+
         showHud();
         return false;
     }
