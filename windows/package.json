@@ -28,16 +28,23 @@
       "app/**/*",
       "package.json"
     ],
-    "artifactName": "Blazzing-${version}-Windows-${arch}.${ext}",
     "win": {
-      "target": ["nsis", "portable"]
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "app/tizen/icon.png"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "artifactName": "Blazzing-${version}-Windows-${arch}-Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "Blazzing-${version}-Windows-${arch}-Portable.${ext}"
     }
   }
 }
