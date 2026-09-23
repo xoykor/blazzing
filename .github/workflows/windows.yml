@@ -16,7 +16,7 @@ on:
       - ".github/workflows/windows.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -59,9 +59,33 @@ jobs:
       - name: Package Windows app
         run: npm run dist
 
+      - name: Generate Windows SHA-256 files
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -Filter *.exe | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Set-Content "$($_.FullName).sha256" -Encoding ascii
+          }
+
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: blazzing-windows
           path: windows/dist/*
           if-no-files-found: error
+
+      - name: Publish Windows assets to matching GitHub release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $tag = "v$version"
+          gh release view $tag --repo "${{ github.repository }}"
+          Get-ChildItem dist -File | Where-Object {
+            $_.Name -match '\.exe(\.sha256)?
+          } | ForEach-Object {
+            gh release upload $tag $_.FullName --clobber --repo "${{ github.repository }}"
+          }
