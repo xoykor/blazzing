@@ -1,0 +1,57 @@
+name: Windows
+
+on:
+  push:
+    branches:
+      - main
+      - feat/windows-desktop-port
+    paths:
+      - "windows/**"
+      - "tizen/**"
+      - ".github/workflows/windows.yml"
+  pull_request:
+    paths:
+      - "windows/**"
+      - "tizen/**"
+      - ".github/workflows/windows.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        working-directory: windows
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: windows/package-lock.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Validate shared frontend
+        run: |
+          npm run prepare-app
+          node ../tizen/tests/providers.test.js
+          node ../tizen/tests/pairing.test.js
+
+      - name: Package Windows app
+        run: npm run dist
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: blazzing-windows
+          path: windows/dist/*
+          if-no-files-found: error
