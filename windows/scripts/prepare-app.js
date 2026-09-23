@@ -12,6 +12,11 @@ const destination = path.join(appRoot, "tizen");
 fs.rmSync(appRoot, { recursive: true, force: true });
 fs.mkdirSync(appRoot, { recursive: true });
 fs.cpSync(source, destination, { recursive: true });
+fs.copyFileSync(path.resolve(windowsRoot, "..", "LICENSE"), path.join(appRoot, "LICENSE"));
+fs.copyFileSync(
+    path.resolve(windowsRoot, "..", "THIRD_PARTY_NOTICES.md"),
+    path.join(appRoot, "THIRD_PARTY_NOTICES.md")
+);
 
 const indexPath = path.join(destination, "index.html");
 let html = fs.readFileSync(indexPath, "utf8");
