@@ -22,6 +22,9 @@ typedef struct {
     char *channel_id;
     char *logo_url;
     char *stream_url;
+    /* Optional metadata used only by Blazzing's interactive artwork resolver. */
+    char *title;
+    char *artwork_kind;
     int64_t priority;
 } vip_thumbnail_request_t;
 
