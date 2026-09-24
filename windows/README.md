@@ -1,30 +1,25 @@
 # Blazzing for Windows
 
-The Windows desktop port reuses the Samsung/Tizen catalog frontend and replaces Samsung-specific APIs with an Electron host. Networking, playlist persistence and playback are handled outside the browser sandbox.
+The Windows build is a dedicated desktop client. It no longer copies or patches the Samsung/Tizen application.
 
-## Runtime architecture
+## Architecture
 
-- **Electron**: desktop window, native keyboard/fullscreen handling and IPC boundary.
-- **Shared frontend**: the Tizen HTML/CSS/provider/controller code is copied at build time so catalog behavior stays aligned between TV and Windows.
-- **mpv**: persistent native player embedded into a dedicated Windows window through `--wid=<HWND>`.
-- **JSON IPC**: mpv is controlled through a private Windows named pipe. Stream URLs are sent through that pipe and are not placed in the mpv command line.
-- **Playlist cache**: remote M3U/M3U8 files are stored under Electron's per-user application-data directory and reused until **Atualizar playlist** is selected.
+- **Electron host**: native Windows window, IPC boundary, networking and local playlist cache.
+- **Windows renderer**: its own HTML/CSS/JavaScript UI under `windows/`.
+- **Xtream Codes**: live TV, movies, series and episode loading through the provider API.
+- **M3U/M3U8**: remote playlist download, persistent raw cache and explicit refresh.
+- **mpv**: native player launched as its own Windows window and controlled through a private named pipe.
+- **Packaged runtime**: GitHub Actions downloads an x64 mpv build and places it under `resources/mpv` inside the release package.
 
-## Requirements
-
-- Windows 10 or newer, x64.
-- Node.js 20+ only when building from source.
-- `mpv.exe` available through one of these locations:
-  1. `VIPTV_MPV_PATH`;
-  2. `resources/mpv/mpv.exe` beside a packaged build;
-  3. `windows/mpv/mpv.exe` during development;
-  4. the system `PATH`.
-
-The repository does not redistribute an mpv binary. This keeps the Windows package independent of third-party binary release schedules and licensing bundles.
+The Windows frontend does not import files from `tizen/`.
 
 ## Run from source
 
-From PowerShell:
+Requirements:
+
+- Windows 10 or newer, x64.
+- Node.js 20+.
+- mpv available through `VIPTV_MPV_PATH`, `windows/runtime/mpv/mpv.exe`, or system `PATH`.
 
 ```powershell
 cd windows
@@ -32,17 +27,9 @@ npm install
 npm start
 ```
 
-From `cmd.exe`:
+## Build installers locally
 
-```bat
-cd windows
-npm install
-npm start
-```
-
-The `prepare-app` step copies `../tizen` into a generated `windows/app/` directory and injects the Windows bridge. Do not edit the generated copy.
-
-## Build installers
+Place `mpv.exe` in `windows/runtime/mpv/` first, then:
 
 ```powershell
 cd windows
@@ -50,50 +37,32 @@ npm install
 npm run dist
 ```
 
-Outputs are written to `windows/dist/`:
+Outputs are written to `windows/dist/`: an NSIS installer and a portable executable.
 
-- NSIS installer;
-- portable executable/package produced by electron-builder.
+## Release build
 
-## Controls
+The Windows GitHub Actions workflow validates syntax, runs architecture tests, downloads the current x64 mpv runtime, packages both Windows targets, generates SHA-256 files, and uploads the assets to the GitHub release matching `package.json`.
 
-Catalog:
+## Current Windows features
 
-- Arrow keys: navigation.
-- Enter: activate.
-- Ctrl+1 / Ctrl+2 / Ctrl+3: TV / Movies / Series.
-- Ctrl+F: search.
-- Ctrl+D: favorite the focused card.
-- Ctrl+L: saved lists.
-- Esc: back/exit according to the current screen.
-- F11: fullscreen.
+- Xtream login and saved profiles;
+- M3U/M3U8 profiles and local playlist cache;
+- TV, movies and series;
+- episode selection by season;
+- categories and search;
+- favorites;
+- VOD/episode resume progress;
+- native mpv playback;
+- installer and portable package.
 
-Player:
+## Player controls
 
-- Space / Enter: play/pause.
-- Left / Right: seek ±10 seconds for VOD/episodes, previous/next channel for live TV.
-- Esc: return to the catalog.
-- F11: fullscreen.
+- `Esc`: close the player and return to the catalog;
+- `Space`: play/pause;
+- `Left` / `Right`: seek -10 / +10 seconds;
+- `Up` / `Down`: volume;
+- `F`: fullscreen.
 
-## Security notes
+## Security boundary
 
-The renderer has Node integration disabled and uses context isolation. HTTP requests and filesystem writes cross a narrow preload bridge. mpv receives media URLs over its private named pipe, not argv, reducing accidental credential exposure in process listings.
-
-As on Tizen, saving an Xtream password is optional. The current shared profile format uses frontend local storage for that opt-in secret; a future Windows-specific credential-vault backend can replace it without changing provider logic.
-
-## Current scope
-
-The Windows port includes:
-
-- M3U/M3U8;
-- Xtream Codes;
-- live TV, movies and series;
-- categories, search and favorites;
-- saved profiles;
-- persisted M3U cache and explicit refresh;
-- resume/progress;
-- Lista card/fallback shards;
-- QR pairing;
-- mpv playback and fallback sources.
-
-Pluto TV is not yet exposed by the shared web frontend, so Windows currently matches the Tizen feature path rather than the Linux X11 hub's separate Pluto mode.
+The renderer has Node integration disabled and context isolation enabled. Network and filesystem access are only exposed through the preload IPC bridge. Media URLs are sent to mpv over the private named pipe rather than through its process command line.
