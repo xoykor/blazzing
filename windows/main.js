@@ -534,6 +534,13 @@ ipcMain.handle("app:close", () => {
     app.quit();
     return true;
 });
+ipcMain.handle("app:toggle-fullscreen", () => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+        return false;
+    }
+    mainWindow.setFullScreen(!mainWindow.isFullScreen());
+    return mainWindow.isFullScreen();
+});
 ipcMain.handle("net:text", async (_event, request) => {
     return requestText(request && request.url, request && request.options);
 });
