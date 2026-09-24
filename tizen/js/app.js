@@ -719,10 +719,42 @@
     function downloadAndStoreM3u(profile, kind, refreshing) {
         setBusy(true, refreshing ? "Atualizando playlist…" : "Baixando playlist pela primeira vez…");
 
+        if (realTizenDevice()) {
+            /*
+             * O XMLHttpRequest mantém responseText inteiro na heap JavaScript.
+             * Em uma playlist de ~85 MiB isso pode derrubar o Web Runtime da TV.
+             * O Download API do Tizen grava direto no filesystem e mantém a
+             * playlist fora da heap durante a transferência.
+             */
+            window.BlazzingStorage.downloadPlaylistToCache(profile.url, {
+                timeout: 180000,
+                maxBytes: window.BlazzingNet.MAX_RESPONSE_BYTES,
+                onProgress: function (receivedSize, totalSize) {
+                    var receivedMiB = Math.floor(receivedSize / (1024 * 1024));
+                    var totalMiB = totalSize > 0 ?
+                        Math.floor(totalSize / (1024 * 1024)) : 0;
+                    setBusy(
+                        true,
+                        refreshing ?
+                            "Atualizando playlist… " + receivedMiB +
+                                (totalMiB ? "/" + totalMiB : "") + " MiB" :
+                            "Baixando playlist… " + receivedMiB +
+                                (totalMiB ? "/" + totalMiB : "") + " MiB"
+                    );
+                }
+            }).then(function () {
+                return openStoredM3u(profile, kind);
+            }).catch(function (error) {
+                setBusy(false);
+                showToast(error.message || "Falha ao baixar ou armazenar a playlist.");
+            });
+            return;
+        }
+
         /*
-         * No Tizen não monte o catálogo inteiro a partir da resposta HTTP.
-         * Grave a M3U bruta primeiro e depois abra somente a seção solicitada
-         * pelo parser incremental de baixo consumo de memória.
+         * Fallback para navegador/ambiente de desenvolvimento. Em TV real
+         * nunca caímos neste XHR, pois materializar listas gigantes em
+         * responseText é justamente o comportamento que queremos evitar.
          */
         window.BlazzingNet.text(profile.url, {
             timeout: 60000,
