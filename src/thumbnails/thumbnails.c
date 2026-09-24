@@ -123,6 +123,8 @@ static void request_clear(vip_thumbnail_request_t *r) {
     free(r->channel_id);
     free(r->logo_url);
     free(r->stream_url);
+    free(r->title);
+    free(r->artwork_kind);
     memset(r, 0, sizeof(*r));
 }
 
@@ -134,8 +136,11 @@ static vip_status_t request_copy(vip_thumbnail_request_t *dst, const vip_thumbna
     dst->channel_id = vip_strdup(src->channel_id);
     dst->logo_url = vip_strdup_nullable(src->logo_url);
     dst->stream_url = vip_strdup(src->stream_url);
+    dst->title = vip_strdup_nullable(src->title);
+    dst->artwork_kind = vip_strdup_nullable(src->artwork_kind);
     dst->priority = src->priority;
-    if (!dst->provider_id || !dst->channel_id || !dst->stream_url) {
+    if (!dst->provider_id || !dst->channel_id || !dst->stream_url ||
+        (src->title && !dst->title) || (src->artwork_kind && !dst->artwork_kind)) {
         request_clear(dst);
         vip_error_set(error, VIP_ERR_NOMEM, "sem memória para pedido de thumbnail");
         return VIP_ERR_NOMEM;

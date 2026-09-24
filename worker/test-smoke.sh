@@ -52,8 +52,15 @@ expect_status 204 delete -X DELETE "${BASE}/api/v1/sessions/${ID}"
 expect_status 410 deleted-poll "${BASE}/api/v1/sessions/${ID}/payload"
 expect_status 204 health-head -I "${BASE}/healthz"
 
+ARTWORK='{"items":[{"id":"smoke","title":"Futurama","kind":"tv"}]}'
+expect_status 204 artwork-preflight -X OPTIONS -H "Origin: app://blazzing" -H "Access-Control-Request-Method: POST" "${BASE}/api/v1/artwork/resolve"
+expect_status 200 artwork-resolve -X POST -H 'Content-Type: application/json' --data "${ARTWORK}" "${BASE}/api/v1/artwork/resolve"
+grep -q '"id":"smoke"' "${BODY}"
+expect_status 200 artwork-export "${BASE}/api/v1/artwork/export?limit=10"
+grep -q '"items"' "${BODY}"
+
 HEADERS="/tmp/blazzing-worker-headers"
 curl --silent --dump-header "${HEADERS}" --output /dev/null -H "Origin: app://blazzing" "${BASE}/api/v1/sessions/${ID}/payload" || true
 grep -qi "^Access-Control-Allow-Origin: \*" "${HEADERS}"
 
-echo "Worker pairing smoke test: OK"
+echo "Worker pairing + artwork smoke test: OK"

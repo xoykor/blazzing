@@ -310,6 +310,62 @@
         });
     }
 
+    function postJson(url, value, options) {
+        options = options || {};
+        return new Promise(function (resolve, reject) {
+            var xhr = new XMLHttpRequest();
+            var done = false;
+            var limit = options.maxBytes || (2 * 1024 * 1024);
+            var body;
+
+            function fail(message) {
+                if (done) { return; }
+                done = true;
+                reject(new Error(message));
+            }
+
+            try {
+                body = JSON.stringify(value);
+                xhr.open("POST", url, true);
+                xhr.timeout = options.timeout || 15000;
+                xhr.withCredentials = false;
+                xhr.setRequestHeader("Content-Type", "application/json");
+                xhr.onprogress = function (event) {
+                    if (event.loaded > limit) {
+                        try { xhr.abort(); } catch (ignore) {}
+                        fail("A resposta excede o limite permitido.");
+                    }
+                };
+                xhr.onerror = function () { fail("Falha de rede ao acessar o servidor."); };
+                xhr.ontimeout = function () { fail("Tempo limite excedido ao acessar o servidor."); };
+                xhr.onabort = function () { fail("Requisição cancelada."); };
+                xhr.onload = function () {
+                    var parsed;
+                    if (done) { return; }
+                    if (xhr.status < 200 || xhr.status >= 300) {
+                        fail("Servidor respondeu HTTP " + xhr.status + ".");
+                        return;
+                    }
+                    if ((xhr.responseText || "").length > limit) {
+                        fail("A resposta excede o limite permitido.");
+                        return;
+                    }
+                    try {
+                        parsed = JSON.parse(xhr.responseText || "{}");
+                    } catch (error) {
+                        fail("O servidor retornou JSON inválido.");
+                        return;
+                    }
+                    done = true;
+                    resolve(parsed);
+                };
+                xhr.send(body);
+            } catch (error) {
+                fail("Não foi possível iniciar a requisição.");
+            }
+        });
+    }
+
     function readJson(key, fallback) {
         try {
             var raw = localStorage.getItem(STORAGE_PREFIX + key);
@@ -415,7 +471,8 @@
     window.BlazzingNet = {
         MAX_RESPONSE_BYTES: MAX_RESPONSE_BYTES,
         text: requestText,
-        json: requestJson
+        json: requestJson,
+        postJson: postJson
     };
     window.BlazzingStorage = storage;
 }());

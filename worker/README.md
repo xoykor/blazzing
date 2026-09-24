@@ -19,6 +19,30 @@ expiry state; the AES key is never sent to it.
 
 The same relay protocol is used by the Linux desktop client and the Samsung Tizen port.
 
+## On-demand artwork
+
+The Worker also exposes `POST /api/v1/artwork/resolve`. Linux and Tizen call
+this route only for visible movie/series cards that have no provider/static
+artwork. Requests are small batches on Tizen and interactive thumbnail jobs on
+Linux.
+
+The Worker keeps the TMDB token server-side, resolves posters conservatively by
+title/year, and stores successful/negative lookups in the global
+`ArtworkCatalog` SQLite Durable Object. It returns only poster URLs; image
+bytes still come directly from the TMDB image CDN.
+
+Configure the Worker secret before deployment:
+
+```sh
+cd worker
+npx wrangler secret put TMDB_API_TOKEN
+```
+
+The public read-only `GET /api/v1/artwork/export` endpoint is consumed by the
+`xoykor/Lista` regeneration pipeline. This periodically folds discoveries
+made by Blazzing into `artwork-cache.json` and the static `cards/` shards,
+so a poster discovered on one device becomes part of the shared Lista cache.
+
 ## Local test
 
 ```sh
@@ -52,7 +76,9 @@ Pages site is required.
 
 ## Security boundary
 
-The Worker is a short-lived relay, not a playlist proxy. It does not fetch or play the submitted M3U/M3U8 URL and does not need the plaintext playlist data. Confidentiality depends on clients keeping the fragment-carried AES key local and using the expected HTTPS relay endpoint.
+The Worker is not a playlist proxy. Pairing state is short-lived; the artwork
+catalog stores only normalized title metadata, TMDB identifiers and poster
+URLs. It does not fetch or play the submitted M3U/M3U8 URL and does not need the plaintext playlist data. Confidentiality depends on clients keeping the fragment-carried AES key local and using the expected HTTPS relay endpoint.
 
 ## License
 

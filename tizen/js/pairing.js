@@ -616,6 +616,7 @@
     }
 
     window.BlazzingPairing = {
+        baseUrl: function () { return DEFAULT_BASE_URL; },
         start: start,
         stop: stop,
         qrSvg: qrSvg,

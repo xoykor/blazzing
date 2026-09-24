@@ -150,7 +150,7 @@ if(BUILD_TESTING)
     add_test(NAME thumbnails COMMAND test_thumbnails)
 
     add_executable(test_thumbnail_policy tests/test_thumbnail_policy.c src/thumbnails/thumbnail_policy.c)
-    target_link_libraries(test_thumbnail_policy PRIVATE vip_thumbnails Threads::Threads)
+    target_link_libraries(test_thumbnail_policy PRIVATE vip_thumbnails PkgConfig::CURL PkgConfig::JSONC Threads::Threads)
     vip_thumbnail_policy_wrap(test_thumbnail_policy)
     vip_warnings(test_thumbnail_policy)
     add_test(NAME thumbnail_policy COMMAND test_thumbnail_policy)
