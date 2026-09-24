@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: http: https:; style-src 'self'; script-src 'self'; connect-src 'none';">
+  <title>Blazzing</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">B</div>
+        <div>
+          <strong>Blazzing</strong>
+          <span>Windows Desktop</span>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button id="back-series" class="ghost hidden">Voltar para séries</button>
+        <button id="back-login" class="ghost hidden">Trocar fonte</button>
+        <button id="fullscreen" class="ghost" title="F11">Tela cheia</button>
+      </div>
+    </header>
+
+    <main>
+      <section id="login-view" class="login-view">
+        <div class="hero">
+          <p class="eyebrow">PLAYER IPTV DESKTOP</p>
+          <h1>Conecte sua lista</h1>
+          <p>Cliente Windows independente para Xtream Codes e M3U/M3U8, com reprodução via mpv.</p>
+        </div>
+
+        <div class="login-card">
+          <div class="mode-tabs">
+            <button id="mode-xtream" class="mode-tab active">Xtream Codes</button>
+            <button id="mode-m3u" class="mode-tab">M3U / M3U8</button>
+          </div>
+
+          <label>Perfil salvo
+            <select id="saved-profile">
+              <option value="">Novo perfil</option>
+            </select>
+          </label>
+
+          <label>Nome do perfil
+            <input id="profile-name" autocomplete="off" placeholder="Minha lista">
+          </label>
+
+          <div id="xtream-fields">
+            <label>Servidor
+              <input id="server" autocomplete="off" placeholder="http://servidor:porta">
+            </label>
+            <div class="two-cols">
+              <label>Usuário
+                <input id="username" autocomplete="username">
+              </label>
+              <label>Senha
+                <input id="password" type="password" autocomplete="current-password">
+              </label>
+            </div>
+          </div>
+
+          <div id="m3u-fields" class="hidden">
+            <label>URL da playlist
+              <input id="m3u-url" autocomplete="off" placeholder="https://exemplo/lista.m3u">
+            </label>
+            <label class="check-row">
+              <input id="m3u-refresh" type="checkbox">
+              <span>Baixar novamente e substituir o cache local</span>
+            </label>
+          </div>
+
+          <div class="login-actions">
+            <button id="connect" class="primary">Conectar</button>
+            <button id="delete-profile" class="danger ghost hidden">Excluir perfil</button>
+          </div>
+          <p id="login-status" class="status"></p>
+        </div>
+      </section>
+
+      <section id="browser-view" class="browser-view hidden">
+        <aside class="sidebar">
+          <div class="content-tabs">
+            <button data-kind="live" class="content-tab active">TV</button>
+            <button data-kind="vod" class="content-tab">Filmes</button>
+            <button data-kind="series" class="content-tab">Séries</button>
+          </div>
+          <div class="sidebar-heading">Categorias</div>
+          <button id="all-category" class="category active">Todos</button>
+          <div id="categories"></div>
+        </aside>
+
+        <section class="catalog">
+          <div class="catalog-toolbar">
+            <div>
+              <h2 id="catalog-title">TV</h2>
+              <p id="catalog-count">0 itens</p>
+            </div>
+            <input id="search" type="search" placeholder="Pesquisar">
+          </div>
+          <div id="catalog-status" class="status catalog-status"></div>
+          <div id="cards" class="cards"></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <template id="card-template">
+    <article class="media-card" tabindex="0">
+      <div class="poster-wrap">
+        <img class="poster" alt="">
+        <div class="poster-fallback">B</div>
+      </div>
+      <div class="media-copy">
+        <strong class="media-title"></strong>
+        <span class="media-meta"></span>
+      </div>
+      <button class="favorite" title="Favoritar">☆</button>
+    </article>
+  </template>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
