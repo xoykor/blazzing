@@ -239,7 +239,7 @@
         };
     }
 
-    function parseM3u(text, source) {
+    function createM3uParser(source) {
         var catalogs = {
             live: { items: [], categories: [] },
             vod: { items: [], categories: [] },
@@ -254,8 +254,8 @@
         var fallbackIndexBase = "";
         var fallbackIndexVersion = "";
         var fallbackIndexShardLength = 2;
-        var cursor = 0;
-        var next;
+        var lineCarry = "";
+        var hasM3uMarker = false;
 
         function ensureCategory(kind, group) {
             var safeGroup = cleanCategoryName(group, kind);
@@ -275,6 +275,10 @@
 
             if (!line) {
                 return;
+            }
+
+            if (line.indexOf("#EXTM3U") === 0 || line.indexOf("#EXTINF:") === 0) {
+                hasM3uMarker = true;
             }
 
             if (line.indexOf("#EXT-X-LISTA-FALLBACK:") === 0) {
@@ -435,40 +439,106 @@
             });
         }
 
-        while (cursor <= text.length) {
-            next = text.indexOf("\n", cursor);
-            if (next === -1) {
-                consumeLine(text.slice(cursor));
-                break;
+        function consumeTextChunk(chunk) {
+            var text = lineCarry + String(chunk || "");
+            var cursor = 0;
+            var next;
+
+            while (cursor < text.length) {
+                next = text.indexOf("\n", cursor);
+                if (next === -1) {
+                    lineCarry = text.slice(cursor);
+                    return;
+                }
+                consumeLine(text.slice(cursor, next));
+                cursor = next + 1;
             }
-            consumeLine(text.slice(cursor, next));
-            cursor = next + 1;
+            lineCarry = "";
         }
 
-        catalogs.series.items.forEach(function (series) {
-            series.episodes.sort(function (a, b) {
-                if (a.season !== b.season) {
-                    return a.season - b.season;
+        function finish() {
+            if (lineCarry) {
+                consumeLine(lineCarry);
+                lineCarry = "";
+            }
+
+            catalogs.series.items.forEach(function (series) {
+                series.episodes.sort(function (a, b) {
+                    if (a.season !== b.season) {
+                        return a.season - b.season;
+                    }
+                    return a.episode - b.episode;
+                });
+            });
+
+            ["live", "vod", "series"].forEach(function (kind) {
+                catalogs[kind].categories.sort(function (a, b) {
+                    return String(a.name || "").localeCompare(
+                        String(b.name || ""),
+                        "pt-BR",
+                        { sensitivity: "base", numeric: true }
+                    );
+                });
+
+                /* Keep provider order for items. Sorting huge IPTV catalogs here
+                 * causes long UI stalls on televisions; categories are sorted
+                 * separately and filtering keeps item order stable. */
+            });
+
+            return catalogs;
+        }
+
+        return {
+            consumeTextChunk: consumeTextChunk,
+            finish: finish,
+            hasM3uMarker: function () { return hasM3uMarker; }
+        };
+    }
+
+    function parseM3u(text, source) {
+        var parser = createM3uParser(source);
+        parser.consumeTextChunk(text);
+        return parser.finish();
+    }
+
+    function parseM3uAsync(text, source, options) {
+        options = options || {};
+        text = String(text || "");
+
+        var parser = createM3uParser(source);
+        var cursor = 0;
+        var chunkChars = Math.max(
+            32 * 1024,
+            Math.min(1024 * 1024, options.chunkChars || 256 * 1024)
+        );
+
+        return new Promise(function (resolve, reject) {
+            function step() {
+                var end;
+
+                try {
+                    if (cursor >= text.length) {
+                        resolve(parser.finish());
+                        return;
+                    }
+
+                    end = Math.min(text.length, cursor + chunkChars);
+                    parser.consumeTextChunk(text.slice(cursor, end));
+                    cursor = end;
+
+                    if (options.onProgress) {
+                        options.onProgress(cursor, text.length);
+                    }
+                } catch (error) {
+                    reject(error);
+                    return;
                 }
-                return a.episode - b.episode;
-            });
+
+                setTimeout(step, 0);
+            }
+
+            setTimeout(step, 0);
         });
-
-        ["live", "vod", "series"].forEach(function (kind) {
-            catalogs[kind].categories.sort(function (a, b) {
-                return String(a.name || "").localeCompare(
-                    String(b.name || ""),
-                    "pt-BR",
-                    { sensitivity: "base", numeric: true }
-                );
-            });
-
-            /* Keep provider order for items. Sorting huge IPTV catalogs here
-             * causes long UI stalls on televisions; categories are sorted
-             * separately and filtering keeps item order stable. */
-        });
-
-        return catalogs;
     }
 
     function parseDownloadedM3u(text, url) {
@@ -483,10 +553,15 @@
             timeout: 60000,
             maxBytes: window.BlazzingNet.MAX_RESPONSE_BYTES
         }).then(function (text) {
-            return {
-                text: text,
-                catalogs: parseDownloadedM3u(text, url)
-            };
+            if (text.indexOf("#EXTM3U") === -1 && text.indexOf("#EXTINF:") === -1) {
+                throw new Error("O conteúdo recebido não parece ser uma playlist M3U.");
+            }
+            return parseM3uAsync(text, url).then(function (catalogs) {
+                return {
+                    text: text,
+                    catalogs: catalogs
+                };
+            });
         });
     }
 
@@ -775,7 +850,9 @@
         parseEpisodeLabel: parseEpisodeLabel,
         loadM3u: loadM3u,
         downloadM3u: downloadM3u,
+        createM3uParser: createM3uParser,
         parseM3u: parseM3u,
+        parseM3uAsync: parseM3uAsync,
         XtreamClient: XtreamClient
     };
 }());

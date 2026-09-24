@@ -109,6 +109,93 @@
         });
     }
 
+    function streamPlaylistFile(file, onChunk) {
+        return new Promise(function (resolve, reject) {
+            file.openStream(
+                "r",
+                function (stream) {
+                    var closed = false;
+
+                    function closeQuietly() {
+                        if (closed) { return; }
+                        closed = true;
+                        try { stream.close(); } catch (ignoreClose) {}
+                    }
+
+                    function pump() {
+                        var chunk;
+
+                        try {
+                            if (stream.bytesAvailable <= 0) {
+                                closeQuietly();
+                                resolve(true);
+                                return;
+                            }
+
+                            chunk = stream.read(
+                                Math.min(stream.bytesAvailable, PLAYLIST_CHUNK_CHARS)
+                            );
+                            onChunk(chunk);
+                        } catch (error) {
+                            closeQuietly();
+                            reject(storageError("Falha ao ler playlist salva", error));
+                            return;
+                        }
+
+                        /*
+                         * Cede a thread principal entre blocos. TVs Tizen mais
+                         * antigas podem encerrar o Web App quando uma playlist
+                         * grande monopoliza o event loop durante o boot.
+                         */
+                        setTimeout(pump, 0);
+                    }
+
+                    try {
+                        stream.position = 0;
+                        setTimeout(pump, 0);
+                    } catch (error) {
+                        closeQuietly();
+                        reject(storageError("Falha ao preparar leitura da playlist", error));
+                    }
+                },
+                function (error) {
+                    reject(storageError("Falha ao abrir playlist salva", error));
+                },
+                "UTF-8"
+            );
+        });
+    }
+
+    function streamCachedPlaylist(url, onChunk) {
+        url = String(url || "").replace(/^\s+|\s+$/g, "");
+        if (!url) {
+            return Promise.resolve(null);
+        }
+        if (typeof onChunk !== "function") {
+            return Promise.reject(new Error("Callback de leitura da playlist inválido."));
+        }
+
+        return resolvePlaylistDirectory("r").then(function (dir) {
+            var file;
+
+            if (!dir) {
+                return null;
+            }
+            try {
+                file = dir.resolve(playlistFileName(url));
+            } catch (missing) {
+                return null;
+            }
+
+            return streamPlaylistFile(file, onChunk).then(function () {
+                return {
+                    url: url,
+                    updatedAt: file.modified ? new Date(file.modified).getTime() : 0
+                };
+            });
+        });
+    }
+
     function writePlaylistFile(file, text) {
         return new Promise(function (resolve, reject) {
             file.openStream(
@@ -443,6 +530,7 @@
             writeJson("lastOpenedProfileId", String(id || ""));
         },
         cachedPlaylist: cachedPlaylist,
+        streamCachedPlaylist: streamCachedPlaylist,
         saveCachedPlaylist: saveCachedPlaylist,
         deleteCachedPlaylist: deleteCachedPlaylist,
         favorites: function () {
