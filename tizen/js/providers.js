@@ -207,12 +207,14 @@
         return "m3ug:" + hashText((kind || "") + "|" + normalizeWords(group || "Outros"));
     }
 
-    function makeM3uItem(source, pending, mediaUrl) {
+    function makeM3uItem(source, pending, mediaUrl, classified) {
+        classified = classified || {};
         var name = pending.name || "Canal";
         var rawGroup = pending.group || "Sem grupo";
-        var episode = parseEpisodeLabel(name);
-        var resolved = resolveUrl(source, mediaUrl);
-        var kind = inferKind(rawGroup, name, resolved, episode);
+        var episode = classified.episode !== undefined ?
+            classified.episode : parseEpisodeLabel(name);
+        var resolved = classified.resolved || resolveUrl(source, mediaUrl);
+        var kind = classified.kind || inferKind(rawGroup, name, resolved, episode);
         var group = cleanCategoryName(rawGroup, kind);
 
         return {
@@ -239,7 +241,11 @@
         };
     }
 
-    function createM3uParser(source) {
+    function createM3uParser(source, options) {
+        options = options || {};
+        var onlyKind = String(options.onlyKind || "");
+        var seriesSummaryOnly = !!options.seriesSummaryOnly;
+        var seriesFilterKey = normalizeWords(options.seriesFilterKey || "");
         var catalogs = {
             live: { items: [], categories: [] },
             vod: { items: [], categories: [] },
@@ -272,6 +278,10 @@
             var info;
             var key;
             var series;
+            var entryName;
+            var rawGroup;
+            var resolved;
+            var inferredKind;
 
             if (!line) {
                 return;
@@ -362,12 +372,48 @@
                 };
             }
 
-            item = makeM3uItem(source, pending, line);
-            pending = null;
+            entryName = pending.name || "Canal";
+            rawGroup = pending.group || "Sem grupo";
+            info = parseEpisodeLabel(entryName);
+            resolved = resolveUrl(source, line);
+            inferredKind = inferKind(rawGroup, entryName, resolved, info);
 
-            if (!/^https?:\/\//i.test(item.url)) {
+            if (!/^https?:\/\//i.test(resolved)) {
+                pending = null;
                 return;
             }
+
+            /*
+             * O catálogo Tizen é carregado por seção. Classifique primeiro e
+             * só materialize o objeto completo quando a entrada pertence à
+             * seção solicitada. Isso evita centenas de milhares de objetos
+             * temporários ao abrir uma M3U muito grande.
+             */
+            if (onlyKind && inferredKind !== onlyKind) {
+                pending = null;
+                return;
+            }
+
+            if (inferredKind === "series") {
+                key = normalizeWords(info && info.title || entryName);
+                if (seriesFilterKey && key !== seriesFilterKey) {
+                    pending = null;
+                    return;
+                }
+
+                if (seriesSummaryOnly && seriesMap[key]) {
+                    seriesMap[key].episodeCount += 1;
+                    pending = null;
+                    return;
+                }
+            }
+
+            item = makeM3uItem(source, pending, line, {
+                episode: info,
+                resolved: resolved,
+                kind: inferredKind
+            });
+            pending = null;
 
             if (item.kind !== "series") {
                 ensureCategory(item.kind, item.group);
@@ -376,13 +422,6 @@
             }
 
             info = item.episodeInfo;
-            if (!info) {
-                item.kind = "vod";
-                ensureCategory("vod", item.group);
-                catalogs.vod.items.push(item);
-                return;
-            }
-
             key = normalizeWords(info.title);
 
             if (!seriesMap[key]) {
@@ -399,7 +438,9 @@
                     cardIndexBase: item.cardIndexBase || "",
                     cardIndexVersion: item.cardIndexVersion || "",
                     cardIndexShardLength: item.cardIndexShardLength || 1,
-                    episodes: []
+                    seriesKey: key,
+                    episodeCount: 0,
+                    episodes: seriesSummaryOnly ? null : []
                 };
                 seriesMap[key] = series;
                 catalogs.series.items.push(series);
@@ -407,6 +448,7 @@
             }
 
             series = seriesMap[key];
+            series.episodeCount += 1;
             if (!series.logo && item.logo) {
                 series.logo = item.logo;
             }
@@ -415,6 +457,10 @@
                 series.cardIndexBase = item.cardIndexBase || "";
                 series.cardIndexVersion = item.cardIndexVersion || "";
                 series.cardIndexShardLength = item.cardIndexShardLength || 1;
+            }
+
+            if (seriesSummaryOnly) {
+                return;
             }
 
             series.episodes.push({
@@ -463,6 +509,9 @@
             }
 
             catalogs.series.items.forEach(function (series) {
+                if (!Array.isArray(series.episodes)) {
+                    return;
+                }
                 series.episodes.sort(function (a, b) {
                     if (a.season !== b.season) {
                         return a.season - b.season;
@@ -505,7 +554,7 @@
         options = options || {};
         text = String(text || "");
 
-        var parser = createM3uParser(source);
+        var parser = createM3uParser(source, options);
         var cursor = 0;
         var chunkChars = Math.max(
             32 * 1024,
