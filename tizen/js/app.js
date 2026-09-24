@@ -44,6 +44,12 @@
     var cardShardQueue = [];
     var activeCardShardLoads = 0;
     var MAX_CARD_SHARD_LOADS = 4;
+    var artworkQueue = [];
+    var artworkTimer = 0;
+    var artworkSequence = 0;
+    var artworkInFlight = {};
+    var artworkSessionCache = {};
+    var MAX_ARTWORK_BATCH = 24;
 
 
     function showToast(message) {
@@ -1188,6 +1194,136 @@
         });
     }
 
+    function artworkServiceBase() {
+        if (window.BlazzingPairing && window.BlazzingPairing.baseUrl) {
+            return String(window.BlazzingPairing.baseUrl() || "").replace(/\/+$/, "");
+        }
+        return "";
+    }
+
+    function artworkKind(item) {
+        if (item && item.kind === "series") { return "tv"; }
+        if (item && item.kind === "vod") { return "movie"; }
+        return "auto";
+    }
+
+    function artworkLookupKey(item) {
+        return artworkKind(item) + "|" + String(item && item.name || "")
+            .toLowerCase().replace(/^\s+|\s+$/g, "");
+    }
+
+    function scheduleArtworkFlush() {
+        if (artworkTimer) { return; }
+        artworkTimer = setTimeout(function () {
+            artworkTimer = 0;
+            flushArtworkQueue();
+        }, 40);
+    }
+
+    function finishArtworkTask(task, url, remember) {
+        url = safeImageUrl(url);
+        if (remember) {
+            artworkSessionCache[task.cacheKey] = url || "";
+        }
+        if (url) {
+            task.item.logo = url;
+        }
+        delete artworkInFlight[task.cacheKey];
+        task.resolve(url || "");
+    }
+
+    function flushArtworkQueue() {
+        var batch;
+        var base;
+        var payload;
+
+        if (!artworkQueue.length) { return; }
+        base = artworkServiceBase();
+        if (!base || !window.BlazzingNet || !window.BlazzingNet.postJson) {
+            while (artworkQueue.length) {
+                finishArtworkTask(artworkQueue.shift(), "", false);
+            }
+            return;
+        }
+
+        batch = artworkQueue.splice(0, MAX_ARTWORK_BATCH);
+        payload = {
+            items: batch.map(function (task) {
+                return {
+                    id: task.requestId,
+                    title: task.item.name || "",
+                    kind: artworkKind(task.item)
+                };
+            })
+        };
+
+        window.BlazzingNet.postJson(
+            base + "/api/v1/artwork/resolve",
+            payload,
+            { timeout: 18000, maxBytes: 256 * 1024 }
+        ).then(function (result) {
+            var byRequest = {};
+            var rows = result && Array.isArray(result.items) ? result.items : [];
+            rows.forEach(function (row) {
+                byRequest[String(row.id || "")] = row.url || "";
+            });
+            batch.forEach(function (task) {
+                finishArtworkTask(
+                    task,
+                    byRequest[task.requestId] || "",
+                    true
+                );
+            });
+        }).catch(function () {
+            batch.forEach(function (task) {
+                /* Network failures are intentionally not remembered so a
+                   later viewport visit can retry the central resolver. */
+                finishArtworkTask(task, "", false);
+            });
+        }).then(function () {
+            if (artworkQueue.length) {
+                scheduleArtworkFlush();
+            }
+        }, function () {
+            if (artworkQueue.length) {
+                scheduleArtworkFlush();
+            }
+        });
+    }
+
+    function resolveOnDemandArtwork(item) {
+        var cacheKey;
+        var requestId;
+
+        if (!item || item.logo) {
+            return Promise.resolve(item && item.logo || "");
+        }
+        if (item.kind !== "vod" && item.kind !== "series") {
+            return Promise.resolve("");
+        }
+
+        cacheKey = artworkLookupKey(item);
+        if (Object.prototype.hasOwnProperty.call(artworkSessionCache, cacheKey)) {
+            item.logo = artworkSessionCache[cacheKey] || "";
+            return Promise.resolve(item.logo);
+        }
+        if (artworkInFlight[cacheKey]) {
+            return artworkInFlight[cacheKey];
+        }
+
+        requestId = "art-" + (++artworkSequence);
+        artworkInFlight[cacheKey] = new Promise(function (resolve) {
+            artworkQueue.push({
+                cacheKey: cacheKey,
+                requestId: requestId,
+                item: item,
+                resolve: resolve
+            });
+            scheduleArtworkFlush();
+        });
+        return artworkInFlight[cacheKey];
+    }
+
     function resolveCardLogo(item) {
         var base = String(item.cardIndexBase || "").replace(/\/$/, "");
         var key = String(item.cardKey || "");
@@ -1202,7 +1338,7 @@
             return Promise.resolve(item.logo);
         }
         if (!base || !key) {
-            return Promise.resolve("");
+            return resolveOnDemandArtwork(item);
         }
 
         prefixLength = parseInt(item.cardIndexShardLength || 1, 10);
@@ -1214,12 +1350,13 @@
 
         if (cardShardCache[cacheKey]) {
             item.logo = cardShardCache[cacheKey][key] || "";
-            return Promise.resolve(item.logo);
+            return item.logo ? Promise.resolve(item.logo) :
+                resolveOnDemandArtwork(item);
         }
 
         failedAt = cardShardFailureAt[cacheKey] || 0;
         if (failedAt && Date.now() - failedAt < 30000) {
-            return Promise.resolve("");
+            return resolveOnDemandArtwork(item);
         }
 
         if (!cardShardPromises[cacheKey]) {
@@ -1243,7 +1380,7 @@
 
         return cardShardPromises[cacheKey].then(function (rows) {
             item.logo = rows[key] || "";
-            return item.logo;
+            return item.logo || resolveOnDemandArtwork(item);
         });
     }
 
@@ -1269,7 +1406,8 @@
         poster.className = "poster";
         poster.appendChild(fallback);
 
-        if (imageUrl || item.cardKey) {
+        if (imageUrl || item.cardKey ||
+                item.kind === "vod" || item.kind === "series") {
             var image = document.createElement("img");
             image.alt = "";
             image.className = "poster-image";
