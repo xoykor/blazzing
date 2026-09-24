@@ -207,12 +207,14 @@
         return "m3ug:" + hashText((kind || "") + "|" + normalizeWords(group || "Outros"));
     }
 
-    function makeM3uItem(source, pending, mediaUrl) {
+    function makeM3uItem(source, pending, mediaUrl, classified) {
+        classified = classified || {};
         var name = pending.name || "Canal";
         var rawGroup = pending.group || "Sem grupo";
-        var episode = parseEpisodeLabel(name);
-        var resolved = resolveUrl(source, mediaUrl);
-        var kind = inferKind(rawGroup, name, resolved, episode);
+        var episode = classified.episode !== undefined ?
+            classified.episode : parseEpisodeLabel(name);
+        var resolved = classified.resolved || resolveUrl(source, mediaUrl);
+        var kind = classified.kind || inferKind(rawGroup, name, resolved, episode);
         var group = cleanCategoryName(rawGroup, kind);
 
         return {
@@ -276,6 +278,10 @@
             var info;
             var key;
             var series;
+            var entryName;
+            var rawGroup;
+            var resolved;
+            var inferredKind;
 
             if (!line) {
                 return;
@@ -366,41 +372,57 @@
                 };
             }
 
-            item = makeM3uItem(source, pending, line);
-            pending = null;
+            entryName = pending.name || "Canal";
+            rawGroup = pending.group || "Sem grupo";
+            info = parseEpisodeLabel(entryName);
+            resolved = resolveUrl(source, line);
+            inferredKind = inferKind(rawGroup, entryName, resolved, info);
 
-            if (!/^https?:\/\//i.test(item.url)) {
+            if (!/^https?:\/\//i.test(resolved)) {
+                pending = null;
                 return;
             }
 
-            if (item.kind !== "series") {
-                if (onlyKind && item.kind !== onlyKind) {
+            /*
+             * O catálogo Tizen é carregado por seção. Classifique primeiro e
+             * só materialize o objeto completo quando a entrada pertence à
+             * seção solicitada. Isso evita centenas de milhares de objetos
+             * temporários ao abrir uma M3U muito grande.
+             */
+            if (onlyKind && inferredKind !== onlyKind) {
+                pending = null;
+                return;
+            }
+
+            if (inferredKind === "series") {
+                key = normalizeWords(info && info.title || entryName);
+                if (seriesFilterKey && key !== seriesFilterKey) {
+                    pending = null;
                     return;
                 }
+
+                if (seriesSummaryOnly && seriesMap[key]) {
+                    seriesMap[key].episodeCount += 1;
+                    pending = null;
+                    return;
+                }
+            }
+
+            item = makeM3uItem(source, pending, line, {
+                episode: info,
+                resolved: resolved,
+                kind: inferredKind
+            });
+            pending = null;
+
+            if (item.kind !== "series") {
                 ensureCategory(item.kind, item.group);
                 catalogs[item.kind].items.push(item);
                 return;
             }
 
             info = item.episodeInfo;
-            if (!info) {
-                item.kind = "vod";
-                if (onlyKind && onlyKind !== "vod") {
-                    return;
-                }
-                ensureCategory("vod", item.group);
-                catalogs.vod.items.push(item);
-                return;
-            }
-
-            if (onlyKind && onlyKind !== "series") {
-                return;
-            }
-
             key = normalizeWords(info.title);
-            if (seriesFilterKey && key !== seriesFilterKey) {
-                return;
-            }
 
             if (!seriesMap[key]) {
                 series = {
