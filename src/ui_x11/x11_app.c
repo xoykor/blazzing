@@ -4357,16 +4357,22 @@ static void draw_browse(app_t *a) {
             vip_error_t error = {0};
             char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
             bool image_ok = path && draw_cached_image_contain(a, path, cx, cy, layout.card_w, layout.art_h);
+            bool can_load_image =
+                (ch->logo_url && ch->logo_url[0]) ||
+                strncmp(ch->stream_url ? ch->stream_url : "", "series://", 9u) != 0;
             if (!image_ok) {
+                const char *placeholder = can_load_image ? "carregando imagem..." : "sem capa";
                 if (a->renderer.active)
                     vip_ui_render_text(&a->renderer, cx + 8, cy + layout.art_h / 2 - 7, layout.card_w - 16,
-                                       "carregando imagem...", "Sans 9", 0x91A0B7u, 1.0, true);
+                                       placeholder, "Sans 9", 0x91A0B7u, 1.0, true);
                 else
-                    draw_centered(a, cx, cy + layout.art_h / 2 + 5, layout.card_w, "carregando imagem...",
+                    draw_centered(a, cx, cy + layout.art_h / 2 + 5, layout.card_w, placeholder,
                                   a->colors.muted);
-                int distance = rr >= 0 ? rr : -rr;
-                int64_t priority = 1000000LL - (int64_t)distance * 1000LL - col;
-                enqueue_thumbnail(a, ch, priority);
+                if (can_load_image) {
+                    int distance = rr >= 0 ? rr : -rr;
+                    int64_t priority = 1000000LL - (int64_t)distance * 1000LL - col;
+                    enqueue_thumbnail(a, ch, priority);
+                }
             }
             free(path);
             stroke_round_rect(a, cx, cy, layout.card_w, layout.art_h, 14,
