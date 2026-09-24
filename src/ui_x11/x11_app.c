@@ -1606,7 +1606,7 @@ static void enqueue_thumbnail(app_t *a, const vip_channel_t *ch, int64_t priorit
         .logo_url = ch->logo_url,
         .stream_url = ch->stream_url,
         .title = ch->name,
-        .artwork_kind = artwork_kind,
+        .artwork_kind = (char *)artwork_kind,
         .priority = priority,
     };
     (void)vip_thumbnail_scheduler_enqueue(a->thumbs, &req, &error);
