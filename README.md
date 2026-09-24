@@ -10,18 +10,18 @@
 
 Blazzing is a multi-platform IPTV player. Its Linux desktop client is native C17 with X11/XWayland, Cairo/Pango, SQLite and persistent mpv playback; the repository also contains Samsung Tizen and Windows desktop ports.
 
-> **Project status:** **v1.4.7** is the current Linux desktop release. Samsung Tizen and Windows desktop ports are maintained in the same repository. The Windows port currently builds from source/CI and is not yet published as a versioned Windows release. Phone-assisted playlist entry uses an encrypted Cloudflare relay while playlist decryption remains local to the client.
+> **Project status:** **v1.4.8** is the current Linux desktop release. Samsung Tizen and Windows desktop ports are maintained in the same repository. The Windows port currently builds from source/CI and is not yet published as a versioned Windows release. Phone-assisted playlist entry uses an encrypted Cloudflare relay while playlist decryption remains local to the client.
 
 > Use Blazzing only with playlists, servers and content that you are authorized to access.
 
 ## Download
 
-The recommended installation is the official **v1.4.7 Flatpak bundle** from the [GitHub release](https://github.com/xoykor/blazzing/releases/tag/v1.4.7).
+The recommended installation is the official **v1.4.8 Flatpak bundle** from the [GitHub release](https://github.com/xoykor/blazzing/releases/tag/v1.4.8).
 
-After downloading `Blazzing-v1.4.7-x86_64.flatpak`:
+After downloading `Blazzing-v1.4.8-x86_64.flatpak`:
 
 ```sh
-flatpak install --user ./Blazzing-v1.4.7-x86_64.flatpak
+flatpak install --user ./Blazzing-v1.4.8-x86_64.flatpak
 flatpak run io.github.xoykor.Blazzing
 ```
 
@@ -44,6 +44,7 @@ Blazzing provides:
 - aggregated series progress;
 - movie/series metadata when supplied by the provider;
 - poster, backdrop, logo and stream-frame thumbnails;
+- on-demand poster resolution for visible movie and series cards through the shared artwork service;
 - bounded asynchronous thumbnail workers and disk cache;
 - JPEG, PNG and WebP artwork decoding;
 - FFmpeg fallback frame capture;
