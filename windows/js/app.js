@@ -675,7 +675,9 @@
         $("back-login").addEventListener("click", showLogin);
         $("back-series").addEventListener("click", closeSeries);
         $("fullscreen").addEventListener("click", function () {
-            document.dispatchEvent(new KeyboardEvent("keydown", { key: "F11", bubbles: true }));
+            if (native && native.toggleFullscreen) {
+                native.toggleFullscreen();
+            }
         });
 
         $("saved-profile").addEventListener("change", function () {
