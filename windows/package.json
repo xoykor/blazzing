@@ -33,11 +33,16 @@
       {
         "from": "runtime/mpv",
         "to": "mpv",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "../assets/blazzing.png"
     },
     "nsis": {
@@ -46,10 +51,10 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "artifactName": "Blazzing-\${version}-Windows-\${arch}-Setup.\${ext}"
+      "artifactName": "Blazzing-${version}-Windows-${arch}-Setup.${ext}"
     },
     "portable": {
-      "artifactName": "Blazzing-\${version}-Windows-\${arch}-Portable.\${ext}"
+      "artifactName": "Blazzing-${version}-Windows-${arch}-Portable.${ext}"
     }
   },
   "engines": {
