@@ -566,6 +566,26 @@
         });
     }
 
+    function cachedPlaylistExists(url) {
+        url = String(url || "").replace(/^\s+|\s+$/g, "");
+        if (!url) {
+            return Promise.resolve(false);
+        }
+
+        return resolvePlaylistDirectory("r").then(function (dir) {
+            if (!dir) {
+                return false;
+            }
+
+            try {
+                dir.resolve(playlistFileName(url));
+                return true;
+            } catch (missing) {
+                return false;
+            }
+        });
+    }
+
     function streamCachedPlaylist(url, onChunk) {
         url = String(url || "").replace(/^\s+|\s+$/g, "");
         if (!url) {
@@ -1154,6 +1174,7 @@
             writeJson("lastOpenedProfileId", String(id || ""));
         },
         cachedPlaylist: cachedPlaylist,
+        cachedPlaylistExists: cachedPlaylistExists,
         streamCachedPlaylist: streamCachedPlaylist,
         streamCachedPlaylistSection: streamCachedPlaylistSection,
         buildPlaylistSectionCaches: buildPlaylistSectionCaches,
