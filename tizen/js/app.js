@@ -695,26 +695,40 @@
             }
 
             /*
-             * A primeira abertura após baixar/atualizar a M3U faz uma única
-             * varredura grande e cria arquivos menores para TV, Filmes e
-             * Séries. As trocas seguintes leem apenas a seção necessária.
+             * Se nem o índice nem a playlist bruta existem, esta é uma
+             * primeira aquisição (ou uma atualização do app que preservou o
+             * perfil, mas não o arquivo privado). Retorne null para que
+             * connectM3u() siga o fluxo normal de download.
              */
-            setBusy(true, "Otimizando playlist para a TV…");
+            return window.BlazzingStorage.cachedPlaylistExists(
+                profile.url
+            ).then(function (exists) {
+                if (!exists) {
+                    return null;
+                }
 
-            return window.BlazzingStorage.buildPlaylistSectionCaches(
-                profile.url,
-                window.BlazzingProviders.classifyM3uEntry,
-                function (readChars) {
-                    var mib = Math.floor(readChars / (1024 * 1024));
-                    setBusy(true, "Otimizando playlist… " + mib + " MiB");
-                }
-            ).then(function () {
-                return parseSectionCache();
-            }).then(function (indexedCatalog) {
-                if (!indexedCatalog) {
-                    throw new Error("Falha ao criar índice da playlist.");
-                }
-                return indexedCatalog;
+                /*
+                 * A primeira abertura após baixar/atualizar a M3U faz uma única
+                 * varredura grande e cria arquivos menores para TV, Filmes e
+                 * Séries. As trocas seguintes leem apenas a seção necessária.
+                 */
+                setBusy(true, "Otimizando playlist para a TV…");
+
+                return window.BlazzingStorage.buildPlaylistSectionCaches(
+                    profile.url,
+                    window.BlazzingProviders.classifyM3uEntry,
+                    function (readChars) {
+                        var mib = Math.floor(readChars / (1024 * 1024));
+                        setBusy(true, "Otimizando playlist… " + mib + " MiB");
+                    }
+                ).then(function () {
+                    return parseSectionCache();
+                }).then(function (indexedCatalog) {
+                    if (!indexedCatalog) {
+                        throw new Error("Falha ao criar índice da playlist.");
+                    }
+                    return indexedCatalog;
+                });
             });
         });
     }
