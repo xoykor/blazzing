@@ -305,6 +305,223 @@
         });
     }
 
+    function downloadApiAvailable() {
+        return !!(
+            window.tizen &&
+            window.tizen.download &&
+            typeof window.tizen.DownloadRequest === "function"
+        );
+    }
+
+    function removeFileByName(dir, name) {
+        return new Promise(function (resolve) {
+            var file;
+
+            try {
+                file = dir.resolve(name);
+            } catch (missing) {
+                resolve();
+                return;
+            }
+
+            try {
+                dir.deleteFile(
+                    file.fullPath,
+                    function () { resolve(); },
+                    function () { resolve(); }
+                );
+            } catch (error) {
+                resolve();
+            }
+        });
+    }
+
+    function publishDownloadedPlaylist(dir, tmpName, finalName) {
+        return new Promise(function (resolve, reject) {
+            var tmp;
+
+            try {
+                tmp = dir.resolve(tmpName);
+            } catch (error) {
+                reject(storageError("Download concluído sem arquivo temporário", error));
+                return;
+            }
+
+            tmp.openStream(
+                "r",
+                function (stream) {
+                    var sample = "";
+                    var sampleSize;
+
+                    try {
+                        stream.position = 0;
+                        sampleSize = Math.min(stream.bytesAvailable, 128 * 1024);
+                        sample = sampleSize > 0 ? stream.read(sampleSize) : "";
+                        stream.close();
+                    } catch (error) {
+                        try { stream.close(); } catch (ignoreClose) {}
+                        reject(storageError("Falha ao validar playlist baixada", error));
+                        return;
+                    }
+
+                    if (sample.indexOf("#EXTM3U") === -1 &&
+                            sample.indexOf("#EXTINF:") === -1) {
+                        removeFileByName(dir, tmpName).then(function () {
+                            reject(new Error(
+                                "O conteúdo recebido não parece ser uma playlist M3U."
+                            ));
+                        });
+                        return;
+                    }
+
+                    try {
+                        dir.moveTo(
+                            tmp.fullPath,
+                            "wgt-private/" + PLAYLIST_DIR + "/" + finalName,
+                            true,
+                            function () { resolve(true); },
+                            function (error) {
+                                reject(storageError(
+                                    "Falha ao publicar playlist baixada",
+                                    error
+                                ));
+                            }
+                        );
+                    } catch (error) {
+                        reject(storageError(
+                            "Falha ao substituir playlist salva",
+                            error
+                        ));
+                    }
+                },
+                function (error) {
+                    reject(storageError("Falha ao abrir playlist baixada", error));
+                },
+                "UTF-8"
+            );
+        });
+    }
+
+    function downloadPlaylistToCache(url, options) {
+        options = options || {};
+        url = String(url || "").replace(/^\s+|\s+$/g, "");
+
+        if (!url || !/^https?:\/\//i.test(url)) {
+            return Promise.reject(new Error("URL M3U inválida."));
+        }
+        if (!downloadApiAvailable()) {
+            return Promise.reject(new Error(
+                "Download direto do Tizen indisponível neste dispositivo."
+            ));
+        }
+
+        return resolvePlaylistDirectory("rw").then(function (dir) {
+            var finalName = playlistFileName(url);
+            var tmpName = finalName + ".download";
+            var limit = options.maxBytes || MAX_RESPONSE_BYTES;
+            var timeout = options.timeout || 180000;
+
+            return removeFileByName(dir, tmpName).then(function () {
+                return new Promise(function (resolve, reject) {
+                    var request;
+                    var downloadId = -1;
+                    var settled = false;
+                    var timer = 0;
+
+                    function cleanupTemp() {
+                        removeFileByName(dir, tmpName);
+                    }
+
+                    function fail(message) {
+                        if (settled) { return; }
+                        settled = true;
+                        clearTimeout(timer);
+                        cleanupTemp();
+                        reject(new Error(message));
+                    }
+
+                    function cancelForLimit() {
+                        try {
+                            if (downloadId >= 0) {
+                                window.tizen.download.cancel(downloadId);
+                            }
+                        } catch (ignoreCancel) {}
+                        fail("A resposta excede o limite de 128 MiB.");
+                    }
+
+                    try {
+                        request = new window.tizen.DownloadRequest(
+                            url,
+                            "wgt-private/" + PLAYLIST_DIR,
+                            tmpName
+                        );
+
+                        downloadId = window.tizen.download.start(request, {
+                            onprogress: function (id, receivedSize, totalSize) {
+                                if (receivedSize > limit ||
+                                        (totalSize > 0 && totalSize > limit)) {
+                                    cancelForLimit();
+                                }
+                                if (typeof options.onProgress === "function") {
+                                    options.onProgress(receivedSize, totalSize);
+                                }
+                            },
+                            onpaused: function () {},
+                            oncanceled: function () {
+                                if (!settled) {
+                                    fail("Download da playlist cancelado.");
+                                }
+                            },
+                            oncompleted: function () {
+                                if (settled) { return; }
+                                clearTimeout(timer);
+
+                                publishDownloadedPlaylist(
+                                    dir,
+                                    tmpName,
+                                    finalName
+                                ).then(function () {
+                                    if (settled) { return; }
+                                    settled = true;
+                                    resolve(true);
+                                }).catch(function (error) {
+                                    fail(error.message || "Falha ao salvar playlist baixada.");
+                                });
+                            },
+                            onfailed: function (id, error) {
+                                var failure = error || id;
+                                fail(
+                                    "Falha no download da playlist" +
+                                    (failure && failure.name ?
+                                        " (" + failure.name + ")" : "") +
+                                    "."
+                                );
+                            }
+                        });
+
+                        if (downloadId < 0) {
+                            fail("A TV não conseguiu iniciar o download da playlist.");
+                            return;
+                        }
+
+                        timer = setTimeout(function () {
+                            try {
+                                window.tizen.download.cancel(downloadId);
+                            } catch (ignoreTimeoutCancel) {}
+                            fail("Tempo limite excedido ao baixar a playlist.");
+                        }, timeout);
+                    } catch (error) {
+                        fail(
+                            "Não foi possível iniciar o Download API do Tizen" +
+                            (error && error.name ? " (" + error.name + ")" : "") +
+                            "."
+                        );
+                    }
+                });
+            });
+        });
+    }
+
     function deleteCachedPlaylist(url) {
         url = String(url || "").replace(/^\s+|\s+$/g, "");
         if (!url) {
@@ -532,6 +749,7 @@
         cachedPlaylist: cachedPlaylist,
         streamCachedPlaylist: streamCachedPlaylist,
         saveCachedPlaylist: saveCachedPlaylist,
+        downloadPlaylistToCache: downloadPlaylistToCache,
         deleteCachedPlaylist: deleteCachedPlaylist,
         favorites: function () {
             return readJson("favorites", {});
