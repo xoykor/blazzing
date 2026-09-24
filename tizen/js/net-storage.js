@@ -6,6 +6,7 @@
     var STORAGE_PREFIX = "blazzing.tizen.";
     var PLAYLIST_DIR = "playlists";
     var PLAYLIST_CHUNK_CHARS = 512 * 1024;
+    var SECTION_WRITE_BUFFER_CHARS = 256 * 1024;
 
     function storageError(prefix, error) {
         return new Error(
@@ -34,6 +35,21 @@
 
     function playlistFileName(url) {
         return "playlist-" + playlistHash(url) + ".m3u8";
+    }
+
+    function playlistSectionFileName(url, kind, summaryOnly) {
+        var suffix = kind === "series" && summaryOnly ?
+            "series-summary" : String(kind || "live");
+        return "playlist-" + playlistHash(url) + "." + suffix + ".m3u8";
+    }
+
+    function playlistSectionKinds() {
+        return [
+            { kind: "live", summaryOnly: false },
+            { kind: "vod", summaryOnly: false },
+            { kind: "series", summaryOnly: false },
+            { kind: "series", summaryOnly: true }
+        ];
     }
 
     function filesystemAvailable() {
@@ -166,6 +182,390 @@
         });
     }
 
+    function streamCachedPlaylistSection(url, kind, summaryOnly, onChunk) {
+        url = String(url || "").replace(/^\s+|\s+$/g, "");
+        kind = String(kind || "live");
+
+        if (!url) {
+            return Promise.resolve(null);
+        }
+        if (typeof onChunk !== "function") {
+            return Promise.reject(new Error("Callback de leitura da seção inválido."));
+        }
+
+        return resolvePlaylistDirectory("r").then(function (dir) {
+            var file;
+
+            if (!dir) {
+                return null;
+            }
+            try {
+                file = dir.resolve(playlistSectionFileName(url, kind, !!summaryOnly));
+            } catch (missing) {
+                return null;
+            }
+
+            return streamPlaylistFile(file, onChunk).then(function () {
+                return {
+                    url: url,
+                    kind: kind,
+                    summaryOnly: !!summaryOnly,
+                    updatedAt: file.modified ? new Date(file.modified).getTime() : 0
+                };
+            });
+        });
+    }
+
+    function removePlaylistSectionCachesInDir(dir, url) {
+        var specs = playlistSectionKinds();
+
+        return Promise.all(specs.map(function (spec) {
+            var name = playlistSectionFileName(url, spec.kind, spec.summaryOnly);
+            return removeFileByName(dir, name).then(function () {
+                return removeFileByName(dir, name + ".tmp");
+            });
+        })).then(function () { return true; });
+    }
+
+    function clearPlaylistSectionCaches(url) {
+        url = String(url || "").replace(/^\s+|\s+$/g, "");
+        if (!url) {
+            return Promise.resolve();
+        }
+
+        return resolvePlaylistDirectory("rw").then(function (dir) {
+            return removePlaylistSectionCachesInDir(dir, url);
+        }).catch(function () {});
+    }
+
+    function buildPlaylistSectionCaches(url, classifyEntry, onProgress) {
+        url = String(url || "").replace(/^\s+|\s+$/g, "");
+
+        if (!url) {
+            return Promise.reject(new Error("URL M3U inválida."));
+        }
+        if (typeof classifyEntry !== "function") {
+            return Promise.reject(new Error("Classificador M3U inválido."));
+        }
+
+        return resolvePlaylistDirectory("rw").then(function (dir) {
+            var sourceFile;
+            var specs = playlistSectionKinds();
+            var files = {};
+            var streams = {};
+            var buffers = {
+                live: "",
+                vod: "",
+                series: "",
+                seriesSummary: ""
+            };
+            var seriesSeen = {};
+            var rawStream = null;
+            var carry = "";
+            var pendingExtinf = "";
+            var readChars = 0;
+
+            try {
+                sourceFile = dir.resolve(playlistFileName(url));
+            } catch (missing) {
+                throw new Error("Playlist salva não encontrada.");
+            }
+
+            function keyForSpec(spec) {
+                return spec.kind === "series" && spec.summaryOnly ?
+                    "seriesSummary" : spec.kind;
+            }
+
+            function appendBuffer(key, text) {
+                buffers[key] += text;
+                if (buffers[key].length >= SECTION_WRITE_BUFFER_CHARS) {
+                    streams[key].write(buffers[key]);
+                    buffers[key] = "";
+                }
+            }
+
+            function appendHeader(line) {
+                var text = line + "\n";
+                appendBuffer("live", text);
+                appendBuffer("vod", text);
+                appendBuffer("series", text);
+                appendBuffer("seriesSummary", text);
+            }
+
+            function processLine(rawLine) {
+                var line = String(rawLine || "").replace(/\r$/, "");
+                var classified;
+                var entry;
+                var key;
+
+                if (!line) {
+                    return;
+                }
+
+                if (line.indexOf("#EXTM3U") === 0 ||
+                        line.indexOf("#EXT-X-LISTA-") === 0) {
+                    appendHeader(line);
+                    return;
+                }
+
+                if (line.indexOf("#EXTINF:") === 0) {
+                    pendingExtinf = line;
+                    return;
+                }
+
+                if (line.charAt(0) === "#") {
+                    return;
+                }
+
+                if (!pendingExtinf) {
+                    return;
+                }
+
+                classified = classifyEntry(url, pendingExtinf, line);
+                entry = pendingExtinf + "\n" + line + "\n";
+                pendingExtinf = "";
+
+                if (!classified || !classified.kind) {
+                    return;
+                }
+
+                if (classified.kind === "live") {
+                    appendBuffer("live", entry);
+                    return;
+                }
+
+                if (classified.kind === "vod") {
+                    appendBuffer("vod", entry);
+                    return;
+                }
+
+                if (classified.kind === "series") {
+                    appendBuffer("series", entry);
+                    key = classified.seriesKey || "";
+                    if (key && !seriesSeen[key]) {
+                        seriesSeen[key] = true;
+                        appendBuffer("seriesSummary", entry);
+                    }
+                }
+            }
+
+            function consumeChunk(chunk) {
+                var text = carry + String(chunk || "");
+                var cursor = 0;
+                var next;
+
+                while (cursor < text.length) {
+                    next = text.indexOf("\n", cursor);
+                    if (next === -1) {
+                        carry = text.slice(cursor);
+                        return;
+                    }
+                    processLine(text.slice(cursor, next));
+                    cursor = next + 1;
+                }
+                carry = "";
+            }
+
+            function closeAll() {
+                if (rawStream) {
+                    try { rawStream.close(); } catch (ignoreRawClose) {}
+                    rawStream = null;
+                }
+                Object.keys(streams).forEach(function (key) {
+                    try { streams[key].close(); } catch (ignoreClose) {}
+                });
+                streams = {};
+            }
+
+            function flushAll() {
+                Object.keys(buffers).forEach(function (key) {
+                    if (buffers[key]) {
+                        streams[key].write(buffers[key]);
+                        buffers[key] = "";
+                    }
+                });
+            }
+
+            function cleanupTemps() {
+                return Promise.all(specs.map(function (spec) {
+                    return removeFileByName(
+                        dir,
+                        playlistSectionFileName(url, spec.kind, spec.summaryOnly) + ".tmp"
+                    );
+                }));
+            }
+
+            function publishAll() {
+                var index = 0;
+
+                function next() {
+                    var spec;
+                    var tmp;
+                    var finalName;
+
+                    if (index >= specs.length) {
+                        return Promise.resolve(true);
+                    }
+
+                    spec = specs[index];
+                    index += 1;
+                    finalName = playlistSectionFileName(url, spec.kind, spec.summaryOnly);
+
+                    try {
+                        tmp = dir.resolve(finalName + ".tmp");
+                    } catch (error) {
+                        return Promise.reject(storageError(
+                            "Cache de seção temporário ausente",
+                            error
+                        ));
+                    }
+
+                    return new Promise(function (resolve, reject) {
+                        try {
+                            dir.moveTo(
+                                tmp.fullPath,
+                                "wgt-private/" + PLAYLIST_DIR + "/" + finalName,
+                                true,
+                                function () { resolve(); },
+                                function (error) {
+                                    reject(storageError(
+                                        "Falha ao publicar cache de seção",
+                                        error
+                                    ));
+                                }
+                            );
+                        } catch (error) {
+                            reject(storageError(
+                                "Falha ao substituir cache de seção",
+                                error
+                            ));
+                        }
+                    }).then(next);
+                }
+
+                return next();
+            }
+
+            function openOutputFiles() {
+                return cleanupTemps().then(function () {
+                    return Promise.all(specs.map(function (spec) {
+                        var finalName = playlistSectionFileName(
+                            url,
+                            spec.kind,
+                            spec.summaryOnly
+                        );
+                        var tmpName = finalName + ".tmp";
+                        var file;
+                        var key = keyForSpec(spec);
+
+                        try {
+                            file = dir.createFile(tmpName);
+                        } catch (exists) {
+                            file = dir.resolve(tmpName);
+                        }
+                        files[key] = file;
+
+                        return new Promise(function (resolve, reject) {
+                            file.openStream(
+                                "w",
+                                function (stream) {
+                                    streams[key] = stream;
+                                    resolve();
+                                },
+                                function (error) {
+                                    reject(storageError(
+                                        "Falha ao abrir cache de seção",
+                                        error
+                                    ));
+                                },
+                                "UTF-8"
+                            );
+                        });
+                    }));
+                });
+            }
+
+            function scanSource() {
+                return new Promise(function (resolve, reject) {
+                    sourceFile.openStream(
+                        "r",
+                        function (stream) {
+                            rawStream = stream;
+
+                            function pump() {
+                                var chunk;
+
+                                try {
+                                    if (stream.bytesAvailable <= 0) {
+                                        if (carry) {
+                                            processLine(carry);
+                                            carry = "";
+                                        }
+                                        flushAll();
+                                        closeAll();
+                                        publishAll().then(resolve).catch(reject);
+                                        return;
+                                    }
+
+                                    chunk = stream.read(
+                                        Math.min(
+                                            stream.bytesAvailable,
+                                            PLAYLIST_CHUNK_CHARS
+                                        )
+                                    );
+                                    readChars += chunk.length;
+                                    consumeChunk(chunk);
+
+                                    if (typeof onProgress === "function") {
+                                        onProgress(readChars);
+                                    }
+                                } catch (error) {
+                                    closeAll();
+                                    cleanupTemps();
+                                    reject(storageError(
+                                        "Falha ao indexar playlist",
+                                        error
+                                    ));
+                                    return;
+                                }
+
+                                setTimeout(pump, 0);
+                            }
+
+                            try {
+                                stream.position = 0;
+                                setTimeout(pump, 0);
+                            } catch (error) {
+                                closeAll();
+                                cleanupTemps();
+                                reject(storageError(
+                                    "Falha ao iniciar indexação da playlist",
+                                    error
+                                ));
+                            }
+                        },
+                        function (error) {
+                            closeAll();
+                            cleanupTemps();
+                            reject(storageError(
+                                "Falha ao abrir playlist para indexação",
+                                error
+                            ));
+                        },
+                        "UTF-8"
+                    );
+                });
+            }
+
+            return openOutputFiles().then(scanSource).catch(function (error) {
+                closeAll();
+                return cleanupTemps().then(function () {
+                    throw error;
+                });
+            });
+        });
+    }
+
     function streamCachedPlaylist(url, onChunk) {
         url = String(url || "").replace(/^\s+|\s+$/g, "");
         if (!url) {
@@ -286,7 +686,10 @@
                             tmp.fullPath,
                             "wgt-private/" + PLAYLIST_DIR + "/" + name,
                             true,
-                            function () { resolve(true); },
+                            function () {
+                                removePlaylistSectionCachesInDir(dir, url)
+                                    .then(function () { resolve(true); });
+                            },
                             function (error) {
                                 reject(storageError(
                                     "Falha ao publicar playlist salva",
@@ -481,6 +884,8 @@
                                     tmpName,
                                     finalName
                                 ).then(function () {
+                                    return removePlaylistSectionCachesInDir(dir, url);
+                                }).then(function () {
                                     if (settled) { return; }
                                     settled = true;
                                     resolve(true);
@@ -549,6 +954,8 @@
                 } catch (error) {
                     resolve();
                 }
+            }).then(function () {
+                return removePlaylistSectionCachesInDir(dir, url);
             });
         }).catch(function () {
             /* Excluir o perfil continua possível mesmo sem acesso ao arquivo. */
@@ -748,6 +1155,9 @@
         },
         cachedPlaylist: cachedPlaylist,
         streamCachedPlaylist: streamCachedPlaylist,
+        streamCachedPlaylistSection: streamCachedPlaylistSection,
+        buildPlaylistSectionCaches: buildPlaylistSectionCaches,
+        clearPlaylistSectionCaches: clearPlaylistSectionCaches,
         saveCachedPlaylist: saveCachedPlaylist,
         downloadPlaylistToCache: downloadPlaylistToCache,
         deleteCachedPlaylist: deleteCachedPlaylist,
