@@ -212,3 +212,36 @@ mislabeledVodParser.consumeTextChunk(mislabeledSeries);
 var mislabeledVodCatalog = mislabeledVodParser.finish();
 assert(mislabeledVodCatalog.vod.items.length === 1,
     "entrada de grupo Séries sem episódio deve cair para VOD");
+
+
+var classifiedLive = providers.classifyM3uEntry(
+    "https://example.com/list.m3u8",
+    "#EXTINF:-1 group-title=\"Abertos\",Canal X",
+    "https://example.com/live.m3u8"
+);
+assert(classifiedLive.kind === "live",
+    "classificador leve deveria identificar TV");
+
+var classifiedVod = providers.classifyM3uEntry(
+    "https://example.com/list.m3u8",
+    "#EXTINF:-1 group-title=\"Filmes | Ação\",Filme X",
+    "https://example.com/movie.mp4"
+);
+assert(classifiedVod.kind === "vod",
+    "classificador leve deveria identificar VOD");
+
+var classifiedSeries = providers.classifyM3uEntry(
+    "https://example.com/list.m3u8",
+    "#EXTINF:-1 group-title=\"Séries\",Loki S01E02",
+    "https://example.com/loki.m3u8"
+);
+assert(classifiedSeries.kind === "series" && classifiedSeries.seriesKey,
+    "classificador leve deveria identificar série e chave");
+
+var classifiedMislabeledSeries = providers.classifyM3uEntry(
+    "https://example.com/list.m3u8",
+    "#EXTINF:-1 group-title=\"Séries\",Vídeo sem episódio",
+    "https://example.com/plain.mp4"
+);
+assert(classifiedMislabeledSeries.kind === "vod",
+    "grupo Séries sem episódio deve cair para VOD no índice");
