@@ -1585,8 +1585,6 @@ static void thumbnail_ready(const vip_thumbnail_request_t *request, vip_status_t
 static void enqueue_thumbnail(app_t *a, const vip_channel_t *ch, int64_t priority) {
     if (!a->thumbs || !ch || !ch->provider_id || !ch->id || !ch->stream_url)
         return;
-    if (strncmp(ch->stream_url, "series://", 9u) == 0 && (!ch->logo_url || !ch->logo_url[0]))
-        return;
     vip_error_t error = {0};
     char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
     if (path) {
@@ -1596,11 +1594,19 @@ static void enqueue_thumbnail(app_t *a, const vip_channel_t *ch, int64_t priorit
         if (exists)
             return;
     }
+    const char *artwork_kind = NULL;
+    if (a->content_kind == CONTENT_VOD)
+        artwork_kind = "movie";
+    else if (a->content_kind == CONTENT_SERIES || a->series_season_select)
+        artwork_kind = "tv";
+
     vip_thumbnail_request_t req = {
         .provider_id = ch->provider_id,
         .channel_id = ch->id,
         .logo_url = ch->logo_url,
         .stream_url = ch->stream_url,
+        .title = ch->name,
+        .artwork_kind = artwork_kind,
         .priority = priority,
     };
     (void)vip_thumbnail_scheduler_enqueue(a->thumbs, &req, &error);
