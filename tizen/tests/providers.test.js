@@ -118,3 +118,35 @@ assert(fallbackItem.fallbackIndexVersion === "v123",
     "versão do fallback deveria ser preservada");
 assert(fallbackItem.fallbackIndexShardLength === 2,
     "comprimento do shard de fallback deveria ser preservado");
+
+
+var streamedParser = providers.createM3uParser(
+    "https://example.com/list.m3u8"
+);
+for (var offset = 0; offset < mixed.length; offset += 7) {
+    streamedParser.consumeTextChunk(mixed.slice(offset, offset + 7));
+}
+var streamedCatalogs = streamedParser.finish();
+
+assert(streamedParser.hasM3uMarker(),
+    "parser incremental deveria reconhecer marcadores M3U");
+assert(streamedCatalogs.series.items.length === catalogs.series.items.length,
+    "parser incremental deveria preservar agrupamento de séries");
+assert(streamedCatalogs.series.items[0].episodes.length ===
+    catalogs.series.items[0].episodes.length,
+    "parser incremental deveria preservar episódios");
+assert(streamedCatalogs.live.items.length === catalogs.live.items.length,
+    "parser incremental deveria preservar canais ao vivo");
+
+providers.parseM3uAsync(mixed, "https://example.com/list.m3u8", {
+    chunkChars: 32 * 1024
+}).then(function (asyncCatalogs) {
+    assert(asyncCatalogs.series.items.length === catalogs.series.items.length,
+        "parser assíncrono deveria preservar séries");
+    assert(asyncCatalogs.live.items.length === catalogs.live.items.length,
+        "parser assíncrono deveria preservar canais");
+    console.log("Tizen incremental provider tests: OK");
+}).catch(function (error) {
+    console.error(error);
+    process.exitCode = 1;
+});
