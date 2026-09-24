@@ -239,7 +239,11 @@
         };
     }
 
-    function createM3uParser(source) {
+    function createM3uParser(source, options) {
+        options = options || {};
+        var onlyKind = String(options.onlyKind || "");
+        var seriesSummaryOnly = !!options.seriesSummaryOnly;
+        var seriesFilterKey = normalizeWords(options.seriesFilterKey || "");
         var catalogs = {
             live: { items: [], categories: [] },
             vod: { items: [], categories: [] },
@@ -370,6 +374,9 @@
             }
 
             if (item.kind !== "series") {
+                if (onlyKind && item.kind !== onlyKind) {
+                    return;
+                }
                 ensureCategory(item.kind, item.group);
                 catalogs[item.kind].items.push(item);
                 return;
@@ -378,12 +385,22 @@
             info = item.episodeInfo;
             if (!info) {
                 item.kind = "vod";
+                if (onlyKind && onlyKind !== "vod") {
+                    return;
+                }
                 ensureCategory("vod", item.group);
                 catalogs.vod.items.push(item);
                 return;
             }
 
+            if (onlyKind && onlyKind !== "series") {
+                return;
+            }
+
             key = normalizeWords(info.title);
+            if (seriesFilterKey && key !== seriesFilterKey) {
+                return;
+            }
 
             if (!seriesMap[key]) {
                 series = {
@@ -399,7 +416,9 @@
                     cardIndexBase: item.cardIndexBase || "",
                     cardIndexVersion: item.cardIndexVersion || "",
                     cardIndexShardLength: item.cardIndexShardLength || 1,
-                    episodes: []
+                    seriesKey: key,
+                    episodeCount: 0,
+                    episodes: seriesSummaryOnly ? null : []
                 };
                 seriesMap[key] = series;
                 catalogs.series.items.push(series);
@@ -407,6 +426,7 @@
             }
 
             series = seriesMap[key];
+            series.episodeCount += 1;
             if (!series.logo && item.logo) {
                 series.logo = item.logo;
             }
@@ -415,6 +435,10 @@
                 series.cardIndexBase = item.cardIndexBase || "";
                 series.cardIndexVersion = item.cardIndexVersion || "";
                 series.cardIndexShardLength = item.cardIndexShardLength || 1;
+            }
+
+            if (seriesSummaryOnly) {
+                return;
             }
 
             series.episodes.push({
@@ -463,6 +487,9 @@
             }
 
             catalogs.series.items.forEach(function (series) {
+                if (!Array.isArray(series.episodes)) {
+                    return;
+                }
                 series.episodes.sort(function (a, b) {
                     if (a.season !== b.season) {
                         return a.season - b.season;
@@ -505,7 +532,7 @@
         options = options || {};
         text = String(text || "");
 
-        var parser = createM3uParser(source);
+        var parser = createM3uParser(source, options);
         var cursor = 0;
         var chunkChars = Math.max(
             32 * 1024,
