@@ -1,15 +1,14 @@
 {
   "name": "blazzing-windows",
-  "version": "1.4.7",
+  "version": "1.4.8",
   "private": true,
   "description": "Blazzing desktop port for Windows",
   "main": "main.js",
   "scripts": {
-    "prepare-app": "node scripts/prepare-app.js",
-    "start": "npm run prepare-app && electron .",
-    "pack": "npm run prepare-app && electron-builder --dir --win --x64",
-    "dist": "npm run prepare-app && electron-builder --win nsis portable --x64",
-    "test": "node tests/prepare-app.test.js"
+    "start": "electron .",
+    "pack": "electron-builder --dir --win --x64",
+    "dist": "electron-builder --win nsis portable --x64",
+    "test": "node tests/windows-renderer.test.js"
   },
   "devDependencies": {
     "electron": "^44.3.0",
@@ -25,16 +24,21 @@
     "files": [
       "main.js",
       "preload.js",
+      "index.html",
+      "css/**/*",
       "js/**/*",
-      "app/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "runtime/mpv",
+        "to": "mpv",
+        "filter": ["**/*"]
+      }
+    ],
     "win": {
-      "target": [
-        "nsis",
-        "portable"
-      ],
-      "icon": "app/tizen/icon.png"
+      "target": ["nsis", "portable"],
+      "icon": "../assets/blazzing.png"
     },
     "nsis": {
       "oneClick": false,
@@ -42,10 +46,10 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "artifactName": "Blazzing-${version}-Windows-${arch}-Setup.${ext}"
+      "artifactName": "Blazzing-\${version}-Windows-\${arch}-Setup.\${ext}"
     },
     "portable": {
-      "artifactName": "Blazzing-${version}-Windows-${arch}-Portable.${ext}"
+      "artifactName": "Blazzing-\${version}-Windows-\${arch}-Portable.\${ext}"
     }
   },
   "engines": {
