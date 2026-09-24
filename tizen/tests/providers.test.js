@@ -150,3 +150,40 @@ providers.parseM3uAsync(mixed, "https://example.com/list.m3u8", {
     console.error(error);
     process.exitCode = 1;
 });
+
+
+var liveOnlyParser = providers.createM3uParser(
+    "https://example.com/list.m3u8",
+    { onlyKind: "live" }
+);
+liveOnlyParser.consumeTextChunk(mixed);
+var liveOnly = liveOnlyParser.finish();
+assert(liveOnly.live.items.length === 1,
+    "parser por seção deveria manter somente TV");
+assert(liveOnly.series.items.length === 0 && liveOnly.vod.items.length === 0,
+    "parser por seção não deveria materializar outras seções");
+
+var seriesSummaryParser = providers.createM3uParser(
+    "https://example.com/list.m3u8",
+    { onlyKind: "series", seriesSummaryOnly: true }
+);
+seriesSummaryParser.consumeTextChunk(mixed);
+var seriesSummaryCatalog = seriesSummaryParser.finish();
+var seriesSummary = seriesSummaryCatalog.series.items[0];
+assert(seriesSummaryCatalog.series.items.length === 1,
+    "resumo deveria manter um card por série");
+assert(seriesSummary.episodes === null,
+    "resumo de séries não deveria manter episódios em memória");
+assert(seriesSummary.episodeCount === 2,
+    "resumo deveria contar episódios sem materializá-los");
+
+var seriesDetailParser = providers.createM3uParser(
+    "https://example.com/list.m3u8",
+    { onlyKind: "series", seriesFilterKey: seriesSummary.seriesKey }
+);
+seriesDetailParser.consumeTextChunk(mixed);
+var seriesDetail = seriesDetailParser.finish();
+assert(seriesDetail.series.items.length === 1,
+    "carregamento de episódios deveria manter só a série escolhida");
+assert(seriesDetail.series.items[0].episodes.length === 2,
+    "carregamento sob demanda deveria recuperar os episódios da série");
