@@ -207,6 +207,29 @@
         return "m3ug:" + hashText((kind || "") + "|" + normalizeWords(group || "Outros"));
     }
 
+    function classifyM3uEntry(source, extinfLine, mediaUrl) {
+        var name = extinfName(extinfLine || "");
+        var group = parseAttribute(extinfLine || "", "group-title") || "Sem grupo";
+        var episode = parseEpisodeLabel(name);
+        var resolved = resolveUrl(source, mediaUrl);
+        var kind = inferKind(group, name, resolved, episode);
+
+        /*
+         * O grupo pode dizer "Séries" mesmo quando a entrada não representa
+         * um episódio identificável. Preserve a mesma regra do parser:
+         * nesses casos a entrada é tratada como VOD.
+         */
+        if (kind === "series" && !episode) {
+            kind = "vod";
+        }
+
+        return {
+            kind: kind,
+            seriesKey: episode ? normalizeWords(episode.title) : "",
+            name: name
+        };
+    }
+
     function makeM3uItem(source, pending, mediaUrl, classified) {
         classified = classified || {};
         var name = pending.name || "Canal";
@@ -908,6 +931,7 @@
         cleanCategoryName: cleanCategoryName,
         inferKind: inferKind,
         parseEpisodeLabel: parseEpisodeLabel,
+        classifyM3uEntry: classifyM3uEntry,
         loadM3u: loadM3u,
         downloadM3u: downloadM3u,
         createM3uParser: createM3uParser,
