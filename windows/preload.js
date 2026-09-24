@@ -16,6 +16,7 @@ function subscribe(channel, callback) {
 
 contextBridge.exposeInMainWorld("BlazzingWindowsNative", {
     close: () => ipcRenderer.invoke("app:close"),
+    toggleFullscreen: () => ipcRenderer.invoke("app:toggle-fullscreen"),
     netText: (url, options) => ipcRenderer.invoke("net:text", { url, options }),
     netJson: (url, options) => ipcRenderer.invoke("net:json", { url, options }),
     cachedPlaylist: (url) => ipcRenderer.invoke("playlist:read", { url }),
@@ -25,6 +26,5 @@ contextBridge.exposeInMainWorld("BlazzingWindowsNative", {
     playerStop: () => ipcRenderer.invoke("player:stop"),
     playerCommand: (command, value) => ipcRenderer.invoke("player:command", { command, value }),
     onPlayerState: (callback) => subscribe("player:state", callback),
-    onPlayerTime: (callback) => subscribe("player:time", callback),
-    onPlayerKey: (callback) => subscribe("player:key", callback)
+    onPlayerTime: (callback) => subscribe("player:time", callback)
 });
