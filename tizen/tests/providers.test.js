@@ -187,3 +187,28 @@ assert(seriesDetail.series.items.length === 1,
     "carregamento de episódios deveria manter só a série escolhida");
 assert(seriesDetail.series.items[0].episodes.length === 2,
     "carregamento sob demanda deveria recuperar os episódios da série");
+
+
+var mislabeledSeries = [
+    "#EXTM3U",
+    "#EXTINF:-1 group-title=\"Séries | Séries\",Conteúdo sem marcador de episódio",
+    "https://example.com/plain-video.mp4"
+].join("\n");
+
+var mislabeledSeriesParser = providers.createM3uParser(
+    "https://example.com/list.m3u8",
+    { onlyKind: "series", seriesSummaryOnly: true }
+);
+mislabeledSeriesParser.consumeTextChunk(mislabeledSeries);
+var mislabeledSeriesCatalog = mislabeledSeriesParser.finish();
+assert(mislabeledSeriesCatalog.series.items.length === 0,
+    "entrada de grupo Séries sem episódio não deve virar série");
+
+var mislabeledVodParser = providers.createM3uParser(
+    "https://example.com/list.m3u8",
+    { onlyKind: "vod" }
+);
+mislabeledVodParser.consumeTextChunk(mislabeledSeries);
+var mislabeledVodCatalog = mislabeledVodParser.finish();
+assert(mislabeledVodCatalog.vod.items.length === 1,
+    "entrada de grupo Séries sem episódio deve cair para VOD");

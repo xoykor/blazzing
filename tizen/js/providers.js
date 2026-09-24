@@ -378,6 +378,17 @@
             resolved = resolveUrl(source, line);
             inferredKind = inferKind(rawGroup, entryName, resolved, info);
 
+            /*
+             * Alguns grupos são rotulados como Séries mesmo quando a entrada
+             * não representa um episódio identificável. O parser antigo
+             * tratava esses casos como VOD. Preserve essa regra antes do
+             * filtro por seção para nunca tentar acessar info.title com
+             * episodeInfo nulo.
+             */
+            if (inferredKind === "series" && !info) {
+                inferredKind = "vod";
+            }
+
             if (!/^https?:\/\//i.test(resolved)) {
                 pending = null;
                 return;
