@@ -10,18 +10,18 @@
 
 Blazzing é um player IPTV multiplataforma. O cliente desktop Linux é nativo em C17, com X11/XWayland, Cairo/Pango, SQLite e reprodução persistente via mpv; o repositório também contém portes para Samsung Tizen e Windows.
 
-> **Estado do projeto:** a **v1.4.7** é a release atual do desktop Linux. Os portes para Samsung Tizen e Windows são mantidos no mesmo repositório. O porte Windows atualmente é compilável pelo código-fonte/CI e ainda não possui uma release Windows versionada publicada. A entrada de playlist pelo celular usa um relay cifrado via Cloudflare, mantendo a descriptografia local no cliente.
+> **Estado do projeto:** a **v1.4.8** é a release atual do desktop Linux. Os portes para Samsung Tizen e Windows são mantidos no mesmo repositório. O porte Windows atualmente é compilável pelo código-fonte/CI e ainda não possui uma release Windows versionada publicada. A entrada de playlist pelo celular usa um relay cifrado via Cloudflare, mantendo a descriptografia local no cliente.
 
 > Use o Blazzing somente com listas, servidores e conteúdos que você tenha autorização para acessar.
 
 ## Download
 
-A instalação recomendada é o **Flatpak oficial da v1.4.7** disponível na [release do GitHub](https://github.com/xoykor/blazzing/releases/tag/v1.4.7).
+A instalação recomendada é o **Flatpak oficial da v1.4.8** disponível na [release do GitHub](https://github.com/xoykor/blazzing/releases/tag/v1.4.8).
 
-Depois de baixar `Blazzing-v1.4.7-x86_64.flatpak`:
+Depois de baixar `Blazzing-v1.4.8-x86_64.flatpak`:
 
 ```sh
-flatpak install --user ./Blazzing-v1.4.7-x86_64.flatpak
+flatpak install --user ./Blazzing-v1.4.8-x86_64.flatpak
 flatpak run io.github.xoykor.Blazzing
 ```
 
@@ -44,6 +44,7 @@ O Blazzing oferece:
 - progresso agregado de séries;
 - metadados de filmes e séries quando fornecidos pelo provedor;
 - capas, backdrops, logos e thumbnails capturadas do stream;
+- resolução de capas sob demanda para cards visíveis de filmes e séries pelo serviço compartilhado de artwork;
 - workers assíncronos limitados para thumbnails e cache em disco;
 - decode de JPEG, PNG e WebP;
 - captura de frame por FFmpeg como fallback;
