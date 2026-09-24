@@ -4,15 +4,13 @@ on:
   push:
     branches:
       - main
-      - feat/windows-desktop-port
+      - fix/windows-desktop-rewrite
     paths:
       - "windows/**"
-      - "tizen/**"
       - ".github/workflows/windows.yml"
   pull_request:
     paths:
       - "windows/**"
-      - "tizen/**"
       - ".github/workflows/windows.yml"
 
 permissions:
@@ -42,19 +40,30 @@ jobs:
         run: |
           node --check main.js
           node --check preload.js
-          node --check js/platform.js
-          node --check scripts/prepare-app.js
-          node --check tests/prepare-app.test.js
+          node --check js/app.js
+          node --check tests/windows-renderer.test.js
 
-      - name: Validate shared frontend
-        shell: bash
+      - name: Run Windows architecture tests
+        run: npm test
+
+      - name: Bundle current x64 mpv runtime
+        shell: pwsh
         run: |
-          set -euo pipefail
-          npm run prepare-app
-          npm test
-          for file in ../tizen/tests/*.test.js; do
-            node "$file"
-          done
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force runtime/mpv | Out-Null
+          $headers = @{ "User-Agent" = "Blazzing-Windows-CI" }
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest" -Headers $headers
+          $asset = $release.assets | Where-Object { $_.name -match '^mpv-x86_64-.*\.7z$' -and $_.name -notmatch 'dev' } | Select-Object -First 1
+          if (-not $asset) { throw "No x64 mpv runtime asset was found in the latest release." }
+          Invoke-WebRequest -Uri $asset.browser_download_url -Headers $headers -OutFile mpv-runtime.7z
+          New-Item -ItemType Directory -Force runtime/mpv/unpacked | Out-Null
+          7z x mpv-runtime.7z "-oruntime/mpv/unpacked" -y | Out-Host
+          $mpv = Get-ChildItem runtime/mpv/unpacked -Filter mpv.exe -Recurse | Select-Object -First 1
+          if (-not $mpv) { throw "mpv.exe was not found after extracting the runtime archive." }
+          Copy-Item -Path (Join-Path $mpv.Directory.FullName "*") -Destination runtime/mpv -Recurse -Force
+          Remove-Item runtime/mpv/unpacked -Recurse -Force
+          Remove-Item mpv-runtime.7z -Force
+          if (-not (Test-Path runtime/mpv/mpv.exe)) { throw "Bundled mpv.exe is missing." }
 
       - name: Package Windows app
         run: npm run dist
