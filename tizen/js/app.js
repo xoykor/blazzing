@@ -606,10 +606,34 @@
         }
     }
 
+    var AUTO_OPEN_IN_PROGRESS_KEY = "blazzing.tizen.auto-open-in-progress";
+    var AUTO_OPEN_SUPPRESSED_KEY = "blazzing.tizen.auto-open-suppressed";
+
     function rememberOpenedM3u(profile) {
         if (profile && profile.id) {
             window.BlazzingStorage.setLastOpenedProfileId(profile.id);
         }
+    }
+
+    function realTizenDevice() {
+        return !!(window.tizen && !window.BlazzingWindowsNative);
+    }
+
+    function localFlag(key) {
+        try { return window.localStorage.getItem(key) || ""; }
+        catch (ignoreReadFlag) { return ""; }
+    }
+
+    function setLocalFlag(key, value) {
+        try {
+            if (value) { window.localStorage.setItem(key, value); }
+            else { window.localStorage.removeItem(key); }
+        } catch (ignoreWriteFlag) {}
+    }
+
+    function clearAutoOpenGuard() {
+        setLocalFlag(AUTO_OPEN_IN_PROGRESS_KEY, "");
+        setLocalFlag(AUTO_OPEN_SUPPRESSED_KEY, "");
     }
 
     function sameM3uSession(profile) {
@@ -623,13 +647,51 @@
         );
     }
 
-    function activateM3u(profile, catalogs, kind) {
+    function m3uParserOptions(kind) {
+        if (kind === "series") {
+            return {
+                onlyKind: "series",
+                seriesSummaryOnly: true
+            };
+        }
+        return { onlyKind: kind };
+    }
+
+    function loadStoredM3uCatalog(profile, kind, options) {
+        var parser = window.BlazzingProviders.createM3uParser(
+            profile.url,
+            options || m3uParserOptions(kind)
+        );
+
+        return window.BlazzingStorage.streamCachedPlaylist(
+            profile.url,
+            function (chunk) {
+                parser.consumeTextChunk(chunk);
+            }
+        ).then(function (row) {
+            var catalogs;
+
+            if (!row) {
+                return null;
+            }
+            if (!parser.hasM3uMarker()) {
+                throw new Error("cache M3U inválido");
+            }
+
+            catalogs = parser.finish();
+            return catalogs[kind] || { items: [], categories: [] };
+        });
+    }
+
+    function activateM3u(profile, catalog, kind) {
         var saved = saveProfileIfRequested(profile) || profile;
 
         state.profile = saved;
-        state.m3uCatalogs = catalogs;
+        state.m3uCatalogs = {};
+        state.m3uCatalogs[kind] = catalog;
         state.xtream = null;
         rememberOpenedM3u(saved);
+        clearAutoOpenGuard();
         setPlaylistRefreshVisible(true);
         setBusy(false);
         openCatalog(kind || "live");
@@ -645,25 +707,11 @@
     }
 
     function openStoredM3u(profile, kind) {
-        var parser = window.BlazzingProviders.createM3uParser(profile.url);
-
-        return window.BlazzingStorage.streamCachedPlaylist(
-            profile.url,
-            function (chunk) {
-                parser.consumeTextChunk(chunk);
-            }
-        ).then(function (row) {
-            var catalogs;
-
-            if (!row) {
+        return loadStoredM3uCatalog(profile, kind).then(function (catalog) {
+            if (!catalog) {
                 return false;
             }
-            if (!parser.hasM3uMarker()) {
-                throw new Error("cache M3U inválido");
-            }
-
-            catalogs = parser.finish();
-            activateM3u(profile, catalogs, kind);
+            activateM3u(profile, catalog, kind);
             return true;
         });
     }
@@ -671,11 +719,22 @@
     function downloadAndStoreM3u(profile, kind, refreshing) {
         setBusy(true, refreshing ? "Atualizando playlist…" : "Baixando playlist pela primeira vez…");
 
-        window.BlazzingProviders.downloadM3u(profile.url).then(function (result) {
-            return window.BlazzingStorage.saveCachedPlaylist(profile.url, result.text)
-                .then(function () {
-                    activateM3u(profile, result.catalogs, kind);
-                });
+        /*
+         * No Tizen não monte o catálogo inteiro a partir da resposta HTTP.
+         * Grave a M3U bruta primeiro e depois abra somente a seção solicitada
+         * pelo parser incremental de baixo consumo de memória.
+         */
+        window.BlazzingNet.text(profile.url, {
+            timeout: 60000,
+            maxBytes: window.BlazzingNet.MAX_RESPONSE_BYTES
+        }).then(function (text) {
+            if (text.indexOf("#EXTM3U") === -1 &&
+                    text.indexOf("#EXTINF:") === -1) {
+                throw new Error("O conteúdo recebido não parece ser uma playlist M3U.");
+            }
+            return window.BlazzingStorage.saveCachedPlaylist(profile.url, text);
+        }).then(function () {
+            return openStoredM3u(profile, kind);
         }).catch(function (error) {
             setBusy(false);
             showToast(error.message || "Falha ao baixar ou armazenar a playlist.");
@@ -855,9 +914,32 @@
         byId("favorites-button").classList.remove("active");
 
         if (state.m3uCatalogs) {
-            state.catalog = state.m3uCatalogs[kind] ||
-                { items: [], categories: [] };
-            return Promise.resolve(state.catalog);
+            if (state.m3uCatalogs[kind]) {
+                state.catalog = state.m3uCatalogs[kind];
+                return Promise.resolve(state.catalog);
+            }
+
+            /*
+             * Libere a seção anterior antes de percorrer outra vez uma M3U
+             * enorme. Mantemos em RAM apenas a seção que o usuário está vendo.
+             */
+            state.catalog = { items: [], categories: [] };
+            state.filtered = [];
+            state.m3uCatalogs = {};
+            setBusy(true, "Carregando " + sectionTitle(kind).toLowerCase() + "…");
+
+            return loadStoredM3uCatalog(state.profile, kind).then(function (catalog) {
+                if (!catalog) {
+                    throw new Error("A playlist salva não foi encontrada.");
+                }
+                state.m3uCatalogs[kind] = catalog;
+                state.catalog = catalog;
+                setBusy(false);
+                return catalog;
+            }).catch(function (error) {
+                setBusy(false);
+                throw error;
+            });
         }
 
         if (!state.xtream) {
@@ -1562,10 +1644,20 @@
         setBusy(true, "Carregando episódios…");
 
         if (series.source === "m3u") {
-            setBusy(false);
-            showSeries({
-                title: series.name,
-                episodes: series.episodes || []
+            loadStoredM3uCatalog(state.profile, "series", {
+                onlyKind: "series",
+                seriesFilterKey: series.seriesKey || series.name
+            }).then(function (catalog) {
+                var fullSeries = catalog && catalog.items && catalog.items[0];
+                setBusy(false);
+                showSeries({
+                    title: series.name,
+                    episodes: fullSeries && fullSeries.episodes ?
+                        fullSeries.episodes : []
+                });
+            }).catch(function (error) {
+                setBusy(false);
+                showToast(error.message || "Falha ao carregar episódios.");
             });
             return;
         }
@@ -1821,6 +1913,7 @@
         var lastId = window.BlazzingStorage.lastOpenedProfileId();
         var profiles;
         var i;
+        var profile;
 
         if (!lastId) {
             return false;
@@ -1829,16 +1922,35 @@
         profiles = window.BlazzingStorage.profiles();
         for (i = 0; i < profiles.length; i += 1) {
             if (profiles[i].id === lastId && profiles[i].type === "m3u") {
-                setMode("m3u");
-                byId("profile-name").value = profiles[i].name || "";
-                byId("m3u-url").value = profiles[i].url || "";
-                connectM3u(profiles[i], false, "live");
-                return true;
+                profile = profiles[i];
+                break;
             }
         }
 
-        window.BlazzingStorage.setLastOpenedProfileId("");
-        return false;
+        if (!profile) {
+            window.BlazzingStorage.setLastOpenedProfileId("");
+            return false;
+        }
+
+        setMode("m3u");
+        byId("profile-name").value = profile.name || "";
+        byId("m3u-url").value = profile.url || "";
+
+        if (realTizenDevice()) {
+            if (localFlag(AUTO_OPEN_IN_PROGRESS_KEY)) {
+                setLocalFlag(AUTO_OPEN_IN_PROGRESS_KEY, "");
+                setLocalFlag(AUTO_OPEN_SUPPRESSED_KEY, "1");
+                showToast("A abertura automática anterior falhou. Abra a lista manualmente.");
+                return false;
+            }
+            if (localFlag(AUTO_OPEN_SUPPRESSED_KEY)) {
+                return false;
+            }
+            setLocalFlag(AUTO_OPEN_IN_PROGRESS_KEY, "1");
+        }
+
+        connectM3u(profile, false, "live");
+        return true;
     }
 
     registerRemoteKeys();
