@@ -644,22 +644,28 @@
         openCatalog(state.kind || "live");
     }
 
-    function parseStoredM3u(profile, row, kind) {
-        var catalogs;
+    function openStoredM3u(profile, kind) {
+        var parser = window.BlazzingProviders.createM3uParser(profile.url);
 
-        try {
-            if (row.text.indexOf("#EXTM3U") === -1 &&
-                    row.text.indexOf("#EXTINF:") === -1) {
+        return window.BlazzingStorage.streamCachedPlaylist(
+            profile.url,
+            function (chunk) {
+                parser.consumeTextChunk(chunk);
+            }
+        ).then(function (row) {
+            var catalogs;
+
+            if (!row) {
+                return false;
+            }
+            if (!parser.hasM3uMarker()) {
                 throw new Error("cache M3U inválido");
             }
-            catalogs = window.BlazzingProviders.parseM3u(row.text, profile.url);
-        } catch (error) {
-            setBusy(false);
-            showToast("Playlist salva inválida. Use Atualizar playlist.");
-            return;
-        }
 
-        activateM3u(profile, catalogs, kind);
+            catalogs = parser.finish();
+            activateM3u(profile, catalogs, kind);
+            return true;
+        });
     }
 
     function downloadAndStoreM3u(profile, kind, refreshing) {
@@ -695,9 +701,8 @@
         }
 
         setBusy(true, "Abrindo playlist salva…");
-        window.BlazzingStorage.cachedPlaylist(profile.url).then(function (row) {
-            if (row && typeof row.text === "string" && row.text.length) {
-                parseStoredM3u(profile, row, kind || "live");
+        openStoredM3u(profile, kind || "live").then(function (opened) {
+            if (opened) {
                 return;
             }
 
@@ -709,6 +714,10 @@
             downloadAndStoreM3u(profile, kind || "live", false);
         }).catch(function (error) {
             setBusy(false);
+            if (String(error && error.message || "").indexOf("cache M3U inválido") !== -1) {
+                showToast("Playlist salva inválida. Use Atualizar playlist.");
+                return;
+            }
             showToast(error.message || "Não foi possível ler a playlist salva.");
         });
     }
