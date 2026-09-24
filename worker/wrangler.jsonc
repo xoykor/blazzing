@@ -6,12 +6,14 @@
   "durable_objects": {
     "bindings": [
       { "name": "PAIRING_SESSIONS", "class_name": "PairingSession" },
-      { "name": "PAIRING_RATE_LIMIT", "class_name": "PairingRateLimit" }
+      { "name": "PAIRING_RATE_LIMIT", "class_name": "PairingRateLimit" },
+      { "name": "ARTWORK_CATALOG", "class_name": "ArtworkCatalog" }
     ]
   },
   "exports": {
     "PairingSession": { "type": "durable-object", "storage": "sqlite" },
-    "PairingRateLimit": { "type": "durable-object", "storage": "sqlite" }
+    "PairingRateLimit": { "type": "durable-object", "storage": "sqlite" },
+    "ArtworkCatalog": { "type": "durable-object", "storage": "sqlite" }
   },
   "assets": {
     "directory": "./public",
