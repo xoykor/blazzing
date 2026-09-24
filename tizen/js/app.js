@@ -658,28 +658,64 @@
     }
 
     function loadStoredM3uCatalog(profile, kind, options) {
-        var parser = window.BlazzingProviders.createM3uParser(
-            profile.url,
-            options || m3uParserOptions(kind)
-        );
+        options = options || m3uParserOptions(kind);
 
-        return window.BlazzingStorage.streamCachedPlaylist(
-            profile.url,
-            function (chunk) {
-                parser.consumeTextChunk(chunk);
-            }
-        ).then(function (row) {
-            var catalogs;
+        function parseSectionCache() {
+            var parser = window.BlazzingProviders.createM3uParser(
+                profile.url,
+                options
+            );
+            var summaryOnly = kind === "series" && !!options.seriesSummaryOnly;
 
-            if (!row) {
-                return null;
-            }
-            if (!parser.hasM3uMarker()) {
-                throw new Error("cache M3U inválido");
+            return window.BlazzingStorage.streamCachedPlaylistSection(
+                profile.url,
+                kind,
+                summaryOnly,
+                function (chunk) {
+                    parser.consumeTextChunk(chunk);
+                }
+            ).then(function (row) {
+                var catalogs;
+
+                if (!row) {
+                    return null;
+                }
+                if (!parser.hasM3uMarker()) {
+                    throw new Error("cache M3U inválido");
+                }
+
+                catalogs = parser.finish();
+                return catalogs[kind] || { items: [], categories: [] };
+            });
+        }
+
+        return parseSectionCache().then(function (catalog) {
+            if (catalog) {
+                return catalog;
             }
 
-            catalogs = parser.finish();
-            return catalogs[kind] || { items: [], categories: [] };
+            /*
+             * A primeira abertura após baixar/atualizar a M3U faz uma única
+             * varredura grande e cria arquivos menores para TV, Filmes e
+             * Séries. As trocas seguintes leem apenas a seção necessária.
+             */
+            setBusy(true, "Otimizando playlist para a TV…");
+
+            return window.BlazzingStorage.buildPlaylistSectionCaches(
+                profile.url,
+                window.BlazzingProviders.classifyM3uEntry,
+                function (readChars) {
+                    var mib = Math.floor(readChars / (1024 * 1024));
+                    setBusy(true, "Otimizando playlist… " + mib + " MiB");
+                }
+            ).then(function () {
+                return parseSectionCache();
+            }).then(function (indexedCatalog) {
+                if (!indexedCatalog) {
+                    throw new Error("Falha ao criar índice da playlist.");
+                }
+                return indexedCatalog;
+            });
         });
     }
 
