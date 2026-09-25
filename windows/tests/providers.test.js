@@ -41,18 +41,43 @@ const playlist = [
     "https://media/show-s01e01.mp4"
 ].join("\n");
 
-const catalogs = providers.parseM3u(playlist, "https://example/list.m3u");
+(async function () {
+    const catalogs = providers.parseM3u(playlist, "https://example/list.m3u");
 
-assert.strictEqual(catalogs.live.items.length, 1);
-assert.strictEqual(catalogs.vod.items.length, 1);
-assert.strictEqual(catalogs.series.items.length, 1);
-assert.strictEqual(catalogs.series.items[0].episodeCount, 2);
-assert.strictEqual(catalogs.series.items[0].episodes.length, 2);
-assert.strictEqual(catalogs.series.items[0].episodes[0].episode, 1);
-assert.strictEqual(catalogs.series.items[0].episodes[1].episode, 2);
+    assert.strictEqual(catalogs.live.items.length, 1);
+    assert.strictEqual(catalogs.vod.items.length, 1);
+    assert.strictEqual(catalogs.series.items.length, 1);
+    assert.strictEqual(catalogs.series.items[0].episodeCount, 2);
+    assert.strictEqual(catalogs.series.items[0].episodes.length, 2);
+    assert.strictEqual(catalogs.series.items[0].episodes[0].episode, 1);
+    assert.strictEqual(catalogs.series.items[0].episodes[1].episode, 2);
 
-assert.strictEqual(catalogs.live.items[0].kind, "live");
-assert.strictEqual(catalogs.vod.items[0].kind, "vod");
-assert.strictEqual(catalogs.series.items[0].kind, "series");
+    const liveOnly = await providers.parseM3uAsync(
+        playlist,
+        "https://example/list.m3u",
+        { onlyKind: "live" }
+    );
+    const vodOnly = await providers.parseM3uAsync(
+        playlist,
+        "https://example/list.m3u",
+        { onlyKind: "vod" }
+    );
+    const seriesOnly = await providers.parseM3uAsync(
+        playlist,
+        "https://example/list.m3u",
+        { onlyKind: "series", seriesSummaryOnly: true }
+    );
 
-console.log("Windows provider classification checks passed.");
+    assert.strictEqual(liveOnly.live.items.length, 1);
+    assert.strictEqual(liveOnly.vod.items.length, 0);
+    assert.strictEqual(vodOnly.vod.items.length, 1);
+    assert.strictEqual(vodOnly.live.items.length, 0);
+    assert.strictEqual(seriesOnly.series.items.length, 1);
+    assert.strictEqual(seriesOnly.series.items[0].episodeCount, 2);
+    assert.strictEqual(seriesOnly.series.items[0].episodes, null);
+
+    console.log("Windows provider classification checks passed.");
+}()).catch(function (error) {
+    console.error(error);
+    process.exitCode = 1;
+});
