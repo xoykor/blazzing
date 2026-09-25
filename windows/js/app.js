@@ -11,6 +11,16 @@
     var STORAGE_PROGRESS = "blazzing.windows.progress.v2";
     var MAX_RESPONSE_BYTES = 128 * 1024 * 1024;
     var MAX_RENDER = 240;
+    var MAX_ARTWORK_BATCH = 24;
+
+    var cardShardCache = {};
+    var cardShardPromises = {};
+    var cardShardFailureAt = {};
+    var artworkQueue = [];
+    var artworkTimer = 0;
+    var artworkSequence = 0;
+    var artworkInFlight = {};
+    var artworkSessionCache = {};
 
     window.BlazzingNet = {
         MAX_RESPONSE_BYTES: MAX_RESPONSE_BYTES,
@@ -19,6 +29,24 @@
         },
         json: function (url, options) {
             return native.netJson(url, options || {});
+        },
+        postJson: function (url, payload, options) {
+            return native.netRequest(
+                "POST",
+                url,
+                JSON.stringify(payload || {}),
+                options || {}
+            ).then(function (response) {
+                var statusCode = Number(response && response.status) || 0;
+                if (statusCode < 200 || statusCode >= 300) {
+                    throw new Error("Servidor respondeu HTTP " + statusCode + ".");
+                }
+                try {
+                    return JSON.parse(String(response && response.text || "{}"));
+                } catch (_error) {
+                    throw new Error("O servidor retornou JSON inválido.");
+                }
+            });
         }
     };
 
@@ -278,6 +306,248 @@
         return String(item && item.logo || "");
     }
 
+    function safeImageUrl(value) {
+        value = String(value || "").trim();
+        if (/^https?:\/\//i.test(value)) {
+            return value;
+        }
+        if (/^\/\//.test(value)) {
+            return "https:" + value;
+        }
+        return "";
+    }
+
+    function artworkServiceBase() {
+        if (pairing && pairing.baseUrl) {
+            return String(pairing.baseUrl() || "").replace(/\/+$/, "");
+        }
+        return "";
+    }
+
+    function artworkKind(item) {
+        if (item && (item.kind === "series" || item.kind === "episode")) {
+            return "tv";
+        }
+        if (item && item.kind === "vod") {
+            return "movie";
+        }
+        return "auto";
+    }
+
+    function artworkTitle(item) {
+        if (item && item.kind === "episode" && item.seriesName) {
+            return String(item.seriesName);
+        }
+        return itemName(item);
+    }
+
+    function artworkLookupKey(item) {
+        return artworkKind(item) + "|" +
+            artworkTitle(item).toLocaleLowerCase("pt-BR").trim();
+    }
+
+    function finishArtworkTask(task, url, remember) {
+        url = safeImageUrl(url);
+        if (remember) {
+            artworkSessionCache[task.cacheKey] = url || "";
+        }
+        if (url) {
+            task.item.logo = url;
+        }
+        delete artworkInFlight[task.cacheKey];
+        task.resolve(url || "");
+    }
+
+    function scheduleArtworkFlush() {
+        if (artworkTimer) {
+            return;
+        }
+        artworkTimer = setTimeout(function () {
+            artworkTimer = 0;
+            flushArtworkQueue();
+        }, 40);
+    }
+
+    function flushArtworkQueue() {
+        if (!artworkQueue.length) {
+            return;
+        }
+
+        var base = artworkServiceBase();
+        if (!base || !window.BlazzingNet || !window.BlazzingNet.postJson) {
+            while (artworkQueue.length) {
+                finishArtworkTask(artworkQueue.shift(), "", false);
+            }
+            return;
+        }
+
+        var batch = artworkQueue.splice(0, MAX_ARTWORK_BATCH);
+        var payload = {
+            items: batch.map(function (task) {
+                return {
+                    id: task.requestId,
+                    title: artworkTitle(task.item),
+                    kind: artworkKind(task.item)
+                };
+            })
+        };
+
+        window.BlazzingNet.postJson(
+            base + "/api/v1/artwork/resolve",
+            payload,
+            { timeout: 18000, maxBytes: 256 * 1024 }
+        ).then(function (result) {
+            var byRequest = {};
+            var rows = result && Array.isArray(result.items) ? result.items : [];
+
+            rows.forEach(function (row) {
+                byRequest[String(row.id || "")] = row.url || "";
+            });
+
+            batch.forEach(function (task) {
+                finishArtworkTask(
+                    task,
+                    byRequest[task.requestId] || "",
+                    true
+                );
+            });
+        }).catch(function () {
+            batch.forEach(function (task) {
+                finishArtworkTask(task, "", false);
+            });
+        }).then(function () {
+            if (artworkQueue.length) {
+                scheduleArtworkFlush();
+            }
+        });
+    }
+
+    function resolveOnDemandArtwork(item) {
+        if (!item || item.logo) {
+            return Promise.resolve(item && item.logo || "");
+        }
+
+        if (item.kind !== "vod" && item.kind !== "series" &&
+                item.kind !== "episode") {
+            return Promise.resolve("");
+        }
+
+        var cacheKey = artworkLookupKey(item);
+        if (Object.prototype.hasOwnProperty.call(artworkSessionCache, cacheKey)) {
+            item.logo = artworkSessionCache[cacheKey] || "";
+            return Promise.resolve(item.logo);
+        }
+        if (artworkInFlight[cacheKey]) {
+            return artworkInFlight[cacheKey];
+        }
+
+        var requestId = "art-" + (++artworkSequence);
+        artworkInFlight[cacheKey] = new Promise(function (resolve) {
+            artworkQueue.push({
+                cacheKey: cacheKey,
+                requestId: requestId,
+                item: item,
+                resolve: resolve
+            });
+            scheduleArtworkFlush();
+        });
+        return artworkInFlight[cacheKey];
+    }
+
+    function resolveCardLogo(item) {
+        if (!item) {
+            return Promise.resolve("");
+        }
+        if (safeImageUrl(item.logo)) {
+            return Promise.resolve(item.logo);
+        }
+
+        var base = String(item.cardIndexBase || "").replace(/\/+$/, "");
+        var key = String(item.cardKey || "");
+        var version = String(item.cardIndexVersion || "");
+        if (!base || !key || !httpUrl(base)) {
+            return resolveOnDemandArtwork(item);
+        }
+
+        var prefixLength = parseInt(item.cardIndexShardLength || 1, 10);
+        if (!(prefixLength >= 1 && prefixLength <= 4)) {
+            prefixLength = 1;
+        }
+
+        var prefix = key.slice(0, prefixLength);
+        var cacheKey = base + "|" + version + "|" + prefix;
+
+        if (cardShardCache[cacheKey]) {
+            item.logo = safeImageUrl(cardShardCache[cacheKey][key] || "");
+            return item.logo ?
+                Promise.resolve(item.logo) :
+                resolveOnDemandArtwork(item);
+        }
+
+        var failedAt = Number(cardShardFailureAt[cacheKey] || 0);
+        if (failedAt && Date.now() - failedAt < 30000) {
+            return resolveOnDemandArtwork(item);
+        }
+
+        if (!cardShardPromises[cacheKey]) {
+            var url = base + "/" + prefix + ".json";
+            if (version) {
+                url += "?v=" + encodeURIComponent(version);
+            }
+
+            cardShardPromises[cacheKey] = native.netJson(url, {
+                timeout: 20000,
+                maxBytes: 4 * 1024 * 1024
+            }).then(function (rows) {
+                cardShardCache[cacheKey] =
+                    rows && typeof rows === "object" ? rows : {};
+                delete cardShardFailureAt[cacheKey];
+                return cardShardCache[cacheKey];
+            }).catch(function () {
+                cardShardFailureAt[cacheKey] = Date.now();
+                delete cardShardPromises[cacheKey];
+                return {};
+            });
+        }
+
+        return cardShardPromises[cacheKey].then(function (rows) {
+            item.logo = safeImageUrl(rows[key] || "");
+            return item.logo ?
+                item.logo :
+                resolveOnDemandArtwork(item);
+        });
+    }
+
+    function loadCardImage(image, fallback, item, url, allowFallback) {
+        url = safeImageUrl(url);
+        if (!url || !image || !fallback) {
+            return;
+        }
+
+        image.alt = itemName(item);
+        image.referrerPolicy = "no-referrer";
+        image.onload = function () {
+            fallback.style.display = "none";
+        };
+        image.onerror = function () {
+            image.removeAttribute("src");
+            fallback.style.display = "grid";
+
+            if (!allowFallback || item._artworkFallbackTried) {
+                return;
+            }
+
+            item._artworkFallbackTried = true;
+            item.logo = "";
+            resolveCardLogo(item).then(function (resolved) {
+                if (safeImageUrl(resolved)) {
+                    loadCardImage(image, fallback, item, resolved, false);
+                }
+            }).catch(function () {});
+        };
+        image.src = url;
+    }
+
     function itemCategory(item) {
         return String(item && item.categoryId || "");
     }
@@ -509,16 +779,14 @@
                 meta.textContent = item.categoryName || sectionTitle(state.kind);
             }
 
-            if (art && httpUrl(art)) {
-                image.src = art;
-                image.alt = itemName(item);
-                image.addEventListener("load", function () {
-                    fallback.style.display = "none";
-                });
-                image.addEventListener("error", function () {
-                    image.removeAttribute("src");
-                    fallback.style.display = "grid";
-                });
+            if (safeImageUrl(art)) {
+                loadCardImage(image, fallback, item, art, true);
+            } else {
+                resolveCardLogo(item).then(function (resolved) {
+                    if (safeImageUrl(resolved)) {
+                        loadCardImage(image, fallback, item, resolved, false);
+                    }
+                }).catch(function () {});
             }
 
             if (item.kind === "episode") {

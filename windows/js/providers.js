@@ -250,7 +250,13 @@
             categoryId: categoryId(group, kind),
             categoryName: group,
             logo: pending.logo ? resolveUrl(source, pending.logo) : "",
-            cardKey: pending.cardIndexBase && !pending.logo ?
+            /*
+             * Preserve the static artwork key even when tvg-logo exists.
+             * Provider logos frequently expire or block hotlinking; keeping
+             * the key lets the renderer fall back to the shared Lista card
+             * index before asking the on-demand resolver.
+             */
+            cardKey: pending.cardIndexBase ?
                 cardLookupKey(name, rawGroup) : "",
             cardIndexBase: pending.cardIndexBase || "",
             cardIndexVersion: pending.cardIndexVersion || "",
