@@ -34,9 +34,16 @@ assert.ok(html.includes('data-kind="live"'));
 assert.ok(html.includes('data-kind="vod"'));
 assert.ok(html.includes('data-kind="series"'));
 
-assert.ok(app.includes("providers.parseM3uAsync"));
-assert.ok(app.includes("state.xtream.load(kind)"));
-assert.ok(app.includes("loadStoredM3uCatalog(state.profile, kind)"));
+assert.ok(app.includes("parseDesktopM3uCatalogs"));
+assert.ok(app.includes("chunkChars: 1024 * 1024"));
+assert.ok(app.includes('await client.load("live")'));
+assert.ok(app.includes('loadOptionalXtreamCatalog(client, "vod", "filmes")'));
+assert.ok(app.includes('loadOptionalXtreamCatalog(client, "series", "séries")'));
+assert.ok(app.includes("state.xtream.cache[kind]"));
+assert.ok(app.includes("loadStoredM3uCatalogs(state.profile)"));
+assert.ok(app.includes("Array.isArray(series.episodes) ? series.episodes : []"));
+assert.ok(!app.includes("loadStoredM3uCatalog(state.profile, kind)"));
+assert.ok(!app.includes("seriesSummaryOnly: kind === \"series\""));
 assert.ok(app.includes("pairing.start(acceptPairedPlaylist"));
 assert.ok(app.includes("resolveCardLogo(item)"));
 assert.ok(app.includes("/api/v1/artwork/resolve"));
@@ -48,6 +55,7 @@ assert.ok(!app.includes('button.getAttribute("data-kind") !== "live"'));
 assert.ok(providers.includes("classifyGroup"));
 assert.ok(providers.includes("parseEpisodeLabel"));
 assert.ok(providers.includes("seriesSummaryOnly"));
+assert.ok(providers.includes("keeps them resident like Linux"));
 assert.ok(pairing.includes("BlazzingWindowsNative"));
 assert.ok(pairing.includes("native.netRequest"));
 

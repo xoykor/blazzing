@@ -424,10 +424,9 @@
             }
 
             /*
-             * O catálogo Tizen é carregado por seção. Classifique primeiro e
-             * só materialize o objeto completo quando a entrada pertence à
-             * seção solicitada. Isso evita centenas de milhares de objetos
-             * temporários ao abrir uma M3U muito grande.
+             * Section filtering remains available for constrained/recovery
+             * callers, but the Windows desktop path normally materializes all
+             * root catalogs in one pass and keeps them resident like Linux.
              */
             if (onlyKind && inferredKind !== onlyKind) {
                 pending = null;
@@ -569,9 +568,9 @@
                     );
                 });
 
-                /* Keep provider order for items. Sorting huge IPTV catalogs here
-                 * causes long UI stalls on televisions; categories are sorted
-                 * separately and filtering keeps item order stable. */
+                /* Keep provider order for items. Sorting very large IPTV
+                 * catalogs here adds unnecessary startup work; categories are
+                 * sorted separately and filtering keeps item order stable. */
             });
 
             return catalogs;

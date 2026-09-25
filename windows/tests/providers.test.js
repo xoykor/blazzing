@@ -66,6 +66,16 @@ const playlist = [
     assert.strictEqual(catalogs.vod.items[0].cardIndexVersion, "v-test");
     assert.strictEqual(catalogs.vod.items[0].cardIndexShardLength, 2);
 
+    const desktopAll = await providers.parseM3uAsync(
+        playlist,
+        "https://example/list.m3u",
+        { chunkChars: 1024 * 1024 }
+    );
+    assert.strictEqual(desktopAll.live.items.length, 1);
+    assert.strictEqual(desktopAll.vod.items.length, 1);
+    assert.strictEqual(desktopAll.series.items.length, 1);
+    assert.strictEqual(desktopAll.series.items[0].episodes.length, 2);
+
     const liveOnly = await providers.parseM3uAsync(
         playlist,
         "https://example/list.m3u",
