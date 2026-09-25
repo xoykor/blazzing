@@ -40,8 +40,11 @@ jobs:
         run: |
           node --check main.js
           node --check preload.js
+          node --check js/providers.js
+          node --check js/pairing.js
           node --check js/app.js
           node --check tests/windows-renderer.test.js
+          node --check tests/providers.test.js
 
       - name: Run Windows architecture tests
         run: npm test
