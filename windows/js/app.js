@@ -122,7 +122,6 @@
         $("mode-m3u").classList.toggle("active", state.mode === "m3u");
         $("xtream-fields").classList.toggle("hidden", state.mode !== "xtream");
         $("m3u-fields").classList.toggle("hidden", state.mode !== "m3u");
-        $("pair-button").classList.toggle("hidden", state.mode !== "m3u");
     }
 
     function fillProfile(profile) {
@@ -238,6 +237,7 @@
     }
 
     function startPairing() {
+        setMode("m3u");
         if (!pairing) {
             status($("login-status"), "O módulo de QR não foi carregado.", true);
             return;
