@@ -30,6 +30,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <locale.h>
+#include <limits.h>
 #include <jpeglib.h>
 #include <pthread.h>
 #include <setjmp.h>
