@@ -30,6 +30,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <locale.h>
+#include <limits.h>
 #include <jpeglib.h>
 #include <pthread.h>
 #include <setjmp.h>
@@ -1190,6 +1191,37 @@ static const char *m3u_series_display_name(const app_t *a, const vip_channel_t *
     if (m3u_series_root(a) && ch && vip_m3u_parse_episode_label(ch->name, buffer, cap, NULL, NULL))
         return buffer;
     return ch && ch->name ? ch->name : "";
+}
+
+/* Format the compact season/episode label shown under episode cards. */
+static bool episode_card_meta(const app_t *a, const vip_channel_t *ch, char *buffer, size_t cap) {
+    if (!a || !ch || !buffer || cap == 0u || !a->series_episode_mode || a->series_season_select)
+        return false;
+
+    int season = 0;
+    int episode = 0;
+
+    if (a->login_mode == LOGIN_M3U) {
+        char series_name[256];
+        if (!vip_m3u_parse_episode_label(ch->name, series_name, sizeof(series_name), &season, &episode))
+            return false;
+    } else {
+        if (ch->category_id && ch->category_id[0]) {
+            char *end = NULL;
+            long parsed = strtol(ch->category_id, &end, 10);
+            if (end != ch->category_id && end && *end == '\0' && parsed >= 0 && parsed <= INT_MAX)
+                season = (int)parsed;
+        }
+        episode = ch->position;
+    }
+
+    if (episode <= 0)
+        return false;
+    if (season > 0)
+        snprintf(buffer, cap, "T%d · E%d", season, episode);
+    else
+        snprintf(buffer, cap, "E%d", episode);
+    return true;
 }
 
 /* Rebuild filter. */
@@ -4454,6 +4486,16 @@ static void draw_browse(app_t *a) {
                                        "Sans 8", 0xAAB2C4u, 1.0, false);
                 else
                     draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 44, meta, a->colors.muted);
+            } else if (a->series_episode_mode) {
+                char meta[72];
+                if (episode_card_meta(a, ch, meta, sizeof(meta))) {
+                    if (a->renderer.active)
+                        vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 33, layout.card_w - 18,
+                                           meta, "Sans 8", 0xAAB2C4u, 1.0, false);
+                    else
+                        draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 44, meta,
+                                       a->colors.muted);
+                }
             } else if (a->content_kind == CONTENT_SERIES && !a->series_episode_mode && a->series_watched &&
                        a->series_total && a->series_total[chidx] > 0) {
                 char progress[80];
