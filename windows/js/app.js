@@ -724,10 +724,15 @@
             counts[id] = (counts[id] || 0) + 1;
         });
 
+        var favoriteCount = (state.catalog.items || []).filter(function (item) {
+            return !!state.favorites[itemKey(item)];
+        }).length;
+        $("all-category").textContent = "Todos (" + (state.catalog.items || []).length + ")";
+
         var favoritesButton = document.createElement("button");
         favoritesButton.className = "category" +
             (state.selectedCategory === "__favorites" ? " active" : "");
-        favoritesButton.textContent = "★ Favoritos";
+        favoritesButton.textContent = "★ Favoritos (" + favoriteCount + ")";
         favoritesButton.addEventListener("click", function () {
             state.selectedCategory = "__favorites";
             state.renderLimit = MAX_RENDER;
@@ -769,6 +774,8 @@
             var art = itemArtwork(item);
             var key = itemKey(item);
 
+            card.classList.add("kind-" + String(item.kind || state.kind || "item"));
+            fallback.textContent = itemName(item).charAt(0).toUpperCase() || "B";
             title.textContent = itemName(item);
 
             if (item.kind === "series" && item.episodeCount) {
