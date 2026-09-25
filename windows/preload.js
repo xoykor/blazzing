@@ -17,6 +17,8 @@ function subscribe(channel, callback) {
 contextBridge.exposeInMainWorld("BlazzingWindowsNative", {
     close: () => ipcRenderer.invoke("app:close"),
     toggleFullscreen: () => ipcRenderer.invoke("app:toggle-fullscreen"),
+    netRequest: (method, url, body, options) =>
+        ipcRenderer.invoke("net:request", { method, url, body, options }),
     netText: (url, options) => ipcRenderer.invoke("net:text", { url, options }),
     netJson: (url, options) => ipcRenderer.invoke("net:json", { url, options }),
     cachedPlaylist: (url) => ipcRenderer.invoke("playlist:read", { url }),
