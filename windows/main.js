@@ -65,10 +65,15 @@ function validHttpUrl(value) {
     }
 }
 
-async function requestText(url, options) {
+async function requestRaw(method, url, body, options) {
+    method = String(method || "GET").toUpperCase();
     options = options || {};
+
     if (!validHttpUrl(url)) {
         throw new Error("URL de rede inválida.");
+    }
+    if (!["GET", "POST", "DELETE"].includes(method)) {
+        throw new Error("Método HTTP não permitido.");
     }
 
     const maxBytes = Math.min(
@@ -78,27 +83,30 @@ async function requestText(url, options) {
     const timeout = Math.max(1000, Number(options.timeout) || 60000);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
+    const headers = {
+        "User-Agent": "Blazzing/" + app.getVersion() + " Windows"
+    };
+
+    if (body !== undefined && body !== null) {
+        headers["Content-Type"] = "application/json";
+    }
 
     try {
         const response = await fetch(url, {
-            method: "GET",
+            method,
             redirect: "follow",
             signal: controller.signal,
-            headers: {
-                "User-Agent": "Blazzing/" + app.getVersion() + " Windows"
-            }
+            headers,
+            body: method === "GET" ? undefined : (body == null ? "" : String(body))
         });
-
-        if (!response.ok) {
-            throw new Error("Servidor respondeu HTTP " + response.status + ".");
-        }
 
         const declared = Number(response.headers.get("content-length")) || 0;
         if (declared > maxBytes) {
             throw new Error("A resposta excede o limite permitido.");
         }
+
         if (!response.body) {
-            return "";
+            return { status: response.status, ok: response.ok, text: "" };
         }
 
         const reader = response.body.getReader();
@@ -116,7 +124,12 @@ async function requestText(url, options) {
             }
             chunks.push(Buffer.from(part.value));
         }
-        return Buffer.concat(chunks, total).toString("utf8");
+
+        return {
+            status: response.status,
+            ok: response.ok,
+            text: Buffer.concat(chunks, total).toString("utf8")
+        };
     } catch (error) {
         if (error && error.name === "AbortError") {
             throw new Error("Tempo limite excedido ao acessar o servidor.");
@@ -125,6 +138,14 @@ async function requestText(url, options) {
     } finally {
         clearTimeout(timer);
     }
+}
+
+async function requestText(url, options) {
+    const response = await requestRaw("GET", url, null, options);
+    if (!response.ok) {
+        throw new Error("Servidor respondeu HTTP " + response.status + ".");
+    }
+    return response.text;
 }
 
 function playlistDirectory() {
@@ -540,6 +561,10 @@ ipcMain.handle("app:toggle-fullscreen", () => {
     }
     mainWindow.setFullScreen(!mainWindow.isFullScreen());
     return mainWindow.isFullScreen();
+});
+ipcMain.handle("net:request", async (_event, request) => {
+    request = request || {};
+    return requestRaw(request.method, request.url, request.body, request.options);
 });
 ipcMain.handle("net:text", async (_event, request) => {
     return requestText(request && request.url, request && request.options);
