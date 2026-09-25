@@ -3,25 +3,45 @@
     "use strict";
 
     var native = window.BlazzingWindowsNative;
+    var providers = window.BlazzingProviders;
+    var pairing = window.BlazzingPairing;
+
     var STORAGE_PROFILES = "blazzing.windows.profiles.v2";
     var STORAGE_FAVORITES = "blazzing.windows.favorites.v2";
     var STORAGE_PROGRESS = "blazzing.windows.progress.v2";
+    var MAX_RESPONSE_BYTES = 128 * 1024 * 1024;
     var MAX_RENDER = 240;
+
+    window.BlazzingNet = {
+        MAX_RESPONSE_BYTES: MAX_RESPONSE_BYTES,
+        text: function (url, options) {
+            return native.netText(url, options || {});
+        },
+        json: function (url, options) {
+            return native.netJson(url, options || {});
+        }
+    };
 
     var state = {
         mode: "xtream",
         profile: null,
         kind: "live",
-        categories: [],
-        items: [],
-        selectedCategory: "",
+        catalog: { items: [], categories: [] },
+        m3uCatalogs: {},
+        xtream: null,
+        selectedCategory: "all",
         query: "",
         renderLimit: MAX_RENDER,
         favorites: loadObject(STORAGE_FAVORITES),
         progress: loadObject(STORAGE_PROGRESS),
         currentPlaying: null,
         progressWriteAt: 0,
-        seriesParent: null
+        seriesParent: null,
+        pairingActive: false,
+        loadingKind: false,
+        fallbackRows: null,
+        fallbackCursor: 0,
+        fallbackBusy: false
     };
 
     function $(id) {
@@ -37,6 +57,10 @@
         }
     }
 
+    function saveStateObject(key, value) {
+        localStorage.setItem(key, JSON.stringify(value));
+    }
+
     function loadProfiles() {
         try {
             var parsed = JSON.parse(localStorage.getItem(STORAGE_PROFILES) || "[]");
@@ -50,17 +74,16 @@
         localStorage.setItem(STORAGE_PROFILES, JSON.stringify(profiles));
     }
 
-    function saveStateObject(key, value) {
-        localStorage.setItem(key, JSON.stringify(value));
+    function profileId() {
+        return "p-" + Date.now() + "-" + Math.random().toString(36).slice(2, 9);
     }
 
     function status(element, message, isError) {
+        if (!element) {
+            return;
+        }
         element.textContent = String(message || "");
         element.classList.toggle("error", !!isError);
-    }
-
-    function normalizeServer(value) {
-        return String(value || "").trim().replace(/\/+$/, "");
     }
 
     function httpUrl(value) {
@@ -72,24 +95,23 @@
         }
     }
 
-    function encode(value) {
-        return encodeURIComponent(String(value == null ? "" : value));
-    }
-
-    function profileId() {
-        return "p-" + Date.now() + "-" + Math.random().toString(36).slice(2, 9);
+    function normalizedM3uUrl(value) {
+        return String(value || "").replace(/^\s+|\s+$/g, "");
     }
 
     function refreshSavedProfiles(selectedId) {
         var select = $("saved-profile");
         var profiles = loadProfiles();
         select.innerHTML = '<option value="">Novo perfil</option>';
+
         profiles.forEach(function (profile) {
             var option = document.createElement("option");
             option.value = profile.id;
-            option.textContent = profile.name || (profile.mode === "m3u" ? "M3U" : "Xtream");
+            option.textContent = profile.name ||
+                (profile.mode === "m3u" ? "M3U / M3U8" : "Xtream Codes");
             select.appendChild(option);
         });
+
         select.value = selectedId || "";
         $("delete-profile").classList.toggle("hidden", !select.value);
     }
@@ -115,19 +137,21 @@
     function readProfileForm() {
         var currentId = $("saved-profile").value;
         var name = $("profile-name").value.trim();
+
         if (state.mode === "m3u") {
             return {
                 id: currentId || profileId(),
                 mode: "m3u",
                 name: name || "Minha lista",
-                url: $("m3u-url").value.trim()
+                url: normalizedM3uUrl($("m3u-url").value)
             };
         }
+
         return {
             id: currentId || profileId(),
             mode: "xtream",
             name: name || "Meu Xtream",
-            server: normalizeServer($("server").value),
+            server: $("server").value.trim(),
             username: $("username").value.trim(),
             password: $("password").value
         };
@@ -135,27 +159,51 @@
 
     function persistProfile(profile) {
         var profiles = loadProfiles();
-        var found = false;
+        var replaced = false;
+
         profiles = profiles.map(function (item) {
             if (item.id === profile.id) {
-                found = true;
+                replaced = true;
                 return profile;
             }
             return item;
         });
-        if (!found) {
+
+        if (!replaced) {
             profiles.push(profile);
         }
+
         saveProfiles(profiles);
         refreshSavedProfiles(profile.id);
     }
 
-    function showLogin() {
+    function clearCatalogState() {
+        state.catalog = { items: [], categories: [] };
+        state.selectedCategory = "all";
+        state.query = "";
+        state.renderLimit = MAX_RENDER;
         state.seriesParent = null;
+        $("search").value = "";
+        $("back-series").classList.add("hidden");
+    }
+
+    function cancelPairing() {
+        if (pairing) {
+            pairing.stop();
+        }
+        state.pairingActive = false;
+        $("pairing-modal").classList.add("hidden");
+        $("pairing-qr").innerHTML = "";
+        $("pairing-url").textContent = "";
+        $("pairing-retry").classList.add("hidden");
+    }
+
+    function showLogin() {
+        cancelPairing();
+        clearCatalogState();
         $("browser-view").classList.add("hidden");
         $("login-view").classList.remove("hidden");
         $("back-login").classList.add("hidden");
-        $("back-series").classList.add("hidden");
     }
 
     function showBrowser() {
@@ -164,256 +212,231 @@
         $("back-login").classList.remove("hidden");
     }
 
-    function xtreamApi(profile, action, extra) {
-        var url = profile.server + "/player_api.php?username=" + encode(profile.username) +
-            "&password=" + encode(profile.password);
-        if (action) {
-            url += "&action=" + encode(action);
-        }
-        Object.keys(extra || {}).forEach(function (key) {
-            url += "&" + encode(key) + "=" + encode(extra[key]);
+    function setPairingStatus(message, kind) {
+        status($("pairing-status"), message, kind === "error");
+        $("pairing-retry").classList.toggle("hidden", kind !== "expired" && kind !== "error");
+    }
+
+    function acceptPairedPlaylist(received) {
+        var profile = {
+            id: profileId(),
+            mode: "m3u",
+            name: String(received && received.name || "").trim() || "Lista pelo QR",
+            url: normalizedM3uUrl(received && received.url)
+        };
+
+        state.pairingActive = false;
+        $("pairing-modal").classList.add("hidden");
+        setMode("m3u");
+        $("profile-name").value = profile.name;
+        $("m3u-url").value = profile.url;
+        $("saved-profile").value = "";
+        connectM3u(profile, false).catch(function (error) {
+            status($("login-status"), error && error.message ? error.message : String(error), true);
         });
-        return url;
     }
 
-    async function validateXtream(profile) {
-        var payload = await native.netJson(xtreamApi(profile, "", null), {
-            timeout: 20000,
-            maxBytes: 2 * 1024 * 1024
-        });
-        var info = payload && payload.user_info;
-        if (!info || String(info.auth) !== "1") {
-            throw new Error("Credenciais Xtream rejeitadas pelo servidor.");
+    function startPairing() {
+        setMode("m3u");
+        if (!pairing) {
+            status($("login-status"), "O módulo de QR não foi carregado.", true);
+            return;
         }
-    }
 
-    function categoryName(category) {
-        return String(category.category_name || category.name || "Sem categoria");
-    }
+        cancelPairing();
+        state.pairingActive = true;
+        $("pairing-modal").classList.remove("hidden");
+        $("pairing-retry").classList.add("hidden");
+        setPairingStatus("Preparando sessão segura…", "creating");
 
-    function categoryId(category) {
-        return String(category.category_id == null ? category.id || "" : category.category_id);
-    }
-
-    function itemCategory(item) {
-        return String(item.category_id == null ? item.group || "" : item.category_id);
-    }
-
-    function itemName(item) {
-        return String(item.name || item.title || "Sem título");
-    }
-
-    function itemArtwork(item) {
-        return String(
-            item.stream_icon || item.cover || item.movie_image || item.logo || item.tvgLogo || ""
-        );
+        pairing.start(acceptPairedPlaylist, setPairingStatus).then(function (session) {
+            if (!state.pairingActive) {
+                return;
+            }
+            $("pairing-qr").innerHTML = session.qrSvg;
+            $("pairing-url").textContent = session.url;
+        }).catch(function (error) {
+            if (!state.pairingActive) {
+                return;
+            }
+            setPairingStatus(
+                error && error.message ? error.message : "Falha ao criar o QR.",
+                "error"
+            );
+        });
     }
 
     function itemKey(item) {
-        if (item._m3uUrl) {
-            return "m3u:" + item._m3uUrl;
-        }
-        if (item._episodeId) {
-            return "episode:" + item._episodeId;
-        }
-        if (item.series_id != null) {
-            return "series:" + item.series_id;
-        }
-        if (item.stream_id != null) {
-            return state.kind + ":" + item.stream_id;
-        }
-        return state.kind + ":" + itemName(item);
+        return String(item && item.uid || item && item.url || item && item.name || "");
     }
 
-    function playbackUrl(item) {
-        if (item._m3uUrl) {
-            return item._m3uUrl;
-        }
-        if (item._episodeUrl) {
-            return item._episodeUrl;
-        }
-        if (item.direct_source && httpUrl(item.direct_source)) {
-            return item.direct_source;
-        }
-        if (!state.profile || state.profile.mode !== "xtream") {
-            return "";
-        }
-
-        var base = state.profile.server;
-        var user = encode(state.profile.username);
-        var pass = encode(state.profile.password);
-        var id = encode(item.stream_id);
-        if (state.kind === "live") {
-            return base + "/live/" + user + "/" + pass + "/" + id + ".ts";
-        }
-        if (state.kind === "vod") {
-            return base + "/movie/" + user + "/" + pass + "/" + id + "." +
-                encode(item.container_extension || "mp4");
-        }
-        return "";
+    function itemName(item) {
+        return String(item && item.name || "Sem título");
     }
 
-    function parseM3u(text) {
-        var lines = String(text || "").replace(/\r/g, "").split("\n");
-        var items = [];
-        var pending = null;
+    function itemArtwork(item) {
+        return String(item && item.logo || "");
+    }
 
-        lines.forEach(function (raw) {
-            var line = raw.trim();
-            if (!line) {
-                return;
-            }
-            if (line.indexOf("#EXTINF:") === 0) {
-                var comma = line.lastIndexOf(",");
-                var attrsPart = comma >= 0 ? line.slice(0, comma) : line;
-                var title = comma >= 0 ? line.slice(comma + 1).trim() : "Canal";
-                var attrs = {};
-                var re = /([A-Za-z0-9_-]+)="([^"]*)"/g;
-                var match;
-                while ((match = re.exec(attrsPart))) {
-                    attrs[match[1]] = match[2];
-                }
-                pending = {
-                    name: title || attrs["tvg-name"] || "Canal",
-                    group: attrs["group-title"] || "Sem categoria",
-                    tvgLogo: attrs["tvg-logo"] || "",
-                    tvgId: attrs["tvg-id"] || ""
-                };
-                return;
-            }
-            if (line[0] === "#") {
-                return;
-            }
-            if (pending && httpUrl(line)) {
-                pending._m3uUrl = line;
-                items.push(pending);
-                pending = null;
-            }
+    function itemCategory(item) {
+        return String(item && item.categoryId || "");
+    }
+
+    function categoryName(category) {
+        return String(category && (category.name || category.category_name) || "Outros");
+    }
+
+    function categoryId(category) {
+        return String(category && (category.id || category.category_id) || "");
+    }
+
+    function sectionTitle(kind) {
+        if (kind === "vod") {
+            return "Filmes";
+        }
+        if (kind === "series") {
+            return "Séries";
+        }
+        return "TV";
+    }
+
+    async function ensureM3uCached(profile, forceReload) {
+        var cached = null;
+
+        if (!forceReload) {
+            cached = await native.cachedPlaylist(profile.url);
+        }
+
+        if (cached && cached.text) {
+            return cached.text;
+        }
+
+        status($("login-status"), "Baixando playlist…", false);
+        var text = await native.netText(profile.url, {
+            timeout: 60000,
+            maxBytes: MAX_RESPONSE_BYTES
         });
 
-        return items;
+        if (text.indexOf("#EXTM3U") === -1 && text.indexOf("#EXTINF:") === -1) {
+            throw new Error("O conteúdo recebido não parece ser uma playlist M3U.");
+        }
+
+        await native.saveCachedPlaylist(profile.url, text);
+        return text;
     }
 
-    function categoriesFromM3u(items) {
-        var seen = {};
-        var result = [];
-        items.forEach(function (item) {
-            var group = String(item.group || "Sem categoria");
-            if (!seen[group]) {
-                seen[group] = true;
-                result.push({ category_id: group, category_name: group });
-            }
-        });
-        return result;
+    async function loadStoredM3uCatalog(profile, kind, options) {
+        var cached = await native.cachedPlaylist(profile.url);
+        if (!cached || !cached.text) {
+            throw new Error("A playlist local não está disponível.");
+        }
+
+        options = options || {
+            onlyKind: kind,
+            seriesSummaryOnly: kind === "series"
+        };
+
+        var result = await providers.parseM3uAsync(cached.text, profile.url, options);
+        return result[kind] || { items: [], categories: [] };
     }
 
-    async function connectM3u(profile) {
+    async function connectM3u(profile, forceReload) {
         if (!httpUrl(profile.url)) {
             throw new Error("Informe uma URL M3U/M3U8 HTTP ou HTTPS.");
         }
 
-        var cached = null;
-        if (!$("m3u-refresh").checked) {
-            cached = await native.cachedPlaylist(profile.url);
-        }
-
-        var text;
-        if (cached && cached.text) {
-            text = cached.text;
-            status($("login-status"), "Abrindo playlist salva localmente…", false);
-        } else {
-            status($("login-status"), "Baixando playlist…", false);
-            text = await native.netText(profile.url, {
-                timeout: 60000,
-                maxBytes: 128 * 1024 * 1024
-            });
-            await native.saveCachedPlaylist(profile.url, text);
-        }
-
-        var items = parseM3u(text);
-        if (!items.length) {
-            throw new Error("A playlist não contém entradas HTTP/HTTPS reconhecidas.");
-        }
-
+        await ensureM3uCached(profile, !!forceReload || $("m3u-refresh").checked);
         state.profile = profile;
-        state.kind = "live";
-        state.items = items;
-        state.categories = categoriesFromM3u(items);
-        state.selectedCategory = "";
-        state.query = "";
-        state.renderLimit = MAX_RENDER;
-        state.seriesParent = null;
+        state.xtream = null;
+        state.m3uCatalogs = {};
         persistProfile(profile);
-        configureContentTabs();
         showBrowser();
-        renderAll();
-    }
-
-    async function loadXtreamKind(kind) {
-        state.kind = kind;
-        state.selectedCategory = "";
-        state.query = "";
-        state.renderLimit = MAX_RENDER;
-        state.seriesParent = null;
-        $("search").value = "";
-        $("back-series").classList.add("hidden");
-        status($("catalog-status"), "Carregando catálogo…", false);
-
-        var actions = {
-            live: ["get_live_categories", "get_live_streams"],
-            vod: ["get_vod_categories", "get_vod_streams"],
-            series: ["get_series_categories", "get_series"]
-        };
-        var pair = actions[kind];
-        var responses = await Promise.all([
-            native.netJson(xtreamApi(state.profile, pair[0], null), {
-                timeout: 30000,
-                maxBytes: 16 * 1024 * 1024
-            }),
-            native.netJson(xtreamApi(state.profile, pair[1], null), {
-                timeout: 60000,
-                maxBytes: 128 * 1024 * 1024
-            })
-        ]);
-
-        state.categories = Array.isArray(responses[0]) ? responses[0] : [];
-        state.items = Array.isArray(responses[1]) ? responses[1] : [];
-        status($("catalog-status"), "", false);
-        renderAll();
+        await loadKind("live");
+        status($("login-status"), "", false);
     }
 
     async function connectXtream(profile) {
-        if (!httpUrl(profile.server) || !profile.username || !profile.password) {
+        if (!profile.server || !profile.username || !profile.password) {
             throw new Error("Preencha servidor, usuário e senha.");
         }
+
         status($("login-status"), "Validando credenciais…", false);
-        await validateXtream(profile);
+        var client = new providers.XtreamClient(profile);
+        await client.authenticate();
+
         state.profile = profile;
+        state.xtream = client;
+        state.m3uCatalogs = {};
         persistProfile(profile);
-        configureContentTabs();
         showBrowser();
-        await loadXtreamKind("live");
+        await loadKind("live");
+        status($("login-status"), "", false);
     }
 
     function configureContentTabs() {
         Array.prototype.forEach.call(document.querySelectorAll(".content-tab"), function (button) {
-            var disabled = state.profile && state.profile.mode === "m3u" &&
-                button.getAttribute("data-kind") !== "live";
-            button.disabled = disabled;
-            button.classList.toggle("active", button.getAttribute("data-kind") === state.kind);
+            var kind = button.getAttribute("data-kind");
+            button.disabled = state.loadingKind;
+            button.classList.toggle("active", kind === state.kind);
         });
+    }
+
+    async function loadKind(kind) {
+        if (state.loadingKind || !state.profile) {
+            return;
+        }
+        if (kind !== "live" && kind !== "vod" && kind !== "series") {
+            return;
+        }
+
+        state.loadingKind = true;
+        state.kind = kind;
+        state.seriesParent = null;
+        state.selectedCategory = "all";
+        state.query = "";
+        state.renderLimit = MAX_RENDER;
+        state.catalog = { items: [], categories: [] };
+        $("search").value = "";
+        $("back-series").classList.add("hidden");
+        status($("catalog-status"), "Carregando " + sectionTitle(kind).toLowerCase() + "…", false);
+        configureContentTabs();
+
+        try {
+            var catalog;
+            if (state.profile.mode === "m3u") {
+                catalog = state.m3uCatalogs[kind];
+                if (!catalog) {
+                    catalog = await loadStoredM3uCatalog(state.profile, kind);
+                    state.m3uCatalogs[kind] = catalog;
+                }
+            } else {
+                catalog = await state.xtream.load(kind);
+            }
+
+            state.catalog = catalog || { items: [], categories: [] };
+            status($("catalog-status"), "", false);
+        } finally {
+            state.loadingKind = false;
+            configureContentTabs();
+            renderAll();
+        }
     }
 
     function filteredItems() {
         var q = state.query.trim().toLocaleLowerCase("pt-BR");
-        return state.items.filter(function (item) {
-            if (state.selectedCategory === "__favorites" && !state.favorites[itemKey(item)]) {
+
+        return (state.catalog.items || []).filter(function (item) {
+            if (state.selectedCategory === "__favorites" &&
+                    !state.favorites[itemKey(item)]) {
                 return false;
             }
-            if (state.selectedCategory && state.selectedCategory !== "__favorites" &&
+
+            if (state.selectedCategory !== "all" &&
+                    state.selectedCategory !== "__favorites" &&
                     itemCategory(item) !== state.selectedCategory) {
                 return false;
             }
+
             if (q && itemName(item).toLocaleLowerCase("pt-BR").indexOf(q) < 0) {
                 return false;
             }
@@ -423,7 +446,13 @@
 
     function renderCategories() {
         var root = $("categories");
+        var counts = {};
         root.innerHTML = "";
+
+        (state.catalog.items || []).forEach(function (item) {
+            var id = itemCategory(item);
+            counts[id] = (counts[id] || 0) + 1;
+        });
 
         var favoritesButton = document.createElement("button");
         favoritesButton.className = "category" +
@@ -436,11 +465,12 @@
         });
         root.appendChild(favoritesButton);
 
-        state.categories.forEach(function (category) {
+        (state.catalog.categories || []).forEach(function (category) {
             var id = categoryId(category);
             var button = document.createElement("button");
             button.className = "category" + (state.selectedCategory === id ? " active" : "");
-            button.textContent = categoryName(category);
+            button.textContent = categoryName(category) +
+                (counts[id] ? " (" + counts[id] + ")" : "");
             button.addEventListener("click", function () {
                 state.selectedCategory = id;
                 state.renderLimit = MAX_RENDER;
@@ -449,7 +479,7 @@
             root.appendChild(button);
         });
 
-        $("all-category").classList.toggle("active", !state.selectedCategory);
+        $("all-category").classList.toggle("active", state.selectedCategory === "all");
     }
 
     function renderCards() {
@@ -470,8 +500,15 @@
             var key = itemKey(item);
 
             title.textContent = itemName(item);
-            meta.textContent = item._seasonLabel || item.group ||
-                (state.kind === "series" ? "Série" : state.kind === "vod" ? "Filme" : "TV");
+
+            if (item.kind === "series" && item.episodeCount) {
+                meta.textContent = item.categoryName + " · " + item.episodeCount + " episódios";
+            } else if (item.kind === "episode") {
+                meta.textContent = "T" + item.season + " · E" + item.episode;
+            } else {
+                meta.textContent = item.categoryName || sectionTitle(state.kind);
+            }
+
             if (art && httpUrl(art)) {
                 image.src = art;
                 image.alt = itemName(item);
@@ -483,7 +520,8 @@
                     fallback.style.display = "grid";
                 });
             }
-            if (item._episodeId) {
+
+            if (item.kind === "episode") {
                 card.classList.add("episode-card");
             }
 
@@ -503,12 +541,13 @@
                     activateItem(item);
                 }
             });
+
             root.appendChild(fragment);
         });
 
         if (all.length > visible.length) {
             var more = document.createElement("button");
-            more.className = "ghost";
+            more.className = "ghost more-button";
             more.textContent = "Mostrar mais (" + (all.length - visible.length) + ")";
             more.addEventListener("click", function () {
                 state.renderLimit += MAX_RENDER;
@@ -517,9 +556,8 @@
             root.appendChild(more);
         }
 
-        var titleMap = { live: "TV", vod: "Filmes", series: "Séries" };
         $("catalog-title").textContent = state.seriesParent ?
-            state.seriesParent.name : titleMap[state.kind];
+            state.seriesParent.title : sectionTitle(state.kind);
         $("catalog-count").textContent = all.length + (all.length === 1 ? " item" : " itens");
     }
 
@@ -540,54 +578,27 @@
         renderCards();
     }
 
-    async function openSeries(item) {
-        status($("catalog-status"), "Carregando episódios…", false);
-        var payload = await native.netJson(
-            xtreamApi(state.profile, "get_series_info", { series_id: item.series_id }),
-            { timeout: 30000, maxBytes: 32 * 1024 * 1024 }
-        );
-        var episodes = [];
-        var groups = payload && payload.episodes && typeof payload.episodes === "object" ?
-            payload.episodes : {};
-
-        Object.keys(groups).sort(function (a, b) {
-            return Number(a) - Number(b);
-        }).forEach(function (season) {
-            var list = Array.isArray(groups[season]) ? groups[season] : [];
-            list.forEach(function (episode) {
-                var info = episode.info || {};
-                var extension = episode.container_extension || "mp4";
-                episodes.push({
-                    name: episode.title || ("Episódio " + (episode.episode_num || "")),
-                    category_id: String(season),
-                    _seasonLabel: "Temporada " + season,
-                    _episodeId: episode.id || (item.series_id + "-" + season + "-" + episode.episode_num),
-                    _episodeUrl: state.profile.server + "/series/" +
-                        encode(state.profile.username) + "/" + encode(state.profile.password) + "/" +
-                        encode(episode.id) + "." + encode(extension),
-                    cover: info.movie_image || info.cover_big || item.cover || "",
-                    plot: info.plot || ""
-                });
-            });
-        });
-
-        if (!episodes.length) {
-            throw new Error("O servidor não retornou episódios para esta série.");
-        }
+    function showSeries(details, series) {
+        var seasons = details.seasons || [];
+        var episodes = details.episodes || [];
 
         state.seriesParent = {
-            name: itemName(item),
-            items: state.items,
-            categories: state.categories,
+            title: details.title || itemName(series),
+            catalog: state.catalog,
             selectedCategory: state.selectedCategory
         };
-        state.items = episodes;
-        state.categories = Object.keys(groups).sort(function (a, b) {
-            return Number(a) - Number(b);
-        }).map(function (season) {
-            return { category_id: String(season), category_name: "Temporada " + season };
-        });
-        state.selectedCategory = "";
+
+        state.catalog = {
+            categories: seasons.map(function (season) {
+                return { id: "season:" + season, name: "Temporada " + season };
+            }),
+            items: episodes.map(function (episode) {
+                episode.categoryId = "season:" + episode.season;
+                episode.categoryName = "Temporada " + episode.season;
+                return episode;
+            })
+        };
+        state.selectedCategory = "all";
         state.query = "";
         state.renderLimit = MAX_RENDER;
         $("search").value = "";
@@ -596,13 +607,46 @@
         renderAll();
     }
 
+    async function openSeries(series) {
+        status($("catalog-status"), "Carregando episódios…", false);
+
+        if (series.source === "m3u") {
+            var catalog = await loadStoredM3uCatalog(state.profile, "series", {
+                onlyKind: "series",
+                seriesFilterKey: series.seriesKey || series.name
+            });
+            var fullSeries = catalog.items && catalog.items[0];
+            if (!fullSeries || !Array.isArray(fullSeries.episodes) || !fullSeries.episodes.length) {
+                throw new Error("Nenhum episódio foi encontrado para esta série.");
+            }
+
+            var seasons = [];
+            fullSeries.episodes.forEach(function (episode) {
+                if (seasons.indexOf(episode.season) === -1) {
+                    seasons.push(episode.season);
+                }
+            });
+            seasons.sort(function (a, b) { return a - b; });
+
+            showSeries({
+                title: series.name,
+                seasons: seasons,
+                episodes: fullSeries.episodes
+            }, series);
+            return;
+        }
+
+        var details = await state.xtream.seriesInfo(series);
+        showSeries(details, series);
+    }
+
     function closeSeries() {
         if (!state.seriesParent) {
             return;
         }
-        state.items = state.seriesParent.items;
-        state.categories = state.seriesParent.categories;
-        state.selectedCategory = state.seriesParent.selectedCategory || "";
+
+        state.catalog = state.seriesParent.catalog;
+        state.selectedCategory = state.seriesParent.selectedCategory || "all";
         state.seriesParent = null;
         state.query = "";
         state.renderLimit = MAX_RENDER;
@@ -611,44 +655,159 @@
         renderAll();
     }
 
+    function fallbackShardUrl(item) {
+        var id = String(item && item.fallbackId || "");
+        var base = String(item && item.fallbackIndexBase || "").replace(/\/+$/, "");
+        var shardLength = parseInt(item && item.fallbackIndexShardLength, 10) || 2;
+        var version = String(item && item.fallbackIndexVersion || "");
+
+        if (!id || !base || !httpUrl(base)) {
+            return "";
+        }
+
+        shardLength = Math.max(1, Math.min(4, shardLength));
+        return base + "/" + id.slice(0, shardLength) + ".json" +
+            (version ? "?v=" + encodeURIComponent(version) : "");
+    }
+
+    async function loadFallbackRows(item) {
+        if (state.fallbackRows) {
+            return state.fallbackRows;
+        }
+
+        var shardUrl = fallbackShardUrl(item);
+        var id = String(item && item.fallbackId || "");
+        if (!shardUrl || !id) {
+            state.fallbackRows = [];
+            return state.fallbackRows;
+        }
+
+        try {
+            var payload = await native.netJson(shardUrl, {
+                timeout: 10000,
+                maxBytes: 4 * 1024 * 1024
+            });
+            var rows = payload && Array.isArray(payload[id]) ? payload[id] : [];
+            var seen = {};
+            state.fallbackRows = [];
+
+            rows.forEach(function (row) {
+                if (!Array.isArray(row) || !row.length) {
+                    return;
+                }
+                var url = String(row[0] || "");
+                if (!httpUrl(url) || url === item.url || seen[url]) {
+                    return;
+                }
+                seen[url] = true;
+                state.fallbackRows.push({
+                    url: url,
+                    referer: String(row[2] || ""),
+                    userAgent: String(row[3] || "")
+                });
+            });
+        } catch (_error) {
+            state.fallbackRows = [];
+        }
+
+        return state.fallbackRows;
+    }
+
+    async function openPlayerSource(item, source, resumeMs) {
+        return native.playerOpen({
+            url: source.url,
+            referer: source.referer || "",
+            userAgent: source.userAgent || "",
+            resumeMs: resumeMs,
+            kind: item.kind
+        });
+    }
+
+    async function tryFallback(reason) {
+        if (!state.currentPlaying || state.fallbackBusy) {
+            return;
+        }
+
+        state.fallbackBusy = true;
+        try {
+            var rows = await loadFallbackRows(state.currentPlaying.item);
+            if (state.fallbackCursor >= rows.length) {
+                status(
+                    $("catalog-status"),
+                    reason || "Nenhuma fonte alternativa pôde ser reproduzida.",
+                    true
+                );
+                return;
+            }
+
+            var source = rows[state.fallbackCursor++];
+            status(
+                $("catalog-status"),
+                "Fonte indisponível; tentando alternativa " + state.fallbackCursor + "…",
+                false
+            );
+            await openPlayerSource(
+                state.currentPlaying.item,
+                source,
+                Number(state.progress[state.currentPlaying.key] || 0)
+            );
+        } finally {
+            state.fallbackBusy = false;
+        }
+    }
+
     async function activateItem(item) {
         try {
-            if (state.kind === "series" && !item._episodeUrl) {
+            if (item.kind === "series") {
                 await openSeries(item);
                 return;
             }
 
-            var url = playbackUrl(item);
-            if (!httpUrl(url)) {
+            if (!httpUrl(item.url)) {
                 throw new Error("O item não possui uma URL de reprodução válida.");
             }
+
             var key = itemKey(item);
-            var resumeMs = state.kind === "live" ? 0 : Number(state.progress[key] || 0);
-            state.currentPlaying = { item: item, key: key, kind: state.kind };
+            var resumeMs = item.kind === "live" ? 0 : Number(state.progress[key] || 0);
+
+            state.currentPlaying = {
+                item: item,
+                key: key,
+                kind: item.kind
+            };
+            state.fallbackRows = null;
+            state.fallbackCursor = 0;
+            state.fallbackBusy = false;
+
             status($("catalog-status"), "Abrindo " + itemName(item) + "…", false);
-            await native.playerOpen({
-                url: url,
-                resumeMs: resumeMs,
-                kind: state.kind
-            });
+            await openPlayerSource(item, {
+                url: item.url,
+                referer: item.referer || "",
+                userAgent: item.userAgent || ""
+            }, resumeMs);
         } catch (error) {
-            status($("catalog-status"), error && error.message ? error.message : String(error), true);
+            var message = error && error.message ? error.message : String(error);
+            await tryFallback(message);
         }
     }
 
     async function onConnect() {
         var button = $("connect");
         button.disabled = true;
+
         try {
             var profile = readProfileForm();
             if (profile.mode === "m3u") {
-                await connectM3u(profile);
+                await connectM3u(profile, false);
             } else {
                 await connectXtream(profile);
             }
-            status($("login-status"), "", false);
         } catch (error) {
-            status($("login-status"), error && error.message ? error.message : String(error), true);
+            status(
+                $("login-status"),
+                error && error.message ? error.message : String(error),
+                true
+            );
         } finally {
             button.disabled = false;
         }
@@ -659,6 +818,7 @@
         if (!id) {
             return;
         }
+
         var profiles = loadProfiles().filter(function (profile) {
             return profile.id !== id;
         });
@@ -668,9 +828,16 @@
     }
 
     function installEvents() {
-        $("mode-xtream").addEventListener("click", function () { setMode("xtream"); });
-        $("mode-m3u").addEventListener("click", function () { setMode("m3u"); });
+        $("mode-xtream").addEventListener("click", function () {
+            setMode("xtream");
+        });
+        $("mode-m3u").addEventListener("click", function () {
+            setMode("m3u");
+        });
         $("connect").addEventListener("click", onConnect);
+        $("pair-button").addEventListener("click", startPairing);
+        $("pairing-retry").addEventListener("click", startPairing);
+        $("pairing-cancel").addEventListener("click", cancelPairing);
         $("delete-profile").addEventListener("click", deleteSelectedProfile);
         $("back-login").addEventListener("click", showLogin);
         $("back-series").addEventListener("click", closeSeries);
@@ -682,13 +849,15 @@
 
         $("saved-profile").addEventListener("change", function () {
             var id = this.value;
-            var profile = loadProfiles().find(function (item) { return item.id === id; });
+            var profile = loadProfiles().find(function (item) {
+                return item.id === id;
+            });
             fillProfile(profile || null);
             $("delete-profile").classList.toggle("hidden", !id);
         });
 
         $("all-category").addEventListener("click", function () {
-            state.selectedCategory = "";
+            state.selectedCategory = "all";
             state.renderLimit = MAX_RENDER;
             renderAll();
         });
@@ -700,27 +869,35 @@
         });
 
         Array.prototype.forEach.call(document.querySelectorAll(".content-tab"), function (button) {
-            button.addEventListener("click", async function () {
+            button.addEventListener("click", function () {
                 var kind = button.getAttribute("data-kind");
-                if (!state.profile || state.profile.mode !== "xtream" || kind === state.kind) {
+                if (kind === state.kind && !state.seriesParent) {
                     return;
                 }
-                try {
-                    await loadXtreamKind(kind);
-                } catch (error) {
-                    status($("catalog-status"), error && error.message ? error.message : String(error), true);
-                }
+                loadKind(kind).catch(function (error) {
+                    status(
+                        $("catalog-status"),
+                        error && error.message ? error.message : String(error),
+                        true
+                    );
+                });
             });
         });
 
         document.addEventListener("keydown", function (event) {
+            if (state.pairingActive && event.key === "Escape") {
+                cancelPairing();
+                return;
+            }
+
             if (event.ctrlKey && event.key === "1") {
                 document.querySelector('[data-kind="live"]').click();
             } else if (event.ctrlKey && event.key === "2") {
                 document.querySelector('[data-kind="vod"]').click();
             } else if (event.ctrlKey && event.key === "3") {
                 document.querySelector('[data-kind="series"]').click();
-            } else if (event.ctrlKey && event.key.toLowerCase() === "f" && !$("browser-view").classList.contains("hidden")) {
+            } else if (event.ctrlKey && event.key.toLowerCase() === "f" &&
+                    !$("browser-view").classList.contains("hidden")) {
                 event.preventDefault();
                 $("search").focus();
             } else if (event.key === "Escape" && state.seriesParent) {
@@ -728,39 +905,50 @@
             }
         });
 
-        if (native) {
-            native.onPlayerState(function (payload) {
-                if (!payload) {
-                    return;
-                }
-                status($("catalog-status"), payload.text || "", !!payload.error);
-                if (payload.error) {
-                    state.currentPlaying = null;
-                }
-            });
-            native.onPlayerTime(function (payload) {
-                if (!payload || !state.currentPlaying || state.currentPlaying.kind === "live") {
-                    return;
-                }
-                var now = Date.now();
-                if (now - state.progressWriteAt < 5000) {
-                    return;
-                }
-                state.progressWriteAt = now;
-                state.progress[state.currentPlaying.key] = Math.max(0, Number(payload.milliseconds) || 0);
-                saveStateObject(STORAGE_PROGRESS, state.progress);
-            });
-        }
+        native.onPlayerState(function (payload) {
+            if (!payload) {
+                return;
+            }
+
+            status($("catalog-status"), payload.text || "", !!payload.error);
+            if (payload.error && state.currentPlaying) {
+                tryFallback(payload.text || "Falha de reprodução.").catch(function () {});
+            }
+        });
+
+        native.onPlayerTime(function (payload) {
+            if (!payload || !state.currentPlaying ||
+                    state.currentPlaying.kind === "live") {
+                return;
+            }
+
+            var now = Date.now();
+            if (now - state.progressWriteAt < 5000) {
+                return;
+            }
+
+            state.progressWriteAt = now;
+            state.progress[state.currentPlaying.key] =
+                Math.max(0, Number(payload.milliseconds) || 0);
+            saveStateObject(STORAGE_PROGRESS, state.progress);
+        });
     }
 
     function bootstrap() {
         refreshSavedProfiles("");
         setMode("xtream");
-        installEvents();
-        if (!native) {
-            status($("login-status"), "A ponte nativa do Windows não foi carregada.", true);
+
+        if (!native || !providers) {
+            status(
+                $("login-status"),
+                "Os módulos nativos do Windows não foram carregados corretamente.",
+                true
+            );
             $("connect").disabled = true;
+            return;
         }
+
+        installEvents();
     }
 
     bootstrap();

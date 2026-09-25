@@ -47,8 +47,10 @@ The Windows GitHub Actions workflow validates syntax, runs architecture tests, d
 
 - Xtream login and saved profiles;
 - M3U/M3U8 profiles and local playlist cache;
-- TV, movies and series;
-- episode selection by season;
+- secure QR pairing to add M3U/M3U8 playlists from a phone;
+- independent TV, movies and series catalogs for both Xtream and M3U;
+- on-demand M3U classification to avoid treating the whole playlist as live TV;
+- episode selection by season for Xtream and M3U series;
 - categories and search;
 - favorites;
 - VOD/episode resume progress;
