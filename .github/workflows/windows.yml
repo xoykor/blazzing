@@ -7,6 +7,8 @@ on:
       - fix/windows-desktop-rewrite
     paths:
       - "windows/**"
+      - "tizen/css/app.css"
+      - "src/ui_x11/x11_app.c"
       - ".github/workflows/windows.yml"
   pull_request:
     paths:
@@ -45,6 +47,7 @@ jobs:
           node --check js/app.js
           node --check tests/windows-renderer.test.js
           node --check tests/providers.test.js
+          node --check tests/visual-identity.test.js
 
       - name: Run Windows architecture tests
         run: npm test
