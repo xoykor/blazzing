@@ -31,6 +31,9 @@ assert.ok(providers);
 
 const playlist = [
     "#EXTM3U",
+    "#EXT-X-LISTA-CARDS:https://cards.example/catalog",
+    "#EXT-X-LISTA-CARDS-VERSION:v-test",
+    "#EXT-X-LISTA-CARDS-SHARD-LEN:2",
     '#EXTINF:-1 group-title="CANAIS | Aberta" tvg-logo="https://img/tv.png",Canal Teste',
     "https://media/live.ts",
     '#EXTINF:-1 group-title="FILMES | Ação" tvg-logo="https://img/movie.png",Filme Teste',
@@ -51,6 +54,17 @@ const playlist = [
     assert.strictEqual(catalogs.series.items[0].episodes.length, 2);
     assert.strictEqual(catalogs.series.items[0].episodes[0].episode, 1);
     assert.strictEqual(catalogs.series.items[0].episodes[1].episode, 2);
+
+    // Keep Lista artwork fallback keys even when tvg-logo is present.
+    assert.ok(catalogs.live.items[0].cardKey);
+    assert.ok(catalogs.vod.items[0].cardKey);
+    assert.ok(catalogs.series.items[0].cardKey);
+    assert.strictEqual(
+        catalogs.vod.items[0].cardIndexBase,
+        "https://cards.example/catalog"
+    );
+    assert.strictEqual(catalogs.vod.items[0].cardIndexVersion, "v-test");
+    assert.strictEqual(catalogs.vod.items[0].cardIndexShardLength, 2);
 
     const liveOnly = await providers.parseM3uAsync(
         playlist,
