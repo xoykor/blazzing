@@ -38,6 +38,10 @@ assert.ok(app.includes("providers.parseM3uAsync"));
 assert.ok(app.includes("state.xtream.load(kind)"));
 assert.ok(app.includes("loadStoredM3uCatalog(state.profile, kind)"));
 assert.ok(app.includes("pairing.start(acceptPairedPlaylist"));
+assert.ok(app.includes("resolveCardLogo(item)"));
+assert.ok(app.includes("/api/v1/artwork/resolve"));
+assert.ok(app.includes("window.BlazzingNet.postJson"));
+assert.ok(app.includes("item._artworkFallbackTried"));
 assert.ok(!app.includes('state.profile.mode !== "xtream" || kind === state.kind'));
 assert.ok(!app.includes('button.getAttribute("data-kind") !== "live"'));
 
