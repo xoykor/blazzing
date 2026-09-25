@@ -10,8 +10,8 @@
     --muted: #aab2c4;
     --muted-2: #7f8798;
     --placeholder: #747d91;
-    --accent: var(--accent);
-    --accent-warm: var(--accent-warm);
+    --accent: #ff5f2e;
+    --accent-warm: #ff8a45;
     --focus: #ffffff;
     --danger: #ff7185;
 }
