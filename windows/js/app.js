@@ -395,6 +395,7 @@
         state.selectedCategory = "all";
         state.query = "";
         state.renderLimit = MAX_RENDER;
+        state.catalog = { items: [], categories: [] };
         $("search").value = "";
         $("back-series").classList.add("hidden");
         status($("catalog-status"), "Carregando " + sectionTitle(kind).toLowerCase() + "…", false);
