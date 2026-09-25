@@ -10,6 +10,7 @@
 
 #include <curl/curl.h>
 #include <json-c/json.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -777,7 +778,7 @@ static const char *episode_image(json_object *episode) {
 /* Append episode. */
 static vip_status_t push_episode(json_object *episode, const char *season,
                                  const vip_credentials_t *credentials, vip_channel_list_t *episodes_out,
-                                 int position, vip_error_t *error) {
+                                 int fallback_position, vip_error_t *error) {
     if (!episode || json_object_get_type(episode) != json_type_object)
         return VIP_OK;
     const char *raw_id = jstr(episode, "id");
@@ -785,11 +786,18 @@ static vip_status_t push_episode(json_object *episode, const char *season,
         raw_id = jstr(episode, "stream_id");
     if (!raw_id[0])
         return VIP_OK;
+    const char *episode_num = jstr(episode, "episode_num");
+    int episode_number = fallback_position + 1;
+    if (episode_num[0]) {
+        char *end = NULL;
+        long parsed = strtol(episode_num, &end, 10);
+        if (end != episode_num && end && *end == '\0' && parsed > 0 && parsed <= INT_MAX)
+            episode_number = (int)parsed;
+    }
     const char *title = jstr(episode, "title");
     char fallback[96];
     if (!title[0]) {
-        const char *num = jstr(episode, "episode_num");
-        snprintf(fallback, sizeof(fallback), "Episódio %s", num[0] ? num : raw_id);
+        snprintf(fallback, sizeof(fallback), "Episódio %s", episode_num[0] ? episode_num : raw_id);
         title = fallback;
     }
     const char *extension = jstr(episode, "container_extension");
@@ -809,7 +817,7 @@ static vip_status_t push_episode(json_object *episode, const char *season,
         .logo_url = (char *)episode_image(episode),
         .stream_url = url,
         .epg_channel_id = NULL,
-        .position = position,
+        .position = episode_number,
     };
     vip_status_t st = vip_channel_list_push(episodes_out, &item, error);
     free(url);
