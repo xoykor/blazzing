@@ -325,18 +325,25 @@
     }
 
     function artworkKind(item) {
-        if (item && item.kind === "series") {
+        if (item && (item.kind === "series" || item.kind === "episode")) {
             return "tv";
         }
-        if (item && (item.kind === "vod" || item.kind === "episode")) {
+        if (item && item.kind === "vod") {
             return "movie";
         }
         return "auto";
     }
 
+    function artworkTitle(item) {
+        if (item && item.kind === "episode" && item.seriesName) {
+            return String(item.seriesName);
+        }
+        return itemName(item);
+    }
+
     function artworkLookupKey(item) {
         return artworkKind(item) + "|" +
-            itemName(item).toLocaleLowerCase("pt-BR").trim();
+            artworkTitle(item).toLocaleLowerCase("pt-BR").trim();
     }
 
     function finishArtworkTask(task, url, remember) {
@@ -379,7 +386,7 @@
             items: batch.map(function (task) {
                 return {
                     id: task.requestId,
-                    title: itemName(task.item),
+                    title: artworkTitle(task.item),
                     kind: artworkKind(task.item)
                 };
             })
