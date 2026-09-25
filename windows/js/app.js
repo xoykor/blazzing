@@ -595,19 +595,42 @@
         return text;
     }
 
-    async function loadStoredM3uCatalog(profile, kind, options) {
+    function emptyCatalog() {
+        return { items: [], categories: [] };
+    }
+
+    async function parseDesktopM3uCatalogs(text, source) {
+        /*
+         * Desktop keeps the complete catalog resident like the native Linux
+         * port. Use coarse yielding only to keep the Electron renderer
+         * responsive while a very large (up to 128 MiB) playlist is parsed.
+         * Unlike the Tizen path, the playlist is never reparsed per section.
+         */
+        return providers.parseM3uAsync(text, source, {
+            chunkChars: 1024 * 1024
+        });
+    }
+
+    async function loadStoredM3uCatalogs(profile) {
         var cached = await native.cachedPlaylist(profile.url);
         if (!cached || !cached.text) {
             throw new Error("A playlist local não está disponível.");
         }
+        return parseDesktopM3uCatalogs(cached.text, profile.url);
+    }
 
-        options = options || {
-            onlyKind: kind,
-            seriesSummaryOnly: kind === "series"
-        };
-
-        var result = await providers.parseM3uAsync(cached.text, profile.url, options);
-        return result[kind] || { items: [], categories: [] };
+    function activateCatalog(kind, catalog) {
+        state.kind = kind;
+        state.seriesParent = null;
+        state.selectedCategory = "all";
+        state.query = "";
+        state.renderLimit = MAX_RENDER;
+        state.catalog = catalog || emptyCatalog();
+        $("search").value = "";
+        $("back-series").classList.add("hidden");
+        status($("catalog-status"), "", false);
+        configureContentTabs();
+        renderAll();
     }
 
     async function connectM3u(profile, forceReload) {
@@ -615,14 +638,31 @@
             throw new Error("Informe uma URL M3U/M3U8 HTTP ou HTTPS.");
         }
 
-        await ensureM3uCached(profile, !!forceReload || $("m3u-refresh").checked);
+        var text = await ensureM3uCached(
+            profile,
+            !!forceReload || $("m3u-refresh").checked
+        );
+        status($("login-status"), "Preparando catálogo…", false);
+        var catalogs = await parseDesktopM3uCatalogs(text, profile.url);
+
         state.profile = profile;
         state.xtream = null;
-        state.m3uCatalogs = {};
+        state.m3uCatalogs = catalogs || {};
         persistProfile(profile);
         showBrowser();
-        await loadKind("live");
+        activateCatalog("live", state.m3uCatalogs.live);
         status($("login-status"), "", false);
+    }
+
+    async function loadOptionalXtreamCatalog(client, kind, label) {
+        status($("login-status"), "Carregando " + label + "…", false);
+        try {
+            return await client.load(kind);
+        } catch (error) {
+            console.warn("[xtream] " + label + " indisponível:", error);
+            client.cache[kind] = emptyCatalog();
+            return client.cache[kind];
+        }
     }
 
     async function connectXtream(profile) {
@@ -634,12 +674,22 @@
         var client = new providers.XtreamClient(profile);
         await client.authenticate();
 
+        /*
+         * Match the Linux desktop behavior: prepare the three root catalogs
+         * while connecting. Once the browser opens, TV/Filmes/Séries are
+         * memory switches instead of first-click network loads.
+         */
+        status($("login-status"), "Carregando TV…", false);
+        await client.load("live");
+        await loadOptionalXtreamCatalog(client, "vod", "filmes");
+        await loadOptionalXtreamCatalog(client, "series", "séries");
+
         state.profile = profile;
         state.xtream = client;
         state.m3uCatalogs = {};
         persistProfile(profile);
         showBrowser();
-        await loadKind("live");
+        activateCatalog("live", client.cache.live);
         status($("login-status"), "", false);
     }
 
@@ -651,44 +701,56 @@
         });
     }
 
+    function cachedCatalog(kind) {
+        if (!state.profile) {
+            return null;
+        }
+        if (state.profile.mode === "m3u") {
+            return state.m3uCatalogs[kind] || null;
+        }
+        if (state.xtream && state.xtream.cache) {
+            return state.xtream.cache[kind] || null;
+        }
+        return null;
+    }
+
     async function loadKind(kind) {
-        if (state.loadingKind || !state.profile) {
+        if (!state.profile) {
             return;
         }
         if (kind !== "live" && kind !== "vod" && kind !== "series") {
             return;
         }
 
+        var catalog = cachedCatalog(kind);
+        if (catalog) {
+            activateCatalog(kind, catalog);
+            return;
+        }
+
+        /*
+         * Recovery path only. Normal Windows sessions arrive here with all
+         * root catalogs already resident, so changing tabs has no loading
+         * screen, no blanking and no playlist reparse.
+         */
+        if (state.loadingKind) {
+            return;
+        }
         state.loadingKind = true;
-        state.kind = kind;
-        state.seriesParent = null;
-        state.selectedCategory = "all";
-        state.query = "";
-        state.renderLimit = MAX_RENDER;
-        state.catalog = { items: [], categories: [] };
-        $("search").value = "";
-        $("back-series").classList.add("hidden");
-        status($("catalog-status"), "Carregando " + sectionTitle(kind).toLowerCase() + "…", false);
+        status($("catalog-status"), "Recuperando " + sectionTitle(kind).toLowerCase() + "…", false);
         configureContentTabs();
 
         try {
-            var catalog;
             if (state.profile.mode === "m3u") {
+                state.m3uCatalogs = await loadStoredM3uCatalogs(state.profile);
                 catalog = state.m3uCatalogs[kind];
-                if (!catalog) {
-                    catalog = await loadStoredM3uCatalog(state.profile, kind);
-                    state.m3uCatalogs[kind] = catalog;
-                }
             } else {
                 catalog = await state.xtream.load(kind);
             }
-
-            state.catalog = catalog || { items: [], categories: [] };
-            status($("catalog-status"), "", false);
+            activateCatalog(kind, catalog || emptyCatalog());
         } finally {
             state.loadingKind = false;
             configureContentTabs();
-            renderAll();
         }
     }
 
@@ -883,20 +945,14 @@
     }
 
     async function openSeries(series) {
-        status($("catalog-status"), "Carregando episódios…", false);
-
         if (series.source === "m3u") {
-            var catalog = await loadStoredM3uCatalog(state.profile, "series", {
-                onlyKind: "series",
-                seriesFilterKey: series.seriesKey || series.name
-            });
-            var fullSeries = catalog.items && catalog.items[0];
-            if (!fullSeries || !Array.isArray(fullSeries.episodes) || !fullSeries.episodes.length) {
+            var episodes = Array.isArray(series.episodes) ? series.episodes : [];
+            if (!episodes.length) {
                 throw new Error("Nenhum episódio foi encontrado para esta série.");
             }
 
             var seasons = [];
-            fullSeries.episodes.forEach(function (episode) {
+            episodes.forEach(function (episode) {
                 if (seasons.indexOf(episode.season) === -1) {
                     seasons.push(episode.season);
                 }
@@ -906,11 +962,14 @@
             showSeries({
                 title: series.name,
                 seasons: seasons,
-                episodes: fullSeries.episodes
+                episodes: episodes
             }, series);
             return;
         }
 
+        /* Xtream exposes episode details through a separate API call, so this
+         * loading state is real and intentionally remains on desktop. */
+        status($("catalog-status"), "Carregando episódios…", false);
         var details = await state.xtream.seriesInfo(series);
         showSeries(details, series);
     }
