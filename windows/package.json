@@ -8,7 +8,7 @@
     "start": "electron .",
     "pack": "electron-builder --dir --win --x64",
     "dist": "electron-builder --win nsis portable --x64",
-    "test": "node tests/windows-renderer.test.js && node tests/providers.test.js"
+    "test": "node tests/windows-renderer.test.js && node tests/providers.test.js && node tests/visual-identity.test.js"
   },
   "devDependencies": {
     "electron": "^44.3.0",

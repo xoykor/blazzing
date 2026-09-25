@@ -3,54 +3,41 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#090b11">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: http: https:; style-src 'self'; script-src 'self'; connect-src 'none';">
   <title>Blazzing</title>
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
-  <div id="app">
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-mark">B</div>
-        <div>
-          <strong>Blazzing</strong>
-          <span>Windows Desktop</span>
-        </div>
-      </div>
-      <div class="top-actions">
-        <button id="back-series" class="ghost hidden">Voltar para séries</button>
-        <button id="back-login" class="ghost hidden">Trocar fonte</button>
-        <button id="fullscreen" class="ghost" title="F11">Tela cheia</button>
-      </div>
-    </header>
-
-    <main>
-      <section id="login-view" class="login-view">
-        <div class="hero">
-          <p class="eyebrow">PLAYER IPTV DESKTOP</p>
-          <h1>Conecte sua lista</h1>
-          <p>Cliente Windows independente para Xtream Codes e M3U/M3U8, com reprodução via mpv.</p>
-        </div>
-
-        <div class="login-card">
-          <div class="mode-tabs">
-            <button id="mode-xtream" class="mode-tab active">Xtream Codes</button>
-            <button id="mode-m3u" class="mode-tab">M3U / M3U8</button>
+  <main id="app">
+    <section id="login-view" class="view home-view">
+      <div class="hero">
+        <div class="brand">
+          <div class="brand-mark">B</div>
+          <div>
+            <h1>Blazzing</h1>
+            <p>IPTV para Windows</p>
           </div>
+        </div>
+        <div class="pill">Windows Desktop</div>
+      </div>
 
-          <label>Perfil salvo
-            <select id="saved-profile">
-              <option value="">Novo perfil</option>
-            </select>
-          </label>
+      <div class="home-signature">Para sempre gratuito · Feito por Fernando</div>
+
+      <div class="home-grid">
+        <section class="panel connect-panel">
+          <div class="mode-tabs">
+            <button id="mode-m3u" class="tab mode-tab">M3U / M3U8</button>
+            <button id="mode-xtream" class="tab mode-tab active">Xtream Codes</button>
+          </div>
 
           <label>Nome do perfil
             <input id="profile-name" autocomplete="off" placeholder="Minha lista">
           </label>
 
           <div id="xtream-fields">
-            <label>Servidor
-              <input id="server" autocomplete="off" placeholder="http://servidor:porta">
+            <label>Servidor principal
+              <input id="server" autocomplete="off" placeholder="https://servidor:porta/">
             </label>
             <div class="two-cols">
               <label>Usuário
@@ -64,7 +51,7 @@
 
           <div id="m3u-fields" class="hidden">
             <label>URL da playlist
-              <input id="m3u-url" autocomplete="off" placeholder="https://exemplo/lista.m3u">
+              <input id="m3u-url" autocomplete="off" placeholder="https://servidor/lista.m3u8">
             </label>
             <label class="check-row">
               <input id="m3u-refresh" type="checkbox">
@@ -72,58 +59,95 @@
             </label>
           </div>
 
-          <div class="login-actions">
-            <button id="connect" class="primary">Conectar</button>
-            <button id="pair-button" class="ghost">Adicionar por QR</button>
-            <button id="delete-profile" class="danger ghost hidden">Excluir perfil</button>
-          </div>
+          <button id="connect" class="primary wide">Conectar</button>
+          <button id="pair-button" class="secondary wide">Adicionar pelo celular (QR)</button>
           <p id="login-status" class="status"></p>
-        </div>
-      </section>
+          <p class="privacy-note">Use apenas listas e servidores que você tenha autorização para acessar.</p>
+        </section>
 
-      <section id="browser-view" class="browser-view hidden">
-        <aside class="sidebar">
-          <div class="content-tabs">
-            <button data-kind="live" class="content-tab active">TV</button>
-            <button data-kind="vod" class="content-tab">Filmes</button>
-            <button data-kind="series" class="content-tab">Séries</button>
+        <section class="panel saved-panel">
+          <div class="panel-title-row">
+            <h2>Suas listas</h2>
+            <span class="pill">Perfis</span>
           </div>
-          <div class="sidebar-heading">Categorias</div>
+
+          <label>Perfil salvo
+            <select id="saved-profile">
+              <option value="">Novo perfil</option>
+            </select>
+          </label>
+
+          <div class="saved-profile-copy">
+            <strong>Perfis ficam neste computador</strong>
+            <p>Selecione um perfil para preencher os dados ou crie uma nova conexão.</p>
+          </div>
+
+          <button id="delete-profile" class="danger secondary wide hidden">Excluir perfil</button>
+        </section>
+      </div>
+    </section>
+
+    <section id="browser-view" class="view catalog-view hidden">
+      <header class="topbar">
+        <div class="brand compact">
+          <div class="brand-mark">B</div>
+          <strong>Blazzing</strong>
+        </div>
+
+        <nav class="topnav">
+          <button data-kind="live" class="content-tab active">TV</button>
+          <button data-kind="vod" class="content-tab">Filmes</button>
+          <button data-kind="series" class="content-tab">Séries</button>
+          <button id="back-series" class="hidden">← Voltar</button>
+          <button id="back-login">Listas</button>
+          <button id="fullscreen" title="F11">Tela cheia</button>
+        </nav>
+
+        <div class="search-box">
+          <input id="search" type="search" placeholder="Buscar">
+        </div>
+      </header>
+
+      <div class="catalog-layout">
+        <aside class="sidebar">
           <button id="all-category" class="category active">Todos</button>
           <div id="categories"></div>
         </aside>
 
-        <section class="catalog">
-          <div class="catalog-toolbar">
+        <section class="content">
+          <div class="content-heading">
             <div>
+              <p class="eyebrow">Catálogo</p>
               <h2 id="catalog-title">TV</h2>
-              <p id="catalog-count">0 itens</p>
             </div>
-            <input id="search" type="search" placeholder="Pesquisar">
+            <div class="content-heading-actions">
+              <span class="desktop-hint">★ Favoritar</span>
+              <div id="catalog-count" class="pill">0 itens</div>
+            </div>
           </div>
           <div id="catalog-status" class="status catalog-status"></div>
-          <div id="cards" class="cards"></div>
+          <div id="cards" class="card-grid"></div>
         </section>
-      </section>
-    </main>
-  </div>
-
-  <div id="pairing-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="pairing-title">
-    <div class="modal-card">
-      <div class="modal-head">
-        <div>
-          <p class="eyebrow">PAREAMENTO SEGURO</p>
-          <h2 id="pairing-title">Adicionar lista pelo celular</h2>
-        </div>
-        <button id="pairing-cancel" class="ghost">Fechar</button>
       </div>
-      <p class="modal-copy">Escaneie o QR, informe o nome e a URL M3U no celular e envie. A chave fica somente no QR.</p>
-      <div id="pairing-qr" class="pairing-qr"></div>
-      <p id="pairing-url" class="pairing-url"></p>
-      <p id="pairing-status" class="status"></p>
-      <button id="pairing-retry" class="primary hidden">Gerar novo QR</button>
+    </section>
+
+    <div id="pairing-modal" class="pairing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="pairing-title">
+      <div class="pairing-card">
+        <div id="pairing-qr" class="pairing-qr"></div>
+        <div class="pairing-copy">
+          <p class="eyebrow">Adicionar pelo celular</p>
+          <h2 id="pairing-title">Escaneie o QR</h2>
+          <p id="pairing-status" class="status">Preparando sessão segura…</p>
+          <p class="pairing-help">Abra a câmera do celular, escaneie o código e informe o nome e a URL M3U/M3U8. A chave fica somente no QR.</p>
+          <p id="pairing-url" class="pairing-url"></p>
+          <div class="pairing-actions">
+            <button id="pairing-retry" class="primary hidden">Tentar novamente</button>
+            <button id="pairing-cancel">Cancelar</button>
+          </div>
+        </div>
+      </div>
     </div>
-  </div>
+  </main>
 
   <template id="card-template">
     <article class="media-card" tabindex="0">

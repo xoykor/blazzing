@@ -49,8 +49,8 @@
 #define APP_TITLE "Blazzing"
 #define DEFAULT_W 1600
 #define DEFAULT_H 900
-#define SIDEBAR_W 270
-#define TOPBAR_H 70
+#define SIDEBAR_W 250
+#define TOPBAR_H 76
 #define PLAYER_HEADER_H 64
 #define PLAYER_CONTROLS_H 82
 #define GRID_GAP 18
@@ -381,17 +381,17 @@ static unsigned long alloc_color(app_t *a, const char *hex) {
 
 /* Initialize palette. */
 static void init_palette(app_t *a) {
-    a->colors.bg = alloc_color(a, "#070A12");
-    a->colors.panel = alloc_color(a, "#0E1420");
-    a->colors.panel2 = alloc_color(a, "#151E2D");
-    a->colors.hover = alloc_color(a, "#1D2C43");
-    a->colors.border = alloc_color(a, "#2B3950");
-    a->colors.text = alloc_color(a, "#F6F8FC");
-    a->colors.muted = alloc_color(a, "#91A0B7");
-    a->colors.accent = alloc_color(a, "#62A9FF");
-    a->colors.accent2 = alloc_color(a, "#183E6B");
+    a->colors.bg = alloc_color(a, "#090B11");
+    a->colors.panel = alloc_color(a, "#111722");
+    a->colors.panel2 = alloc_color(a, "#171C28");
+    a->colors.hover = alloc_color(a, "#202839");
+    a->colors.border = alloc_color(a, "#343A48");
+    a->colors.text = alloc_color(a, "#F6F7FB");
+    a->colors.muted = alloc_color(a, "#AAB2C4");
+    a->colors.accent = alloc_color(a, "#FF5F2E");
+    a->colors.accent2 = alloc_color(a, "#572517");
     a->colors.danger = alloc_color(a, "#FF7185");
-    a->colors.black = alloc_color(a, "#030509");
+    a->colors.black = alloc_color(a, "#04060A");
 }
 
 /* Draw target. */
@@ -3613,7 +3613,7 @@ static void draw_input(app_t *a, int x, int y, int w, int h, const char *value, 
     bool bright = search_focused || (value && value[0]);
     if (a->renderer.active)
         vip_ui_render_text(&a->renderer, x + 16, y + (h - 16) / 2, w - 32, text, "Sans 10",
-                           bright ? 0xF6F8FCu : 0x91A0B7u, 1.0, false);
+                           bright ? 0xF6F7FBu : 0xAAB2C4u, 1.0, false);
     else
         draw_text(a, x + 16, y + h / 2 + 6, text, bright ? a->colors.text : a->colors.muted);
     if (search_focused) {
@@ -3633,10 +3633,9 @@ static void draw_input(app_t *a, int x, int y, int w, int h, const char *value, 
 /* Draw login. */
 static void draw_login(app_t *a) {
     if (a->renderer.active)
-        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, a->height, 0x050811u, 0x0B1220u);
+        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, a->height, 0x090B11u, 0x111722u);
     else
         fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.bg);
-    fill_rect(a, 0, 0, (unsigned)a->width, 7, a->colors.accent);
     int w = a->width > 1120 ? 1080 : a->width - 40;
     if (w < 720)
         w = 720;
@@ -3646,8 +3645,8 @@ static void draw_login(app_t *a) {
         y = 18;
     if (a->renderer.active) {
         vip_ui_render_round_rect(&a->renderer, x + 8, y + 10, w, h, 26, 0x000000u, 0.58);
-        vip_ui_render_round_rect(&a->renderer, x, y, w, h, 26, 0x0E1420u, 0.97);
-        vip_ui_render_round_stroke(&a->renderer, x, y, w, h, 26, 0x2B3950u, 1.0, 1.0);
+        vip_ui_render_round_rect(&a->renderer, x, y, w, h, 26, 0x111722u, 0.97);
+        vip_ui_render_round_stroke(&a->renderer, x, y, w, h, 26, 0x343A48u, 1.0, 1.0);
     } else {
         fill_round_rect(a, x + 8, y + 10, w, h, 24, a->colors.black);
         fill_round_rect(a, x, y, w, h, 24, a->colors.panel);
@@ -3655,17 +3654,17 @@ static void draw_login(app_t *a) {
     }
 
     if (a->renderer.active) {
-        vip_ui_render_round_rect(&a->renderer, x + 30, y + 25, 42, 42, 13, 0x62A9FFu, 1.0);
-        vip_ui_render_text(&a->renderer, x + 30, y + 35, 42, "B", "Sans Bold 13", 0x050811u, 1.0, true);
+        vip_ui_render_round_rect(&a->renderer, x + 30, y + 25, 42, 42, 13, 0xFF5F2Eu, 1.0);
+        vip_ui_render_text(&a->renderer, x + 30, y + 35, 42, "B", "Sans Bold 13", 0x090B11u, 1.0, true);
     } else {
         fill_round_rect(a, x + 30, y + 25, 42, 42, 13, a->colors.accent);
         draw_centered_font(a, a->font_heading, x + 30, y + 53, 42, "B", a->colors.bg);
     }
     if (a->renderer.active) {
-        vip_ui_render_text(&a->renderer, x + 86, y + 27, 360, "Blazzing", "Sans Bold 22", 0xF6F8FCu, 1.0,
+        vip_ui_render_text(&a->renderer, x + 86, y + 27, 360, "Blazzing", "Sans Bold 22", 0xF6F7FBu, 1.0,
                            false);
-        vip_ui_render_text(&a->renderer, x + 86, y + 55, 420, "Streaming, listas e biblioteca em um só lugar",
-                           "Sans 10", 0x91A0B7u, 1.0, false);
+        vip_ui_render_text(&a->renderer, x + 86, y + 55, 420, "IPTV para Linux",
+                           "Sans 10", 0xAAB2C4u, 1.0, false);
     } else {
         draw_text_font(a, a->font_title, x + 86, y + 49, "Blazzing", a->colors.text);
         draw_text(a, x + 86, y + 69, "Streaming, listas e biblioteca em um só lugar", a->colors.muted);
@@ -3681,13 +3680,13 @@ static void draw_login(app_t *a) {
         int bx = form_x + i * (mode_w + 10);
         if (a->renderer.active) {
             vip_ui_render_round_rect(&a->renderer, bx, mode_y, mode_w, 42, 12,
-                                     selected ? 0x183E6Bu : 0x151E2Du, 1.0);
+                                     selected ? 0x572517u : 0x171C28u, 1.0);
             vip_ui_render_round_stroke(&a->renderer, bx, mode_y, mode_w, 42, 12,
-                                       mode_focused && selected ? 0xB7D9FFu
-                                                                : (selected ? 0x62A9FFu : 0x2B3950u),
+                                       mode_focused && selected ? 0xFFFFFFu
+                                                                : (selected ? 0xFF5F2Eu : 0x343A48u),
                                        1.0, mode_focused && selected ? 2.5 : (selected ? 1.5 : 1.0));
             vip_ui_render_text(&a->renderer, bx, mode_y + 12, mode_w, i == LOGIN_XTREAM ? "Xtream" : "M3U",
-                               selected ? "Sans Bold 10" : "Sans 10", selected ? 0xF6F8FCu : 0x91A0B7u, 1.0,
+                               selected ? "Sans Bold 10" : "Sans 10", selected ? 0xF6F7FBu : 0xAAB2C4u, 1.0,
                                true);
         } else {
             fill_round_rect(a, bx, mode_y, mode_w, 42, 12, selected ? a->colors.accent2 : a->colors.panel2);
@@ -3713,9 +3712,9 @@ static void draw_login(app_t *a) {
                    INPUT_SERVER, false);
         if (a->renderer.active) {
             vip_ui_render_text(&a->renderer, form_x, y + 252, form_w,
-                               "M3U remoto (HTTP/HTTPS) ou arquivo local.", "Sans 9", 0x91A0B7u, 1.0, false);
+                               "M3U remoto (HTTP/HTTPS) ou arquivo local.", "Sans 9", 0xAAB2C4u, 1.0, false);
             vip_ui_render_text(&a->renderer, form_x, y + 278, form_w,
-                               "A playlist é processada diretamente pelo Blazzing.", "Sans 9", 0x91A0B7u, 1.0,
+                               "A playlist é processada diretamente pelo Blazzing.", "Sans 9", 0xAAB2C4u, 1.0,
                                false);
         } else {
             draw_text(a, form_x, y + 266, "M3U remoto (HTTP/HTTPS) ou arquivo local.", a->colors.muted);
@@ -3732,19 +3731,19 @@ static void draw_login(app_t *a) {
                                          : "Adicionar pelo celular");
         if (a->renderer.active) {
             vip_ui_render_round_rect(&a->renderer, form_x, phone_y, form_w, 46, 12,
-                                     waiting_phone ? 0x183E6Bu : 0x151E2Du, 1.0);
+                                     waiting_phone ? 0x572517u : 0x171C28u, 1.0);
             vip_ui_render_round_stroke(&a->renderer, form_x, phone_y, form_w, 46, 12,
-                                       phone_focused ? 0xB7D9FFu
-                                                     : (waiting_phone ? 0x62A9FFu : 0x2B3950u),
+                                       phone_focused ? 0xFFFFFFu
+                                                     : (waiting_phone ? 0xFF5F2Eu : 0x343A48u),
                                        1.0, phone_focused ? 2.5 : 1.0);
             vip_ui_render_text(&a->renderer, form_x, phone_y + 13, form_w,
                                phone_label,
                                waiting_phone ? "Sans Bold 10" : "Sans 10",
-                               waiting_phone ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+                               waiting_phone ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
             if (waiting_phone)
                 vip_ui_render_text(&a->renderer, form_x, phone_y + 57, form_w,
                                    "Pareamento HTTPS pela Internet", "Sans 8",
-                                   0x91A0B7u, 1.0, false);
+                                   0xAAB2C4u, 1.0, false);
         } else {
             fill_round_rect(a, form_x, phone_y, form_w, 46, 12,
                             waiting_phone ? a->colors.accent2 : a->colors.panel2);
@@ -3766,14 +3765,14 @@ static void draw_login(app_t *a) {
     if (a->renderer.active) {
         vip_ui_render_round_rect(&a->renderer, form_x + 3, connect_y + 5, form_w, 50, 15, 0x000000u, 0.48);
         vip_ui_render_round_rect(&a->renderer, form_x, connect_y, form_w, 50, 15,
-                                 ready ? 0x62A9FFu : 0x151E2Du, 1.0);
+                                 ready ? 0xFF5F2Eu : 0x171C28u, 1.0);
         vip_ui_render_round_stroke(&a->renderer, form_x, connect_y, form_w, 50, 15,
-                                   connect_focused ? 0xB7D9FFu
-                                                   : (ready ? 0x8BC1FFu : 0x2B3950u),
+                                   connect_focused ? 0xFFFFFFu
+                                                   : (ready ? 0xFF8A45u : 0x343A48u),
                                    1.0, connect_focused ? 2.5 : 1.0);
         vip_ui_render_text(&a->renderer, form_x, connect_y + 15, form_w,
                            atomic_load(&a->login_running) ? "Conectando..." : "Conectar", "Sans Bold 11",
-                           ready ? 0x050811u : 0x91A0B7u, 1.0, true);
+                           ready ? 0x090B11u : 0xAAB2C4u, 1.0, true);
     } else {
         fill_round_rect(a, form_x + 2, connect_y + 4, form_w, 50, 14, a->colors.black);
         fill_round_rect(a, form_x, connect_y, form_w, 50, 14, ready ? a->colors.accent : a->colors.panel2);
@@ -3793,11 +3792,11 @@ static void draw_login(app_t *a) {
         vip_ui_render_round_rect(&a->renderer, list_x - 14, y + 88, list_w + 28, 438, 18,
                                  0x111A28u, 0.98);
         vip_ui_render_round_stroke(&a->renderer, list_x - 14, y + 88, list_w + 28, 438, 18,
-                                   0x2B3950u, 1.0, 1.0);
+                                   0x343A48u, 1.0, 1.0);
         vip_ui_render_text(&a->renderer, list_x, y + 102, list_w, side_title,
-                           "Sans Bold 12", 0xF6F8FCu, 1.0, false);
+                           "Sans Bold 12", 0xF6F7FBu, 1.0, false);
         vip_ui_render_text(&a->renderer, list_x, y + 126, list_w, side_subtitle,
-                           "Sans 9", 0x91A0B7u, 1.0, false);
+                           "Sans 9", 0xAAB2C4u, 1.0, false);
     } else {
         fill_round_rect(a, list_x - 14, y + 88, list_w + 28, 438, 18, a->colors.panel2);
         stroke_round_rect(a, list_x - 14, y + 88, list_w + 28, 438, 18, a->colors.border);
@@ -3819,12 +3818,12 @@ static void draw_login(app_t *a) {
         if (a->renderer.active) {
             vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 16, list_w,
                                "Via Internet • nenhuma porta local necessária",
-                               "Sans 8", 0x91A0B7u, 1.0, true);
+                               "Sans 8", 0xAAB2C4u, 1.0, true);
             vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 38, list_w,
-                               session_hint, "Sans 8", 0x91A0B7u, 1.0, true);
+                               session_hint, "Sans 8", 0xAAB2C4u, 1.0, true);
             vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 60, list_w,
                                "Back/Esc cancela o pareamento",
-                               "Sans 8", 0x91A0B7u, 1.0, true);
+                               "Sans 8", 0xAAB2C4u, 1.0, true);
         } else {
             draw_centered(a, list_x, qr_y + qr_size + 30, list_w,
                           "Via Internet • nenhuma porta local necessária", a->colors.muted);
@@ -3845,9 +3844,9 @@ static void draw_login(app_t *a) {
         bool profile_focused = a->input_focus == INPUT_SAVED_PROFILE && a->profile_focus == idx;
         if (a->renderer.active) {
             vip_ui_render_round_rect(&a->renderer, list_x, row_y, list_w, 52, 12,
-                                     profile_focused ? 0x183E6Bu : 0x151E2Du, 1.0);
+                                     profile_focused ? 0x572517u : 0x171C28u, 1.0);
             vip_ui_render_round_stroke(&a->renderer, list_x, row_y, list_w, 52, 12,
-                                       profile_focused ? 0xB7D9FFu : 0x2B3950u,
+                                       profile_focused ? 0xFFFFFFu : 0x343A48u,
                                        1.0, profile_focused ? 2.5 : 1.0);
         } else {
             draw_surface(a, list_x, row_y, list_w, 52, 12, profile_focused);
@@ -3863,8 +3862,8 @@ static void draw_login(app_t *a) {
         if (a->renderer.active) {
             vip_ui_render_text(&a->renderer, list_x + 13, row_y + 8, list_w - 26, label,
                                profile_focused ? "Sans Bold 9" : "Sans SemiBold 9",
-                               0xF6F8FCu, 1.0, false);
-            vip_ui_render_text(&a->renderer, list_x + 13, row_y + 29, list_w - 26, sub, "Sans 8", 0x91A0B7u,
+                               0xF6F7FBu, 1.0, false);
+            vip_ui_render_text(&a->renderer, list_x + 13, row_y + 29, list_w - 26, sub, "Sans 8", 0xAAB2C4u,
                                1.0, false);
         } else {
             draw_text(a, list_x + 13, row_y + 22, label,
@@ -3876,7 +3875,7 @@ static void draw_login(app_t *a) {
     if (!a->pairing_relay && a->profiles.len == 0u) {
         if (a->renderer.active)
             vip_ui_render_text(&a->renderer, list_x, y + 168, list_w, "Nenhuma lista salva ainda.", "Sans 9",
-                               0x91A0B7u, 1.0, false);
+                               0xAAB2C4u, 1.0, false);
         else
             draw_text(a, list_x, y + 182, "Nenhuma lista salva ainda.", a->colors.muted);
     }
@@ -3888,7 +3887,7 @@ static void draw_login(app_t *a) {
     bool status_error = strstr(status_copy, "falha") || strstr(status_copy, "Erro");
     if (a->renderer.active)
         vip_ui_render_text(&a->renderer, form_x, y + h - 56, form_w, status_copy, "Sans 8",
-                           status_error ? 0xFF7185u : 0x91A0B7u, 1.0, false);
+                           status_error ? 0xFF7185u : 0xAAB2C4u, 1.0, false);
     else
         draw_text(a, form_x, y + h - 42, status_copy, status_error ? a->colors.danger : a->colors.muted);
 
@@ -3989,8 +3988,8 @@ static void draw_details_panel(app_t *a) {
     details_panel_geometry(a, &px, &py, &pw, &ph);
     if (a->renderer.active) {
         vip_ui_render_round_rect(&a->renderer, px + 5, py + 8, pw, ph, 20, 0x000000u, 0.55);
-        vip_ui_render_round_rect(&a->renderer, px, py, pw, ph, 20, 0x0E1420u, 0.97);
-        vip_ui_render_round_stroke(&a->renderer, px, py, pw, ph, 20, 0x2B3950u, 1.0, 1.0);
+        vip_ui_render_round_rect(&a->renderer, px, py, pw, ph, 20, 0x111722u, 0.97);
+        vip_ui_render_round_stroke(&a->renderer, px, py, pw, ph, 20, 0x343A48u, 1.0, 1.0);
     } else {
         fill_round_rect(a, px + 4, py + 6, pw, ph, 18, a->colors.black);
         fill_round_rect(a, px, py, pw, ph, 18, a->colors.panel);
@@ -4020,7 +4019,7 @@ static void draw_details_panel(app_t *a) {
     char title[256];
     bounded_text(title, sizeof(title), ch->name, 72);
     if (a->renderer.active)
-        vip_ui_render_text(&a->renderer, px + 16, py + 13, pw - 132, title, "Sans Bold 12", 0xF6F8FCu, 1.0,
+        vip_ui_render_text(&a->renderer, px + 16, py + 13, pw - 132, title, "Sans Bold 12", 0xF6F7FBu, 1.0,
                            false);
     else
         draw_text_font(a, a->font_heading, px + 16, py + 31, title, a->colors.text);
@@ -4028,11 +4027,11 @@ static void draw_details_panel(app_t *a) {
     int fav_w = 92, fav_h = 32, fav_x = px + pw - fav_w - 14, fav_y = py + 10;
     if (a->renderer.active) {
         vip_ui_render_round_rect(&a->renderer, fav_x, fav_y, fav_w, fav_h, 12,
-                                 favorite ? 0x183E6Bu : 0x151E2Du, 1.0);
+                                 favorite ? 0x572517u : 0x171C28u, 1.0);
         vip_ui_render_round_stroke(&a->renderer, fav_x, fav_y, fav_w, fav_h, 12,
-                                   favorite ? 0x62A9FFu : 0x2B3950u, 1.0, 1.0);
+                                   favorite ? 0xFF5F2Eu : 0x343A48u, 1.0, 1.0);
         vip_ui_render_text(&a->renderer, fav_x, fav_y + 9, fav_w, favorite ? "SALVO" : "FAVORITAR",
-                           favorite ? "Sans Bold 8" : "Sans 8", favorite ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+                           favorite ? "Sans Bold 8" : "Sans 8", favorite ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
     } else {
         fill_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12, favorite ? a->colors.accent2 : a->colors.panel2);
         stroke_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12, favorite ? a->colors.accent : a->colors.border);
@@ -4145,16 +4144,15 @@ static const char *browse_back_label(const app_t *a) {
 /* Draw browse. */
 static void draw_browse(app_t *a) {
     if (a->renderer.active) {
-        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, a->height, 0x050811u, 0x080D17u);
-        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, TOPBAR_H, 0x121C2Cu, 0x0C1420u);
-        vip_ui_render_linear_gradient(&a->renderer, 0, TOPBAR_H, SIDEBAR_W, a->height - TOPBAR_H, 0x121C2Au,
-                                      0x0C1320u);
+        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, a->height, 0x090B11u, 0x0D1119u);
+        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, TOPBAR_H, 0x171C28u, 0x111722u);
+        vip_ui_render_linear_gradient(&a->renderer, 0, TOPBAR_H, SIDEBAR_W, a->height - TOPBAR_H, 0x171C28u,
+                                      0x111722u);
     } else {
         fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.bg);
         fill_rect(a, 0, 0, (unsigned)a->width, TOPBAR_H, a->colors.panel);
         fill_rect(a, 0, TOPBAR_H, SIDEBAR_W, (unsigned)(a->height - TOPBAR_H), a->colors.panel2);
     }
-    fill_rect(a, 0, 0, (unsigned)a->width, 4, a->colors.accent);
     fill_rect(a, SIDEBAR_W - 1, TOPBAR_H, 1, (unsigned)(a->height - TOPBAR_H), a->colors.border);
 
     const int tab_y = 12, tab_h = 46;
@@ -4180,7 +4178,7 @@ static void draw_browse(app_t *a) {
         if (a->renderer.active)
             vip_ui_render_text(&a->renderer, tab_x[k], tab_y + 14, tab_w[k], content_label((content_kind_t)k),
                                (selected || key_focused) ? "Sans Bold 10" : "Sans 10",
-                               (selected || hovered || key_focused) ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+                               (selected || hovered || key_focused) ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
         else
             draw_centered(a, tab_x[k], 42, tab_w[k], content_label((content_kind_t)k),
                           (selected || hovered || key_focused) ? a->colors.text : a->colors.muted);
@@ -4210,7 +4208,7 @@ static void draw_browse(app_t *a) {
     if (a->renderer.active)
         vip_ui_render_text(&a->renderer, fav_x, 27, fav_w, fav_label,
                            (a->favorites_only || fav_focus) ? "Sans Bold 10" : "Sans 10",
-                           (a->favorites_only || fav_hover || fav_focus) ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+                           (a->favorites_only || fav_hover || fav_focus) ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
     else
         draw_centered(a, fav_x, 42, fav_w, fav_label,
                       (a->favorites_only || fav_focus) ? a->colors.text : a->colors.muted);
@@ -4222,7 +4220,7 @@ static void draw_browse(app_t *a) {
                       list_focus ? a->colors.text : (list_hover ? a->colors.accent : a->colors.border));
     if (a->renderer.active)
         vip_ui_render_text(&a->renderer, list_x, 27, list_w, "Listas", "Sans 10",
-                           (list_hover || list_focus) ? 0xF6F8FCu : 0x91A0B7u, 1.0, true);
+                           (list_hover || list_focus) ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
     else
         draw_centered(a, list_x, 42, list_w, "Listas",
                       (list_hover || list_focus) ? a->colors.text : a->colors.muted);
@@ -4237,7 +4235,7 @@ static void draw_browse(app_t *a) {
                           back_focus ? a->colors.text : a->colors.accent);
         if (a->renderer.active)
             vip_ui_render_text(&a->renderer, 18, y + 10, SIDEBAR_W - 36, browse_back_label(a), "Sans Bold 10",
-                               0xF6F8FCu, 1.0, false);
+                               0xF6F7FBu, 1.0, false);
         else
             draw_text_font(a, a->font_heading, 18, y + 26, browse_back_label(a), a->colors.text);
         y += 48;
@@ -4255,7 +4253,7 @@ static void draw_browse(app_t *a) {
     if (a->renderer.active)
         vip_ui_render_text(&a->renderer, 18, y + 9, SIDEBAR_W - 36, all_label,
                            (all_sel || all_focus) ? "Sans Bold 9" : "Sans 9",
-                           (all_sel || all_hover || all_focus) ? 0xF6F8FCu : 0x91A0B7u,
+                           (all_sel || all_hover || all_focus) ? 0xF6F7FBu : 0xAAB2C4u,
                            1.0, false);
     else
         draw_text(a, 18, y + 24, all_label,
@@ -4282,7 +4280,7 @@ static void draw_browse(app_t *a) {
         if (a->renderer.active)
             vip_ui_render_text(&a->renderer, 18, y + 9, SIDEBAR_W - 36, label,
                                (selected || key_focused) ? "Sans Bold 9" : "Sans 9",
-                               (selected || hovered || key_focused) ? 0xF6F8FCu : 0x91A0B7u, 1.0, false);
+                               (selected || hovered || key_focused) ? 0xF6F7FBu : 0xAAB2C4u, 1.0, false);
         else
             draw_text(a, 18, y + 24, label,
                       (selected || hovered || key_focused) ? a->colors.text : a->colors.muted);
@@ -4347,7 +4345,7 @@ static void draw_browse(app_t *a) {
                 vip_ui_render_round_rect(&a->renderer, cx + 5, cy + 8 + (int)(3.0f * hover_eased),
                                          layout.card_w, layout.card_h, 18, 0x000000u, 0.62);
                 vip_ui_render_round_stroke(&a->renderer, cx - 3, cy - 3, layout.card_w + 6, layout.card_h + 6,
-                                           19, 0x62A9FFu, 0.80, 2.0);
+                                           19, 0xFF5F2Eu, 0.80, 2.0);
             } else {
                 fill_round_rect(a, cx + 4, cy + 6 + (int)(3.0f * hover_eased), layout.card_w, layout.card_h,
                                 16, a->colors.black);
@@ -4356,10 +4354,10 @@ static void draw_browse(app_t *a) {
             if (active_card) {
                 stroke_round_rect(a, cx - 3, cy - 3, layout.card_w + 6, layout.card_h + 6, 18,
                                   a->colors.accent);
-                stroke_round_rect(a, cx - 1, cy - 1, layout.card_w + 2, layout.card_h + 2, 17,
-                                  a->colors.accent2);
+                stroke_round_rect(a, cx - 1, cy - 1, layout.card_w + 2, layout.card_h + 2, 19,
+                                  a->colors.text);
             }
-            fill_round_rect(a, cx, cy, layout.card_w, layout.art_h, 14, a->colors.black);
+            fill_round_rect(a, cx, cy, layout.card_w, layout.art_h, 18, a->colors.black);
             vip_error_t error = {0};
             char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
             bool image_ok = path && draw_cached_image_contain(a, path, cx, cy, layout.card_w, layout.art_h);
@@ -4370,7 +4368,7 @@ static void draw_browse(app_t *a) {
                 const char *placeholder = can_load_image ? "carregando imagem..." : "sem capa";
                 if (a->renderer.active)
                     vip_ui_render_text(&a->renderer, cx + 8, cy + layout.art_h / 2 - 7, layout.card_w - 16,
-                                       placeholder, "Sans 9", 0x91A0B7u, 1.0, true);
+                                       placeholder, "Sans 9", 0xAAB2C4u, 1.0, true);
                 else
                     draw_centered(a, cx, cy + layout.art_h / 2 + 5, layout.card_w, placeholder,
                                   a->colors.muted);
@@ -4381,7 +4379,7 @@ static void draw_browse(app_t *a) {
                 }
             }
             free(path);
-            stroke_round_rect(a, cx, cy, layout.card_w, layout.art_h, 14,
+            stroke_round_rect(a, cx, cy, layout.card_w, layout.art_h, 18,
                               active_card ? a->colors.accent : a->colors.border);
             if (hovered && hover_eased > 0.30f) {
                 int open_w = 78, open_h = 30;
@@ -4390,7 +4388,7 @@ static void draw_browse(app_t *a) {
                 stroke_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent);
                 if (a->renderer.active)
                     vip_ui_render_text(&a->renderer, open_x, open_y + 7, open_w, "ABRIR", "Sans Bold 8",
-                                       0xF6F8FCu, 1.0, true);
+                                       0xF6F7FBu, 1.0, true);
                 else
                     draw_centered_font(a, a->font_small, open_x, open_y + 20, open_w, "ABRIR",
                                        a->colors.text);
@@ -4438,7 +4436,7 @@ static void draw_browse(app_t *a) {
             bounded_text(title, sizeof(title), display_title, 92);
             if (a->renderer.active)
                 vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 11, layout.card_w - 18, title,
-                                   active_card ? "Sans SemiBold 10" : "Sans 10", 0xF6F8FCu, 1.0, false);
+                                   active_card ? "Sans SemiBold 10" : "Sans 10", 0xF6F7FBu, 1.0, false);
             else
                 draw_text_font(a, active_card ? a->font_heading : a->font, cx + 8, cy + layout.art_h + 25,
                                title, a->colors.text);
@@ -4453,7 +4451,7 @@ static void draw_browse(app_t *a) {
                 snprintf(meta, sizeof(meta), "%zu episódio%s", season_count, season_count == 1u ? "" : "s");
                 if (a->renderer.active)
                     vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 33, layout.card_w - 18, meta,
-                                       "Sans 8", 0x91A0B7u, 1.0, false);
+                                       "Sans 8", 0xAAB2C4u, 1.0, false);
                 else
                     draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 44, meta, a->colors.muted);
             } else if (a->content_kind == CONTENT_SERIES && !a->series_episode_mode && a->series_watched &&
@@ -4463,7 +4461,7 @@ static void draw_browse(app_t *a) {
                          a->series_total[chidx]);
                 if (a->renderer.active)
                     vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 33, layout.card_w - 18,
-                                       progress, "Sans 8", 0x91A0B7u, 1.0, false);
+                                       progress, "Sans 8", 0xAAB2C4u, 1.0, false);
                 else
                     draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 44, progress,
                                    a->colors.muted);
@@ -4555,15 +4553,15 @@ static void draw_player(app_t *a) {
 
     if (!a->fullscreen) {
         if (a->renderer.active) {
-            vip_ui_render_round_rect(&a->renderer, 0, 0, a->width, PLAYER_HEADER_H, 0, 0x0E1420u, 0.97);
-            vip_ui_render_round_rect(&a->renderer, 12, 10, 132, 44, 13, 0x151E2Du, 1.0);
-            vip_ui_render_round_stroke(&a->renderer, 12, 10, 132, 44, 13, 0x2B3950u, 1.0, 1.0);
-            vip_ui_render_text(&a->renderer, 28, 24, 104, "<  Voltar", "Sans SemiBold 10", 0xF6F8FCu, 1.0,
+            vip_ui_render_round_rect(&a->renderer, 0, 0, a->width, PLAYER_HEADER_H, 0, 0x111722u, 0.97);
+            vip_ui_render_round_rect(&a->renderer, 12, 10, 132, 44, 13, 0x171C28u, 1.0);
+            vip_ui_render_round_stroke(&a->renderer, 12, 10, 132, 44, 13, 0x343A48u, 1.0, 1.0);
+            vip_ui_render_text(&a->renderer, 28, 24, 104, "<  Voltar", "Sans SemiBold 10", 0xF6F7FBu, 1.0,
                                false);
             if (a->current_channel < ACTIVE_CHANNELS(a).len)
                 vip_ui_render_text(&a->renderer, 168, 22, a->width - 190,
                                    ACTIVE_CHANNELS(a).items[a->current_channel].name, "Sans Bold 12",
-                                   0xF6F8FCu, 1.0, false);
+                                   0xF6F7FBu, 1.0, false);
         } else {
             fill_rect(a, 0, 0, (unsigned)a->width, PLAYER_HEADER_H, a->colors.panel);
             fill_round_rect(a, 12, 10, 132, 44, 13, a->colors.panel2);
@@ -4579,16 +4577,16 @@ static void draw_player(app_t *a) {
         int y = a->height - PLAYER_CONTROLS_H;
         if (a->renderer.active) {
             vip_ui_render_round_rect(&a->renderer, 10, y + 7, a->width - 20, PLAYER_CONTROLS_H - 12, 18,
-                                     0x0E1420u, 0.96);
+                                     0x111722u, 0.96);
             vip_ui_render_round_stroke(&a->renderer, 10, y + 7, a->width - 20, PLAYER_CONTROLS_H - 12, 18,
-                                       0x2B3950u, 0.95, 1.0);
-            vip_ui_render_round_rect(&a->renderer, 16, y + 18, 52, 46, 14, 0x151E2Du, 1.0);
-            vip_ui_render_round_stroke(&a->renderer, 16, y + 18, 52, 46, 14, 0x36506Fu, 1.0, 1.0);
+                                       0x343A48u, 0.95, 1.0);
+            vip_ui_render_round_rect(&a->renderer, 16, y + 18, 52, 46, 14, 0x171C28u, 1.0);
+            vip_ui_render_round_stroke(&a->renderer, 16, y + 18, 52, 46, 14, 0x343A48u, 1.0, 1.0);
             vip_ui_render_text(&a->renderer, 16, y + 31, 52, snap.paused ? ">" : "||", "Sans Bold 12",
-                               0xF6F8FCu, 1.0, true);
-            vip_ui_render_round_rect(&a->renderer, 76, y + 18, 82, 46, 14, 0x151E2Du, 1.0);
-            vip_ui_render_round_stroke(&a->renderer, 76, y + 18, 82, 46, 14, 0x36506Fu, 1.0, 1.0);
-            vip_ui_render_text(&a->renderer, 76, y + 32, 82, "Voltar", "Sans SemiBold 9", 0xF6F8FCu, 1.0,
+                               0xF6F7FBu, 1.0, true);
+            vip_ui_render_round_rect(&a->renderer, 76, y + 18, 82, 46, 14, 0x171C28u, 1.0);
+            vip_ui_render_round_stroke(&a->renderer, 76, y + 18, 82, 46, 14, 0x343A48u, 1.0, 1.0);
+            vip_ui_render_text(&a->renderer, 76, y + 32, 82, "Voltar", "Sans SemiBold 9", 0xF6F7FBu, 1.0,
                                true);
         } else {
             fill_rect(a, 0, y, (unsigned)a->width, PLAYER_CONTROLS_H, a->colors.panel);
@@ -4603,9 +4601,9 @@ static void draw_player(app_t *a) {
         if (a->player_item_live) {
             if (a->renderer.active) {
                 vip_ui_render_round_rect(&a->renderer, 176, y + 22, 76, 30, 12, 0xFF7185u, 0.96);
-                vip_ui_render_text(&a->renderer, 176, y + 30, 76, "AO VIVO", "Sans Bold 8", 0xF6F8FCu, 1.0,
+                vip_ui_render_text(&a->renderer, 176, y + 30, 76, "AO VIVO", "Sans Bold 8", 0xF6F7FBu, 1.0,
                                    true);
-                vip_ui_render_text(&a->renderer, 270, y + 31, 220, "<-  ->  troca canal", "Sans 9", 0x91A0B7u,
+                vip_ui_render_text(&a->renderer, 270, y + 31, 220, "<-  ->  troca canal", "Sans 9", 0xAAB2C4u,
                                    1.0, false);
             } else {
                 fill_round_rect(a, 176, y + 22, 76, 30, 12, a->colors.danger);
@@ -4616,7 +4614,7 @@ static void draw_player(app_t *a) {
             int tx, ty, tw, th;
             timeline_geometry(a, &tx, &ty, &tw, &th);
             if (a->renderer.active)
-                vip_ui_render_round_rect(&a->renderer, tx, ty, tw, th, th / 2, 0x26354Au, 1.0);
+                vip_ui_render_round_rect(&a->renderer, tx, ty, tw, th, th / 2, 0x343A48u, 1.0);
             else
                 fill_round_rect(a, tx, ty, tw, th, th / 2, a->colors.panel2);
             double ratio = snap.duration_seconds > 0.0 ? snap.position_seconds / snap.duration_seconds : 0.0;
@@ -4627,7 +4625,7 @@ static void draw_player(app_t *a) {
             int fill = (int)((double)tw * ratio);
             if (fill > 0) {
                 if (a->renderer.active)
-                    vip_ui_render_round_rect(&a->renderer, tx, ty, fill, th, th / 2, 0x62A9FFu, 1.0);
+                    vip_ui_render_round_rect(&a->renderer, tx, ty, fill, th, th / 2, 0xFF5F2Eu, 1.0);
                 else
                     fill_round_rect(a, tx, ty, fill, th, th / 2, a->colors.accent);
             }
@@ -4635,12 +4633,12 @@ static void draw_player(app_t *a) {
             format_clock(snap.position_seconds, pos);
             format_clock(snap.duration_seconds, dur);
             if (a->renderer.active) {
-                vip_ui_render_text(&a->renderer, 166, y + 31, 60, pos, "Sans SemiBold 9", 0xF6F8FCu, 1.0,
+                vip_ui_render_text(&a->renderer, 166, y + 31, 60, pos, "Sans SemiBold 9", 0xF6F7FBu, 1.0,
                                    false);
                 vip_ui_render_text(&a->renderer, a->width - 150, y + 31, 132, dur, "Sans SemiBold 9",
-                                   0xF6F8FCu, 1.0, false);
+                                   0xF6F7FBu, 1.0, false);
                 vip_ui_render_text(&a->renderer, tx, y + 57, tw, "Clique/arraste para buscar  ·  <- -> 10s",
-                                   "Sans 8", 0x91A0B7u, 1.0, false);
+                                   "Sans 8", 0xAAB2C4u, 1.0, false);
             } else {
                 draw_text(a, 166, y + 45, pos, a->colors.text);
                 draw_text(a, a->width - 150, y + 45, dur, a->colors.text);
@@ -4651,7 +4649,7 @@ static void draw_player(app_t *a) {
         if (a->renderer.active) {
             int sw = vip_ui_render_text_width(&a->renderer, state_text, "Sans 8");
             vip_ui_render_text(&a->renderer, a->width - sw - 18, y + 58, sw + 2, state_text, "Sans 8",
-                               player_state == VIP_PLAYER_ERROR ? 0xFF7185u : 0x91A0B7u, 1.0, false);
+                               player_state == VIP_PLAYER_ERROR ? 0xFF7185u : 0xAAB2C4u, 1.0, false);
         } else {
             int sw = text_width(a, state_text);
             draw_text_font(a, a->font_small, a->width - sw - 18, y + 72, state_text,
