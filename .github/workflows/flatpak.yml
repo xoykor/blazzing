@@ -76,20 +76,18 @@ jobs:
         run: |
           set -euo pipefail
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "SKIP_RELEASE=true" >> "$GITHUB_ENV"
+            echo "RELEASE_EXISTS=true" >> "$GITHUB_ENV"
           else
-            echo "SKIP_RELEASE=false" >> "$GITHUB_ENV"
+            echo "RELEASE_EXISTS=false" >> "$GITHUB_ENV"
           fi
 
       - name: Download Flatpak artifact
-        if: env.SKIP_RELEASE != 'true'
         uses: actions/download-artifact@v4
         with:
           name: Blazzing-x86_64.flatpak
           path: release
 
       - name: Prepare release files
-        if: env.SKIP_RELEASE != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -97,13 +95,21 @@ jobs:
           cd release
           sha256sum "Blazzing-${TAG}-x86_64.flatpak" > "Blazzing-${TAG}-x86_64.flatpak.sha256"
 
-      - name: Create tag and GitHub Release
-        if: env.SKIP_RELEASE != 'true'
+      - name: Create or refresh GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
+
+          if [[ "$RELEASE_EXISTS" == "true" ]]; then
+            gh release upload "$TAG" \
+              "release/Blazzing-${TAG}-x86_64.flatpak" \
+              "release/Blazzing-${TAG}-x86_64.flatpak.sha256" \
+              --clobber \
+              --repo "$GITHUB_REPOSITORY"
+            exit 0
+          fi
 
           if ! git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
             gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
