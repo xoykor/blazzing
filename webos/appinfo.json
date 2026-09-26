@@ -1,0 +1,12 @@
+{
+  "id": "com.xoykor.blazzing",
+  "version": "0.1.0",
+  "vendor": "Xoykor",
+  "type": "web",
+  "main": "index.html",
+  "title": "Blazzing",
+  "icon": "icon.png",
+  "resolution": "1920x1080",
+  "disableBackHistoryAPI": true,
+  "transparent": false
+}
