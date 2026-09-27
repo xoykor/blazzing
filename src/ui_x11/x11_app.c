@@ -1199,6 +1199,9 @@ static bool contains_ascii_token_case(const char *text, const char *token) {
         return false;
     size_t token_len = strlen(token);
     for (const char *p = text; *p; ++p) {
+        size_t remaining = strlen(p);
+        if (remaining < token_len)
+            break;
         if (strncasecmp(p, token, token_len) != 0)
             continue;
         unsigned char before = p == text ? 0u : (unsigned char)p[-1];
