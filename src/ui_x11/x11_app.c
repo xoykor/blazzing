@@ -984,7 +984,7 @@ static card_layout_t browse_layout(app_t *a) {
         layout.art_h = layout.card_w;
     else
         layout.art_h = (layout.card_w * 9) / 16;
-    layout.card_h = layout.art_h + 54;
+    layout.card_h = layout.art_h + 66;
     layout.row_step = layout.card_h + GRID_GAP;
     return layout;
 }
@@ -1191,6 +1191,177 @@ static const char *m3u_series_display_name(const app_t *a, const vip_channel_t *
     if (m3u_series_root(a) && ch && vip_m3u_parse_episode_label(ch->name, buffer, cap, NULL, NULL))
         return buffer;
     return ch && ch->name ? ch->name : "";
+}
+
+/* Return whether text contains a case-insensitive standalone ASCII token. */
+static bool contains_ascii_token_case(const char *text, const char *token) {
+    if (!text || !token || !token[0])
+        return false;
+    size_t token_len = strlen(token);
+    for (const char *p = text; *p; ++p) {
+        if (strncasecmp(p, token, token_len) != 0)
+            continue;
+        unsigned char before = p == text ? 0u : (unsigned char)p[-1];
+        unsigned char after = (unsigned char)p[token_len];
+        if ((p == text || !isalnum(before)) && (!after || !isalnum(after)))
+            return true;
+    }
+    return false;
+}
+
+/* Keep language/audio variants visible even when a long title is ellipsized. */
+static const char *media_variant_label(const char *name) {
+    if (!name || !name[0])
+        return NULL;
+    if (contains_ascii_token_case(name, "dual"))
+        return "DUAL";
+    if (contains_ascii_token_case(name, "legendado") || contains_ascii_token_case(name, "legendada") ||
+        contains_ascii_token_case(name, "leg") || contains_ascii_token_case(name, "sub") ||
+        contains_ascii_token_case(name, "subbed"))
+        return "LEG";
+    if (contains_ascii_token_case(name, "dublado") || contains_ascii_token_case(name, "dublada") ||
+        contains_ascii_token_case(name, "dub"))
+        return "DUB";
+    return NULL;
+}
+
+/* Extract a numeric season/episode key from either M3U labels or Xtream fields. */
+static void episode_sort_key(const vip_channel_t *ch, int *season_out, int *episode_out) {
+    int season = INT_MAX;
+    int episode = INT_MAX;
+    if (ch) {
+        char series_name[256];
+        int parsed_season = 0;
+        int parsed_episode = 0;
+        if (vip_m3u_parse_episode_label(ch->name, series_name, sizeof(series_name), &parsed_season,
+                                        &parsed_episode)) {
+            season = parsed_season;
+            episode = parsed_episode;
+        } else {
+            if (ch->category_id && ch->category_id[0]) {
+                char *end = NULL;
+                long parsed = strtol(ch->category_id, &end, 10);
+                if (end != ch->category_id && end && *end == '\0' && parsed >= 0 && parsed <= INT_MAX)
+                    season = (int)parsed;
+            }
+            if (ch->position >= 0)
+                episode = ch->position;
+        }
+    }
+    if (season_out)
+        *season_out = season;
+    if (episode_out)
+        *episode_out = episode;
+}
+
+/* Sort episodes naturally as T1E1, T1E2, ... instead of provider insertion order. */
+static int compare_episode_channels(const void *lhs, const void *rhs) {
+    const vip_channel_t *a = lhs;
+    const vip_channel_t *b = rhs;
+    int as = INT_MAX, ae = INT_MAX, bs = INT_MAX, be = INT_MAX;
+    episode_sort_key(a, &as, &ae);
+    episode_sort_key(b, &bs, &be);
+    if (as != bs)
+        return as < bs ? -1 : 1;
+    if (ae != be)
+        return ae < be ? -1 : 1;
+    const char *an = a && a->name ? a->name : "";
+    const char *bn = b && b->name ? b->name : "";
+    return strcasecmp(an, bn);
+}
+
+/* Sort season cards numerically while preserving their original category index in position. */
+static int compare_season_channels(const void *lhs, const void *rhs) {
+    const vip_channel_t *a = lhs;
+    const vip_channel_t *b = rhs;
+    long av = LONG_MAX;
+    long bv = LONG_MAX;
+    if (a && a->category_id && a->category_id[0]) {
+        char *end = NULL;
+        long parsed = strtol(a->category_id, &end, 10);
+        if (end != a->category_id && end && *end == '\0')
+            av = parsed;
+    }
+    if (b && b->category_id && b->category_id[0]) {
+        char *end = NULL;
+        long parsed = strtol(b->category_id, &end, 10);
+        if (end != b->category_id && end && *end == '\0')
+            bv = parsed;
+    }
+    if (av != bv)
+        return av < bv ? -1 : 1;
+    int ap = a ? a->position : INT_MAX;
+    int bp = b ? b->position : INT_MAX;
+    if (ap != bp)
+        return ap < bp ? -1 : 1;
+    return strcasecmp(a && a->name ? a->name : "", b && b->name ? b->name : "");
+}
+
+static void sort_episode_channels(vip_channel_list_t *channels) {
+    if (channels && channels->len > 1u)
+        qsort(channels->items, channels->len, sizeof(channels->items[0]), compare_episode_channels);
+}
+
+static void sort_season_channels(vip_channel_list_t *channels) {
+    if (channels && channels->len > 1u)
+        qsort(channels->items, channels->len, sizeof(channels->items[0]), compare_season_channels);
+}
+
+/* Draw up to two title lines so long work names stay identifiable. */
+static void draw_card_title(app_t *a, int x, int y, int width, const char *text, bool active) {
+    if (!a || !text || !text[0] || width <= 0)
+        return;
+    if (!a->renderer.active) {
+        char bounded[256];
+        bounded_text(bounded, sizeof(bounded), text, 92);
+        draw_text_font(a, active ? a->font_heading : a->font, x, y + 14, bounded, a->colors.text);
+        return;
+    }
+
+    const char *font = active ? "Sans SemiBold 10" : "Sans 10";
+    if (vip_ui_render_text_width(&a->renderer, text, font) <= width) {
+        vip_ui_render_text(&a->renderer, x, y, width, text, font, 0xF6F7FBu, 1.0, false);
+        return;
+    }
+
+    size_t len = strlen(text);
+    size_t best = 0u;
+    char first[256];
+    for (size_t i = 0u; i < len && i < sizeof(first) - 1u; ++i) {
+        if (text[i] != ' ')
+            continue;
+        size_t n = i;
+        while (n > 0u && text[n - 1u] == ' ')
+            --n;
+        if (n == 0u || n >= sizeof(first))
+            continue;
+        memcpy(first, text, n);
+        first[n] = '\0';
+        if (vip_ui_render_text_width(&a->renderer, first, font) <= width)
+            best = i + 1u;
+        else
+            break;
+    }
+
+    if (best == 0u) {
+        vip_ui_render_text(&a->renderer, x, y, width, text, font, 0xF6F7FBu, 1.0, false);
+        return;
+    }
+
+    size_t first_len = best;
+    while (first_len > 0u && text[first_len - 1u] == ' ')
+        --first_len;
+    if (first_len >= sizeof(first))
+        first_len = sizeof(first) - 1u;
+    memcpy(first, text, first_len);
+    first[first_len] = '\0';
+
+    const char *second = text + best;
+    while (*second == ' ')
+        ++second;
+    vip_ui_render_text(&a->renderer, x, y, width, first, font, 0xF6F7FBu, 1.0, false);
+    if (*second)
+        vip_ui_render_text(&a->renderer, x, y + 16, width, second, font, 0xF6F7FBu, 1.0, false);
 }
 
 /* Format the compact season/episode label shown under episode cards. */
@@ -2387,6 +2558,10 @@ static void *series_worker(void *userdata) {
             if (st != VIP_OK)
                 break;
         }
+        if (st == VIP_OK) {
+            sort_episode_channels(&episodes);
+            sort_season_channels(&season_cards);
+        }
     }
 
     if (st == VIP_OK && season_cards.len > 0u) {
@@ -2833,6 +3008,11 @@ static bool start_m3u_series_load(app_t *a, size_t channel_index) {
             copy.position = episode;
             st = vip_channel_list_push(&episodes, &copy, &error);
         }
+    }
+
+    if (st == VIP_OK) {
+        sort_episode_channels(&episodes);
+        sort_season_channels(&cards);
     }
 
     if (st != VIP_OK || cards.len == 0u || episodes.len == 0u) {
@@ -4434,6 +4614,16 @@ static void draw_browse(app_t *a) {
                               favorite ? a->colors.accent : a->colors.border);
             draw_centered(a, card_fav_x, card_fav_y + 19, card_fav_w, favorite ? "SALVO" : "FAV",
                           favorite ? a->colors.text : a->colors.muted);
+            const char *variant_label = media_variant_label(ch->name);
+            if (variant_label) {
+                int variant_w = strcmp(variant_label, "DUAL") == 0 ? 62 : 50;
+                int variant_x = cx + layout.card_w - variant_w - 6;
+                int variant_y = card_fav_y + card_fav_h + 6;
+                fill_round_rect(a, variant_x, variant_y, variant_w, 24, 9, a->colors.panel);
+                stroke_round_rect(a, variant_x, variant_y, variant_w, 24, 9, a->colors.accent);
+                draw_centered_font(a, a->font_small, variant_x, variant_y + 17, variant_w, variant_label,
+                                   a->colors.text);
+            }
             if (a->progress_flags &&
                 (a->content_kind == CONTENT_VOD || (a->series_episode_mode && !a->series_season_select))) {
                 vip_watch_progress_t *pr = &a->progress_flags[chidx];
@@ -4464,14 +4654,8 @@ static void draw_browse(app_t *a) {
             }
             char grouped_title[256];
             const char *display_title = m3u_series_display_name(a, ch, grouped_title, sizeof(grouped_title));
-            char title[256];
-            bounded_text(title, sizeof(title), display_title, 92);
-            if (a->renderer.active)
-                vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 11, layout.card_w - 18, title,
-                                   active_card ? "Sans SemiBold 10" : "Sans 10", 0xF6F7FBu, 1.0, false);
-            else
-                draw_text_font(a, active_card ? a->font_heading : a->font, cx + 8, cy + layout.art_h + 25,
-                               title, a->colors.text);
+            draw_card_title(a, cx + 9, cy + layout.art_h + 9, layout.card_w - 18, display_title,
+                            active_card);
             if (a->series_season_select) {
                 size_t season_count = 0u;
                 for (size_t ei = 0; ei < a->episode_channels.len; ++ei) {
@@ -4482,18 +4666,18 @@ static void draw_browse(app_t *a) {
                 char meta[72];
                 snprintf(meta, sizeof(meta), "%zu episódio%s", season_count, season_count == 1u ? "" : "s");
                 if (a->renderer.active)
-                    vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 33, layout.card_w - 18, meta,
+                    vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 43, layout.card_w - 18, meta,
                                        "Sans 8", 0xAAB2C4u, 1.0, false);
                 else
-                    draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 44, meta, a->colors.muted);
+                    draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 56, meta, a->colors.muted);
             } else if (a->series_episode_mode) {
                 char meta[72];
                 if (episode_card_meta(a, ch, meta, sizeof(meta))) {
                     if (a->renderer.active)
-                        vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 33, layout.card_w - 18,
+                        vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 43, layout.card_w - 18,
                                            meta, "Sans 8", 0xAAB2C4u, 1.0, false);
                     else
-                        draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 44, meta,
+                        draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 56, meta,
                                        a->colors.muted);
                 }
             } else if (a->content_kind == CONTENT_SERIES && !a->series_episode_mode && a->series_watched &&
@@ -4502,10 +4686,10 @@ static void draw_browse(app_t *a) {
                 snprintf(progress, sizeof(progress), "%d/%d episódios", a->series_watched[chidx],
                          a->series_total[chidx]);
                 if (a->renderer.active)
-                    vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 33, layout.card_w - 18,
+                    vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 43, layout.card_w - 18,
                                        progress, "Sans 8", 0xAAB2C4u, 1.0, false);
                 else
-                    draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 44, progress,
+                    draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 56, progress,
                                    a->colors.muted);
             }
             cy = base_cy;
