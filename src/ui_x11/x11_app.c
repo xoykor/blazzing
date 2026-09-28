@@ -5091,70 +5091,106 @@ static void draw_browse_card_artwork(app_t *a, vip_channel_t *ch, size_t chidx, 
     }
 }
 
+/* Convert persisted progress to the clamped ratio used by the progress bar. */
+static double browse_progress_ratio(const vip_watch_progress_t *progress) {
+    if (progress->completed)
+        return 1.0;
+
+    double ratio = progress->position_seconds / progress->duration_seconds;
+    if (ratio < 0.0)
+        return 0.0;
+    if (ratio > 1.0)
+        return 1.0;
+    return ratio;
+}
+
+/* Draw the completion/percentage badge that sits over card artwork. */
+static void draw_browse_progress_badge(app_t *a, const vip_watch_progress_t *progress,
+                                       double ratio, int cx, int cy) {
+    if (progress->completed) {
+        const int badge_w = 92;
+        fill_rect(a, cx + 6, cy + 6, (unsigned)badge_w, 26, a->colors.accent2);
+        stroke_rect(a, cx + 6, cy + 6, (unsigned)badge_w, 26, a->colors.accent);
+        draw_centered(a, cx + 6, cy + 24, badge_w, "ASSISTIDO", a->colors.text);
+        return;
+    }
+    if (progress->duration_seconds <= 1.0 || progress->position_seconds <= 3.0)
+        return;
+
+    char badge[32];
+    int percent = (int)(ratio * 100.0 + 0.5);
+    snprintf(badge, sizeof(badge), "%d%%", percent);
+    fill_rect(a, cx + 6, cy + 6, 54, 26, a->colors.panel2);
+    stroke_rect(a, cx + 6, cy + 6, 54, 26, a->colors.accent);
+    draw_centered(a, cx + 6, cy + 24, 54, badge, a->colors.text);
+}
+
 /* Draw persisted playback progress without coupling it to artwork loading. */
 static void draw_browse_card_progress(app_t *a, size_t chidx, const card_layout_t *layout, int cx, int cy) {
-    if (!a->progress_flags ||
-        (a->content_kind != CONTENT_VOD && (!a->series_episode_mode || a->series_season_select)))
+    if (!a->progress_flags)
+        return;
+    if (a->content_kind != CONTENT_VOD &&
+        (!a->series_episode_mode || a->series_season_select))
         return;
 
-    vip_watch_progress_t *pr = &a->progress_flags[chidx];
-    if (pr->duration_seconds <= 1.0 && !pr->completed)
+    vip_watch_progress_t *progress = &a->progress_flags[chidx];
+    if (progress->duration_seconds <= 1.0 && !progress->completed)
         return;
 
-    double ratio = pr->completed ? 1.0 : pr->position_seconds / pr->duration_seconds;
-    if (ratio < 0.0)
-        ratio = 0.0;
-    if (ratio > 1.0)
-        ratio = 1.0;
-
+    double ratio = browse_progress_ratio(progress);
     int progress_w = (int)((double)layout->card_w * ratio);
     fill_rect(a, cx, cy + layout->art_h - 5, (unsigned)layout->card_w, 5, a->colors.panel2);
     if (progress_w > 0)
         fill_rect(a, cx, cy + layout->art_h - 5, (unsigned)progress_w, 5, a->colors.accent);
 
-    if (pr->completed) {
-        int badge_w = 92;
-        fill_rect(a, cx + 6, cy + 6, (unsigned)badge_w, 26, a->colors.accent2);
-        stroke_rect(a, cx + 6, cy + 6, (unsigned)badge_w, 26, a->colors.accent);
-        draw_centered(a, cx + 6, cy + 24, badge_w, "ASSISTIDO", a->colors.text);
-    } else if (pr->duration_seconds > 1.0 && pr->position_seconds > 3.0) {
-        int percent = (int)(ratio * 100.0 + 0.5);
-        char badge[32];
-        snprintf(badge, sizeof(badge), "%d%%", percent);
-        fill_rect(a, cx + 6, cy + 6, 54, 26, a->colors.panel2);
-        stroke_rect(a, cx + 6, cy + 6, 54, 26, a->colors.accent);
-        draw_centered(a, cx + 6, cy + 24, 54, badge, a->colors.text);
+    draw_browse_progress_badge(a, progress, ratio, cx, cy);
+}
+
+/* Count episodes belonging to the currently represented season. */
+static size_t browse_season_episode_count(const app_t *a, const vip_channel_t *channel) {
+    size_t count = 0u;
+    for (size_t i = 0; i < a->episode_channels.len; ++i) {
+        const char *category_id = a->episode_channels.items[i].category_id;
+        if (category_id && channel->category_id &&
+            strcmp(category_id, channel->category_id) == 0)
+            ++count;
     }
+    return count;
+}
+
+/* Produce the secondary card line for the current series browsing mode. */
+static bool browse_card_metadata_text(app_t *a, vip_channel_t *channel, size_t chidx,
+                                      char *text, size_t text_size) {
+    if (a->series_season_select) {
+        size_t count = browse_season_episode_count(a, channel);
+        snprintf(text, text_size, "%zu episódio%s", count, count == 1u ? "" : "s");
+        return true;
+    }
+    if (a->series_episode_mode)
+        return episode_card_meta(a, channel, text, text_size);
+
+    if (a->content_kind != CONTENT_SERIES || !a->series_watched ||
+        !a->series_total || a->series_total[chidx] <= 0)
+        return false;
+
+    snprintf(text, text_size, "%d/%d episódios", a->series_watched[chidx],
+             a->series_total[chidx]);
+    return true;
 }
 
 /* Draw the secondary line under a card title for the active browse mode. */
-static void draw_browse_card_metadata(app_t *a, vip_channel_t *ch, size_t chidx, const card_layout_t *layout,
-                                      int cx, int cy) {
-    char meta[80];
-
-    if (a->series_season_select) {
-        size_t season_count = 0u;
-        for (size_t ei = 0; ei < a->episode_channels.len; ++ei) {
-            const char *cid = a->episode_channels.items[ei].category_id;
-            if (cid && ch->category_id && strcmp(cid, ch->category_id) == 0)
-                ++season_count;
-        }
-        snprintf(meta, sizeof(meta), "%zu episódio%s", season_count, season_count == 1u ? "" : "s");
-    } else if (a->series_episode_mode) {
-        if (!episode_card_meta(a, ch, meta, sizeof(meta)))
-            return;
-    } else if (a->content_kind == CONTENT_SERIES && a->series_watched && a->series_total &&
-               a->series_total[chidx] > 0) {
-        snprintf(meta, sizeof(meta), "%d/%d episódios", a->series_watched[chidx], a->series_total[chidx]);
-    } else {
+static void draw_browse_card_metadata(app_t *a, vip_channel_t *channel, size_t chidx,
+                                      const card_layout_t *layout, int cx, int cy) {
+    char text[80];
+    if (!browse_card_metadata_text(a, channel, chidx, text, sizeof(text)))
         return;
-    }
 
     if (a->renderer.active)
-        vip_ui_render_text(&a->renderer, cx + 9, cy + layout->art_h + 43, layout->card_w - 18, meta,
-                           "Sans 8", 0xAAB2C4u, 1.0, false);
+        vip_ui_render_text(&a->renderer, cx + 9, cy + layout->art_h + 43,
+                           layout->card_w - 18, text, "Sans 8", 0xAAB2C4u, 1.0, false);
     else
-        draw_text_font(a, a->font_small, cx + 8, cy + layout->art_h + 56, meta, a->colors.muted);
+        draw_text_font(a, a->font_small, cx + 8, cy + layout->art_h + 56, text,
+                       a->colors.muted);
 }
 
 /* Draw one visible card. All per-card state is derived here so the grid loop
