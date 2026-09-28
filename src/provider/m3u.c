@@ -813,7 +813,7 @@ static vip_status_t push_m3u_stream(const char *source,
     snprintf(channel_id, sizeof(channel_id), "m3u:%s", id_hash);
 
     vip_channel_t item = {
-        .provider_id = provider_id,
+        .provider_id = (char *)provider_id,
         .id = channel_id,
         .category_id = category_id,
         .name = state->pending_name && state->pending_name[0] ? state->pending_name : "Canal",
