@@ -3917,65 +3917,65 @@ static char *alternate_stream_url(app_t *a, const char *url) {
     return out;
 }
 
-/* Handle the maybe failover player operation. */
-static void maybe_failover_player(app_t *a) {
-    if (!a || a->screen != SCREEN_PLAYER || !a->player)
-        return;
-    if (vip_mpv_player_state(a->player) != VIP_PLAYER_ERROR)
-        return;
-    if (a->current_channel >= ACTIVE_CHANNELS(a).len)
-        return;
+/* Return whether a channel has a static fallback shard configured. */
+static bool channel_has_static_fallback(const vip_channel_t *channel) {
+    return channel && channel->fallback_id && channel->fallback_id[0] &&
+           channel->fallback_base && channel->fallback_base[0];
+}
 
-    vip_channel_t *channel = &ACTIVE_CHANNELS(a).items[a->current_channel];
+/* Load one resolved static fallback with the headers required by its source. */
+static vip_status_t load_static_fallback(app_t *a, const char *url,
+                                         const char *referer, const char *user_agent,
+                                         vip_error_t *error) {
+    bool plain_hls = a->player_item_live && stream_needs_forced_hls(url) &&
+                     (!referer || !referer[0]) && (!user_agent || !user_agent[0]);
+    if (plain_hls)
+        return vip_mpv_player_load_hls(a->player, url, error);
+    return vip_mpv_player_load_http(a->player, url, referer, user_agent, error);
+}
 
-    /*
-     * Lista static failover: fetch only the shard for this item, then try one
-     * direct source at a time. No playback proxy/Worker is involved.
-     */
-    if (channel->fallback_id && channel->fallback_id[0] &&
-        channel->fallback_base && channel->fallback_base[0]) {
-        char *url = NULL;
-        char *referer = NULL;
-        char *user_agent = NULL;
-        vip_error_t fallback_error = {0};
+/* Try the next direct source from the static-list fallback shard. */
+static bool try_static_player_fallback(app_t *a, vip_channel_t *channel) {
+    if (!channel_has_static_fallback(channel))
+        return false;
 
-        if (vip_m3u_fallback_variant(channel, a->player_fallback_attempt,
-                                     &url, &referer, &user_agent,
-                                     &fallback_error) == VIP_OK &&
-            url && url[0]) {
-            ++a->player_fallback_attempt;
-            fprintf(stderr, "[player] fonte falhou; tentando fallback estático %zu\n",
-                    a->player_fallback_attempt);
-            snprintf(a->player_status, sizeof(a->player_status),
-                     "Fonte indisponível; tentando alternativa %zu...",
-                     a->player_fallback_attempt);
-            a->player_open_ms = monotonic_ms();
-
-            vip_error_t error = {0};
-            vip_status_t st;
-            if (a->player_item_live && stream_needs_forced_hls(url) &&
-                (!referer || !referer[0]) && (!user_agent || !user_agent[0])) {
-                st = vip_mpv_player_load_hls(a->player, url, &error);
-            } else {
-                st = vip_mpv_player_load_http(a->player, url, referer, user_agent, &error);
-            }
-            if (st != VIP_OK)
-                snprintf(a->player_status, sizeof(a->player_status), "%s", error.message);
-
-            free(url);
-            free(referer);
-            free(user_agent);
-            return;
-        }
-
+    char *url = NULL;
+    char *referer = NULL;
+    char *user_agent = NULL;
+    vip_error_t fallback_error = {0};
+    vip_status_t resolved = vip_m3u_fallback_variant(
+        channel, a->player_fallback_attempt, &url, &referer, &user_agent, &fallback_error);
+    if (resolved != VIP_OK || !url || !url[0]) {
         free(url);
         free(referer);
         free(user_agent);
+        return false;
     }
 
-    /* Existing Xtream mirror fallback remains available for Xtream profiles. */
+    ++a->player_fallback_attempt;
+    fprintf(stderr, "[player] fonte falhou; tentando fallback estático %zu\n",
+            a->player_fallback_attempt);
+    snprintf(a->player_status, sizeof(a->player_status),
+             "Fonte indisponível; tentando alternativa %zu...",
+             a->player_fallback_attempt);
+    a->player_open_ms = monotonic_ms();
+
+    vip_error_t error = {0};
+    vip_status_t st = load_static_fallback(a, url, referer, user_agent, &error);
+    if (st != VIP_OK)
+        snprintf(a->player_status, sizeof(a->player_status), "%s", error.message);
+
+    free(url);
+    free(referer);
+    free(user_agent);
+    return true;
+}
+
+/* Try the configured Xtream mirror after direct source fallbacks are exhausted. */
+static void try_xtream_player_mirror(app_t *a, const vip_channel_t *channel) {
     if (a->player_xtream_alt_attempted)
         return;
+
     char *url = alternate_stream_url(a, channel->stream_url);
     a->player_xtream_alt_attempted = true;
     if (!url)
@@ -3989,6 +3989,21 @@ static void maybe_failover_player(app_t *a) {
     if (vip_mpv_player_load(a->player, url, &error) != VIP_OK)
         snprintf(a->player_status, sizeof(a->player_status), "%s", error.message);
     free(url);
+}
+
+/* Handle the maybe failover player operation. */
+static void maybe_failover_player(app_t *a) {
+    if (!a || a->screen != SCREEN_PLAYER || !a->player)
+        return;
+    if (vip_mpv_player_state(a->player) != VIP_PLAYER_ERROR)
+        return;
+    if (a->current_channel >= ACTIVE_CHANNELS(a).len)
+        return;
+
+    vip_channel_t *channel = &ACTIVE_CHANNELS(a).items[a->current_channel];
+    if (try_static_player_fallback(a, channel))
+        return;
+    try_xtream_player_mirror(a, channel);
 }
 
 /* Draw input. */
