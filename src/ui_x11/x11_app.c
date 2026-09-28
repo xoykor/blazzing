@@ -5217,166 +5217,239 @@ static const char *browse_back_label(const app_t *a) {
 }
 
 /* Draw browse. */
-static void draw_browse(app_t *a) {
+typedef struct {
+    int content_x;
+    int content_y;
+    int avail_w;
+    card_layout_t cards;
+    int first_row;
+    int y_offset;
+    int visible_rows;
+} browse_grid_layout_t;
+
+static void draw_browse_background(app_t *a) {
     if (a->renderer.active) {
         vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, a->height, 0x090B11u, 0x0D1119u);
         vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, TOPBAR_H, 0x171C28u, 0x111722u);
-        vip_ui_render_linear_gradient(&a->renderer, 0, TOPBAR_H, SIDEBAR_W, a->height - TOPBAR_H, 0x171C28u,
-                                      0x111722u);
+        vip_ui_render_linear_gradient(&a->renderer, 0, TOPBAR_H, SIDEBAR_W, a->height - TOPBAR_H,
+                                      0x171C28u, 0x111722u);
     } else {
         fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.bg);
         fill_rect(a, 0, 0, (unsigned)a->width, TOPBAR_H, a->colors.panel);
         fill_rect(a, 0, TOPBAR_H, SIDEBAR_W, (unsigned)(a->height - TOPBAR_H), a->colors.panel2);
     }
     fill_rect(a, SIDEBAR_W - 1, TOPBAR_H, 1, (unsigned)(a->height - TOPBAR_H), a->colors.border);
+}
 
-    const int tab_y = 12, tab_h = 46;
-    const int tab_x[3] = {8, 88, 174};
-    const int tab_w[3] = {74, 80, 88};
-    for (int k = 0; k < 3; ++k) {
-        bool selected = (int)a->content_kind == k;
-        bool key_focused = a->browse_focus == BROWSE_FOCUS_TOP && a->browse_top_focus == k;
-        bool hovered = a->hovered_control == HOVER_TAB_BASE + k;
-        float hover_t = hovered ? vip_ui_ease_out_cubic(a->control_motion.value) : 0.0f;
-        fill_round_rect(a, tab_x[k], tab_y, tab_w[k], tab_h, 13,
-                        selected ? a->colors.accent2
-                                 : ((hovered || key_focused) ? a->colors.hover : a->colors.panel2));
-        stroke_round_rect(a, tab_x[k], tab_y, tab_w[k], tab_h, 13,
-                          key_focused ? a->colors.text
-                                      : ((selected || hovered) ? a->colors.accent : a->colors.border));
-        if (hovered && !selected) {
-            int line_w = (int)((float)(tab_w[k] - 24) * hover_t + 0.5f);
-            if (line_w > 0)
-                fill_round_rect(a, tab_x[k] + (tab_w[k] - line_w) / 2, tab_y + tab_h - 4, line_w, 3, 1,
-                                a->colors.accent);
-        }
-        if (a->renderer.active)
-            vip_ui_render_text(&a->renderer, tab_x[k], tab_y + 14, tab_w[k], content_label((content_kind_t)k),
-                               (selected || key_focused) ? "Sans Bold 10" : "Sans 10",
-                               (selected || hovered || key_focused) ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
-        else
-            draw_centered(a, tab_x[k], 42, tab_w[k], content_label((content_kind_t)k),
-                          (selected || hovered || key_focused) ? a->colors.text : a->colors.muted);
+static void draw_browse_tab(app_t *a, int kind, int x, int width) {
+    const int y = 12;
+    const int height = 46;
+    bool selected = (int)a->content_kind == kind;
+    bool key_focused = a->browse_focus == BROWSE_FOCUS_TOP && a->browse_top_focus == kind;
+    bool hovered = a->hovered_control == HOVER_TAB_BASE + kind;
+    float hover_t = hovered ? vip_ui_ease_out_cubic(a->control_motion.value) : 0.0f;
+
+    fill_round_rect(a, x, y, width, height, 13,
+                    selected ? a->colors.accent2
+                             : ((hovered || key_focused) ? a->colors.hover : a->colors.panel2));
+    stroke_round_rect(a, x, y, width, height, 13,
+                      key_focused ? a->colors.text
+                                  : ((selected || hovered) ? a->colors.accent : a->colors.border));
+
+    if (hovered && !selected) {
+        int line_w = (int)((float)(width - 24) * hover_t + 0.5f);
+        if (line_w > 0)
+            fill_round_rect(a, x + (width - line_w) / 2, y + height - 4,
+                            line_w, 3, 1, a->colors.accent);
     }
 
-    int list_w = 94, fav_w = 174;
+    const char *label = content_label((content_kind_t)kind);
+    if (a->renderer.active) {
+        vip_ui_render_text(&a->renderer, x, y + 14, width, label,
+                           (selected || key_focused) ? "Sans Bold 10" : "Sans 10",
+                           (selected || hovered || key_focused) ? 0xF6F7FBu : 0xAAB2C4u,
+                           1.0, true);
+        return;
+    }
+    draw_centered(a, x, 42, width, label,
+                  (selected || hovered || key_focused) ? a->colors.text : a->colors.muted);
+}
+
+static void draw_browse_tabs(app_t *a) {
+    const int tab_x[3] = {8, 88, 174};
+    const int tab_w[3] = {74, 80, 88};
+    for (int k = 0; k < 3; ++k)
+        draw_browse_tab(a, k, tab_x[k], tab_w[k]);
+}
+
+static void draw_browse_favorites_button(app_t *a, int x, int width) {
+    bool focused = a->browse_focus == BROWSE_FOCUS_TOP &&
+                   a->browse_top_focus == BROWSE_TOP_FAVORITES;
+    bool hovered = a->hovered_control == HOVER_FAVORITES;
+
+    fill_round_rect(a, x, 12, width, 46, 13,
+                    a->favorites_only ? a->colors.accent2
+                                      : ((hovered || focused) ? a->colors.hover : a->colors.panel2));
+    stroke_round_rect(a, x, 12, width, 46, 13,
+                      focused ? a->colors.text
+                              : ((a->favorites_only || hovered) ? a->colors.accent : a->colors.border));
+
+    char label[128];
+    snprintf(label, sizeof(label), "* Favoritos (%zu)", favorite_count(a));
+    if (a->renderer.active) {
+        vip_ui_render_text(&a->renderer, x, 27, width, label,
+                           (a->favorites_only || focused) ? "Sans Bold 10" : "Sans 10",
+                           (a->favorites_only || hovered || focused) ? 0xF6F7FBu : 0xAAB2C4u,
+                           1.0, true);
+        return;
+    }
+    draw_centered(a, x, 42, width, label,
+                  (a->favorites_only || focused) ? a->colors.text : a->colors.muted);
+}
+
+static void draw_browse_lists_button(app_t *a, int x, int width) {
+    bool focused = a->browse_focus == BROWSE_FOCUS_TOP &&
+                   a->browse_top_focus == BROWSE_TOP_LISTS;
+    bool hovered = a->hovered_control == HOVER_LISTS;
+
+    fill_round_rect(a, x, 12, width, 46, 13,
+                    (hovered || focused) ? a->colors.hover : a->colors.panel2);
+    stroke_round_rect(a, x, 12, width, 46, 13,
+                      focused ? a->colors.text : (hovered ? a->colors.accent : a->colors.border));
+
+    if (a->renderer.active) {
+        vip_ui_render_text(&a->renderer, x, 27, width, "Listas", "Sans 10",
+                           (hovered || focused) ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
+        return;
+    }
+    draw_centered(a, x, 42, width, "Listas",
+                  (hovered || focused) ? a->colors.text : a->colors.muted);
+}
+
+static void draw_browse_topbar(app_t *a) {
+    draw_browse_tabs(a);
+
+    const int list_w = 94;
+    const int fav_w = 174;
     int list_x = a->width - list_w - 18;
     int fav_x = list_x - fav_w - 10;
     int search_w = fav_x - (SIDEBAR_W + 18) - 10;
     if (search_w < 180)
         search_w = 180;
+
     char search_hint[96];
     snprintf(search_hint, sizeof(search_hint), "Buscar %s...", content_plural(a));
-    draw_input(a, SIDEBAR_W + 18, 12, search_w, 46, a->search, search_hint, INPUT_SEARCH, false);
+    draw_input(a, SIDEBAR_W + 18, 12, search_w, 46,
+               a->search, search_hint, INPUT_SEARCH, false);
     if (a->hovered_control == HOVER_SEARCH && a->input_focus != INPUT_SEARCH)
         stroke_round_rect(a, SIDEBAR_W + 18, 12, search_w, 46, 13, a->colors.accent);
-    bool fav_focus = a->browse_focus == BROWSE_FOCUS_TOP && a->browse_top_focus == BROWSE_TOP_FAVORITES;
-    bool fav_hover = a->hovered_control == HOVER_FAVORITES;
-    fill_round_rect(a, fav_x, 12, fav_w, 46, 13,
-                    a->favorites_only ? a->colors.accent2
-                                      : ((fav_hover || fav_focus) ? a->colors.hover : a->colors.panel2));
-    stroke_round_rect(a, fav_x, 12, fav_w, 46, 13,
-                      fav_focus ? a->colors.text
-                                : ((a->favorites_only || fav_hover) ? a->colors.accent : a->colors.border));
-    char fav_label[128];
-    snprintf(fav_label, sizeof(fav_label), "* Favoritos (%zu)", favorite_count(a));
-    if (a->renderer.active)
-        vip_ui_render_text(&a->renderer, fav_x, 27, fav_w, fav_label,
-                           (a->favorites_only || fav_focus) ? "Sans Bold 10" : "Sans 10",
-                           (a->favorites_only || fav_hover || fav_focus) ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
-    else
-        draw_centered(a, fav_x, 42, fav_w, fav_label,
-                      (a->favorites_only || fav_focus) ? a->colors.text : a->colors.muted);
-    bool list_focus = a->browse_focus == BROWSE_FOCUS_TOP && a->browse_top_focus == BROWSE_TOP_LISTS;
-    bool list_hover = a->hovered_control == HOVER_LISTS;
-    fill_round_rect(a, list_x, 12, list_w, 46, 13,
-                    (list_hover || list_focus) ? a->colors.hover : a->colors.panel2);
-    stroke_round_rect(a, list_x, 12, list_w, 46, 13,
-                      list_focus ? a->colors.text : (list_hover ? a->colors.accent : a->colors.border));
-    if (a->renderer.active)
-        vip_ui_render_text(&a->renderer, list_x, 27, list_w, "Listas", "Sans 10",
-                           (list_hover || list_focus) ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
-    else
-        draw_centered(a, list_x, 42, list_w, "Listas",
-                      (list_hover || list_focus) ? a->colors.text : a->colors.muted);
 
-    int y = TOPBAR_H + 12;
-    if (a->series_episode_mode) {
-        bool back_focus = a->browse_focus == BROWSE_FOCUS_SIDEBAR && a->browse_sidebar_focus == -2;
-        bool back_hover = a->hovered_control == HOVER_BACK;
-        fill_round_rect(a, 8, y, SIDEBAR_W - 16, 38, 11,
-                        (back_hover || back_focus) ? a->colors.accent2 : a->colors.panel);
-        stroke_round_rect(a, 8, y, SIDEBAR_W - 16, 38, 11,
-                          back_focus ? a->colors.text : a->colors.accent);
-        if (a->renderer.active)
-            vip_ui_render_text(&a->renderer, 18, y + 10, SIDEBAR_W - 36, browse_back_label(a), "Sans Bold 10",
-                               0xF6F7FBu, 1.0, false);
-        else
-            draw_text_font(a, a->font_heading, 18, y + 26, browse_back_label(a), a->colors.text);
-        y += 48;
-    }
-    bool all_sel = a->selected_category < 0;
-    bool all_focus = a->browse_focus == BROWSE_FOCUS_SIDEBAR && a->browse_sidebar_focus == -1;
-    bool all_hover = a->hovered_control == HOVER_CATEGORY_ALL;
-    fill_round_rect(a, 8, y, SIDEBAR_W - 16, 36, 11,
-                    all_sel ? a->colors.accent2
-                            : ((all_hover || all_focus) ? a->colors.hover : a->colors.panel2));
-    if (all_focus)
-        stroke_round_rect(a, 8, y, SIDEBAR_W - 16, 36, 11, a->colors.text);
-    char all_label[128];
-    snprintf(all_label, sizeof(all_label), "%s (%zu)", all_content_label(a), ACTIVE_CHANNELS(a).len);
+    draw_browse_favorites_button(a, fav_x, fav_w);
+    draw_browse_lists_button(a, list_x, list_w);
+}
+
+static int draw_browse_back_button(app_t *a, int y) {
+    if (!a->series_episode_mode)
+        return y;
+
+    bool focused = a->browse_focus == BROWSE_FOCUS_SIDEBAR &&
+                   a->browse_sidebar_focus == -2;
+    bool hovered = a->hovered_control == HOVER_BACK;
+    fill_round_rect(a, 8, y, SIDEBAR_W - 16, 38, 11,
+                    (hovered || focused) ? a->colors.accent2 : a->colors.panel);
+    stroke_round_rect(a, 8, y, SIDEBAR_W - 16, 38, 11,
+                      focused ? a->colors.text : a->colors.accent);
+
     if (a->renderer.active)
-        vip_ui_render_text(&a->renderer, 18, y + 9, SIDEBAR_W - 36, all_label,
-                           (all_sel || all_focus) ? "Sans Bold 9" : "Sans 9",
-                           (all_sel || all_hover || all_focus) ? 0xF6F7FBu : 0xAAB2C4u,
+        vip_ui_render_text(&a->renderer, 18, y + 10, SIDEBAR_W - 36,
+                           browse_back_label(a), "Sans Bold 10", 0xF6F7FBu, 1.0, false);
+    else
+        draw_text_font(a, a->font_heading, 18, y + 26,
+                       browse_back_label(a), a->colors.text);
+    return y + 48;
+}
+
+static int draw_browse_all_category(app_t *a, int y) {
+    bool selected = a->selected_category < 0;
+    bool focused = a->browse_focus == BROWSE_FOCUS_SIDEBAR &&
+                   a->browse_sidebar_focus == -1;
+    bool hovered = a->hovered_control == HOVER_CATEGORY_ALL;
+
+    fill_round_rect(a, 8, y, SIDEBAR_W - 16, 36, 11,
+                    selected ? a->colors.accent2
+                             : ((hovered || focused) ? a->colors.hover : a->colors.panel2));
+    if (focused)
+        stroke_round_rect(a, 8, y, SIDEBAR_W - 16, 36, 11, a->colors.text);
+
+    char label[128];
+    snprintf(label, sizeof(label), "%s (%zu)", all_content_label(a), ACTIVE_CHANNELS(a).len);
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, 18, y + 9, SIDEBAR_W - 36, label,
+                           (selected || focused) ? "Sans Bold 9" : "Sans 9",
+                           (selected || hovered || focused) ? 0xF6F7FBu : 0xAAB2C4u,
                            1.0, false);
     else
-        draw_text(a, 18, y + 24, all_label,
-                  (all_sel || all_hover || all_focus) ? a->colors.text : a->colors.muted);
-    y += 42;
+        draw_text(a, 18, y + 24, label,
+                  (selected || hovered || focused) ? a->colors.text : a->colors.muted);
+    return y + 42;
+}
+
+static void draw_browse_category_row(app_t *a, int idx, int y) {
+    bool selected = a->selected_category == idx;
+    bool focused = a->browse_focus == BROWSE_FOCUS_SIDEBAR &&
+                   a->browse_sidebar_focus == idx;
+    bool hovered = a->hovered_control == HOVER_CATEGORY_BASE + idx;
+
+    fill_round_rect(a, 8, y, SIDEBAR_W - 16, 36, 11,
+                    selected ? a->colors.accent2
+                             : ((hovered || focused) ? a->colors.hover : a->colors.panel2));
+    if (focused)
+        stroke_round_rect(a, 8, y, SIDEBAR_W - 16, 36, 11, a->colors.text);
+
+    char full_label[512];
+    char label[256];
+    size_t count = a->category_counts ? a->category_counts[idx] : 0u;
+    snprintf(full_label, sizeof(full_label), "%s (%zu)",
+             ACTIVE_CATEGORIES(a).items[idx].name, count);
+    bounded_text(label, sizeof(label), full_label, 34);
+
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, 18, y + 9, SIDEBAR_W - 36, label,
+                           (selected || focused) ? "Sans Bold 9" : "Sans 9",
+                           (selected || hovered || focused) ? 0xF6F7FBu : 0xAAB2C4u,
+                           1.0, false);
+    else
+        draw_text(a, 18, y + 24, label,
+                  (selected || hovered || focused) ? a->colors.text : a->colors.muted);
+}
+
+static void draw_browse_sidebar(app_t *a) {
+    int y = draw_browse_back_button(a, TOPBAR_H + 12);
+    y = draw_browse_all_category(a, y);
+
     int rows = category_visible_rows(a) - 1;
     for (int r = 0; r < rows; ++r) {
         int idx = a->category_scroll + r;
         if (idx < 0 || (size_t)idx >= ACTIVE_CATEGORIES(a).len)
             break;
-        bool selected = a->selected_category == idx;
-        bool key_focused = a->browse_focus == BROWSE_FOCUS_SIDEBAR && a->browse_sidebar_focus == idx;
-        bool hovered = a->hovered_control == HOVER_CATEGORY_BASE + idx;
-        fill_round_rect(a, 8, y, SIDEBAR_W - 16, 36, 11,
-                        selected ? a->colors.accent2
-                                 : ((hovered || key_focused) ? a->colors.hover : a->colors.panel2));
-        if (key_focused)
-            stroke_round_rect(a, 8, y, SIDEBAR_W - 16, 36, 11, a->colors.text);
-        char full_label[512];
-        char label[256];
-        size_t count = a->category_counts ? a->category_counts[idx] : 0;
-        snprintf(full_label, sizeof(full_label), "%s (%zu)", ACTIVE_CATEGORIES(a).items[idx].name, count);
-        bounded_text(label, sizeof(label), full_label, 34);
-        if (a->renderer.active)
-            vip_ui_render_text(&a->renderer, 18, y + 9, SIDEBAR_W - 36, label,
-                               (selected || key_focused) ? "Sans Bold 9" : "Sans 9",
-                               (selected || hovered || key_focused) ? 0xF6F7FBu : 0xAAB2C4u, 1.0, false);
-        else
-            draw_text(a, 18, y + 24, label,
-                      (selected || hovered || key_focused) ? a->colors.text : a->colors.muted);
+        draw_browse_category_row(a, idx, y);
         y += 42;
     }
+}
 
-    card_layout_t layout = browse_layout(a);
-    int content_x = SIDEBAR_W + 20;
-    int content_y = TOPBAR_H + 18;
-    int avail_w = a->width - content_x - 18;
-    int first_row = a->grid_scroll / layout.row_step;
-    int y_offset = -(a->grid_scroll % layout.row_step);
-    int visible_rows = (a->height - content_y) / layout.row_step + 3;
+static browse_grid_layout_t make_browse_grid_layout(app_t *a) {
+    browse_grid_layout_t layout = {0};
+    layout.cards = browse_layout(a);
+    layout.content_x = SIDEBAR_W + 20;
+    layout.content_y = TOPBAR_H + 18;
+    layout.avail_w = a->width - layout.content_x - 18;
+    layout.first_row = a->grid_scroll / layout.cards.row_step;
+    layout.y_offset = -(a->grid_scroll % layout.cards.row_step);
+    layout.visible_rows = (a->height - layout.content_y) / layout.cards.row_step + 3;
+    return layout;
+}
 
-    if (a->filtered_len == 0) {
-        char empty[160];
-        snprintf(empty, sizeof(empty), "Nenhum %s nesta seleção", content_plural(a));
-        draw_text(a, content_x, content_y + 32, empty, a->colors.muted);
-        return;
-    }
-
+static bool begin_browse_grid_clip(app_t *a, const browse_grid_layout_t *layout) {
     int grid_right = a->width - 18;
     if (details_panel_active(a)) {
         int px, py, pw, ph;
@@ -5386,195 +5459,338 @@ static void draw_browse(app_t *a) {
         (void)ph;
         grid_right = px - 12;
     }
-    if (grid_right > content_x && a->height > content_y) {
-        XRectangle grid_clip = {
-            .x = (short)content_x,
-            .y = (short)content_y,
-            .width = (unsigned short)(grid_right - content_x),
-            .height = (unsigned short)(a->height - content_y),
-        };
-        XSetClipRectangles(a->dpy, a->gc, 0, 0, &grid_clip, 1, Unsorted);
+    if (grid_right <= layout->content_x || a->height <= layout->content_y)
+        return false;
+
+    XRectangle clip = {
+        .x = (short)layout->content_x,
+        .y = (short)layout->content_y,
+        .width = (unsigned short)(grid_right - layout->content_x),
+        .height = (unsigned short)(a->height - layout->content_y),
+    };
+    XSetClipRectangles(a->dpy, a->gc, 0, 0, &clip, 1, Unsorted);
+    return true;
+}
+
+static void draw_browse_card_frame(app_t *a,
+                                   const card_layout_t *layout,
+                                   int x,
+                                   int y,
+                                   bool active,
+                                   bool hovered,
+                                   float hover_eased) {
+    if (a->renderer.active && active) {
+        vip_ui_render_round_rect(&a->renderer, x + 5, y + 8 + (int)(3.0f * hover_eased),
+                                 layout->card_w, layout->card_h, 18, 0x000000u, 0.62);
+        vip_ui_render_round_stroke(&a->renderer, x - 3, y - 3,
+                                   layout->card_w + 6, layout->card_h + 6,
+                                   19, 0xFF5F2Eu, 0.80, 2.0);
+    } else {
+        fill_round_rect(a, x + 4, y + 6 + (int)(3.0f * hover_eased),
+                        layout->card_w, layout->card_h, 16, a->colors.black);
     }
 
-    for (int rr = 0; rr < visible_rows; ++rr) {
-        int row = first_row + rr;
-        int cy = content_y + y_offset + rr * layout.row_step;
-        if (cy > a->height || cy + layout.card_h < content_y)
+    fill_round_rect(a, x, y, layout->card_w, layout->card_h, 16, a->colors.panel2);
+    if (active) {
+        stroke_round_rect(a, x - 3, y - 3, layout->card_w + 6, layout->card_h + 6, 18,
+                          a->colors.accent);
+        stroke_round_rect(a, x - 1, y - 1, layout->card_w + 2, layout->card_h + 2, 19,
+                          a->colors.text);
+    }
+    fill_round_rect(a, x, y, layout->card_w, layout->art_h, 18, a->colors.black);
+    (void)hovered;
+}
+
+static void draw_browse_card_image(app_t *a,
+                                   const card_layout_t *layout,
+                                   vip_channel_t *ch,
+                                   int x,
+                                   int y,
+                                   int row_distance,
+                                   int col,
+                                   bool active) {
+    vip_error_t error = {0};
+    char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
+    bool image_ok = path &&
+                    draw_cached_image_contain(a, path, x, y, layout->card_w, layout->art_h);
+    bool can_load = (ch->logo_url && ch->logo_url[0]) ||
+                    strncmp(ch->stream_url ? ch->stream_url : "", "series://", 9u) != 0;
+
+    if (!image_ok) {
+        const char *placeholder = can_load ? "carregando imagem..." : "sem capa";
+        if (a->renderer.active)
+            vip_ui_render_text(&a->renderer, x + 8, y + layout->art_h / 2 - 7,
+                               layout->card_w - 16, placeholder, "Sans 9",
+                               0xAAB2C4u, 1.0, true);
+        else
+            draw_centered(a, x, y + layout->art_h / 2 + 5,
+                          layout->card_w, placeholder, a->colors.muted);
+
+        if (can_load) {
+            int distance = row_distance >= 0 ? row_distance : -row_distance;
+            int64_t priority = 1000000LL - (int64_t)distance * 1000LL - col;
+            enqueue_thumbnail(a, ch, priority);
+        }
+    }
+    free(path);
+    stroke_round_rect(a, x, y, layout->card_w, layout->art_h, 18,
+                      active ? a->colors.accent : a->colors.border);
+}
+
+static void draw_browse_card_open_hint(app_t *a,
+                                       const card_layout_t *layout,
+                                       int x,
+                                       int y,
+                                       bool hovered,
+                                       float hover_eased) {
+    if (!hovered || hover_eased <= 0.30f)
+        return;
+
+    const int open_w = 78;
+    const int open_h = 30;
+    int open_x = x + 8;
+    int open_y = y + layout->art_h - open_h - 8;
+    fill_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent2);
+    stroke_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent);
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, open_x, open_y + 7, open_w,
+                           "ABRIR", "Sans Bold 8", 0xF6F7FBu, 1.0, true);
+    else
+        draw_centered_font(a, a->font_small, open_x, open_y + 20,
+                           open_w, "ABRIR", a->colors.text);
+}
+
+static void draw_browse_card_favorite(app_t *a,
+                                      const card_layout_t *layout,
+                                      size_t chidx,
+                                      int x,
+                                      int y) {
+    bool favorite = a->favorite_flags && a->favorite_flags[chidx];
+    const int width = 58;
+    const int height = 28;
+    int bx = x + layout->card_w - width - 6;
+    int by = y + 6;
+
+    fill_round_rect(a, bx, by, width, height, 10,
+                    favorite ? a->colors.accent2 : a->colors.panel);
+    stroke_round_rect(a, bx, by, width, height, 10,
+                      favorite ? a->colors.accent : a->colors.border);
+    draw_centered(a, bx, by + 19, width, favorite ? "SALVO" : "FAV",
+                  favorite ? a->colors.text : a->colors.muted);
+}
+
+static void draw_browse_card_variant(app_t *a,
+                                     const card_layout_t *layout,
+                                     const vip_channel_t *ch,
+                                     int x,
+                                     int y) {
+    const char *label = media_variant_label(ch->name);
+    if (!label)
+        return;
+
+    int width = strcmp(label, "DUAL") == 0 ? 62 : 50;
+    int bx = x + layout->card_w - width - 6;
+    int by = y + 40;
+    fill_round_rect(a, bx, by, width, 24, 9, a->colors.panel);
+    stroke_round_rect(a, bx, by, width, 24, 9, a->colors.accent);
+    draw_centered_font(a, a->font_small, bx, by + 17, width, label, a->colors.text);
+}
+
+static bool browse_card_has_watch_progress(app_t *a) {
+    return a->content_kind == CONTENT_VOD ||
+           (a->series_episode_mode && !a->series_season_select);
+}
+
+static void draw_browse_card_watch_progress(app_t *a,
+                                            const card_layout_t *layout,
+                                            size_t chidx,
+                                            int x,
+                                            int y) {
+    if (!a->progress_flags || !browse_card_has_watch_progress(a))
+        return;
+
+    vip_watch_progress_t *progress = &a->progress_flags[chidx];
+    if (progress->duration_seconds <= 1.0 && !progress->completed)
+        return;
+
+    double ratio = progress->completed ? 1.0 :
+                   progress->position_seconds / progress->duration_seconds;
+    if (ratio < 0.0)
+        ratio = 0.0;
+    if (ratio > 1.0)
+        ratio = 1.0;
+
+    int progress_w = (int)((double)layout->card_w * ratio);
+    fill_rect(a, x, y + layout->art_h - 5,
+              (unsigned)layout->card_w, 5, a->colors.panel2);
+    if (progress_w > 0)
+        fill_rect(a, x, y + layout->art_h - 5,
+                  (unsigned)progress_w, 5, a->colors.accent);
+
+    if (progress->completed) {
+        const int badge_w = 92;
+        fill_rect(a, x + 6, y + 6, (unsigned)badge_w, 26, a->colors.accent2);
+        stroke_rect(a, x + 6, y + 6, (unsigned)badge_w, 26, a->colors.accent);
+        draw_centered(a, x + 6, y + 24, badge_w, "ASSISTIDO", a->colors.text);
+        return;
+    }
+
+    if (progress->duration_seconds <= 1.0 || progress->position_seconds <= 3.0)
+        return;
+
+    int percent = (int)(ratio * 100.0 + 0.5);
+    char badge[32];
+    snprintf(badge, sizeof(badge), "%d%%", percent);
+    fill_rect(a, x + 6, y + 6, 54, 26, a->colors.panel2);
+    stroke_rect(a, x + 6, y + 6, 54, 26, a->colors.accent);
+    draw_centered(a, x + 6, y + 24, 54, badge, a->colors.text);
+}
+
+static size_t season_episode_count(app_t *a, const vip_channel_t *season) {
+    size_t count = 0u;
+    for (size_t i = 0; i < a->episode_channels.len; ++i) {
+        const char *category_id = a->episode_channels.items[i].category_id;
+        if (category_id && season->category_id &&
+            strcmp(category_id, season->category_id) == 0)
+            ++count;
+    }
+    return count;
+}
+
+static void draw_browse_card_meta_text(app_t *a,
+                                       const card_layout_t *layout,
+                                       int x,
+                                       int y,
+                                       const char *text) {
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, x + 9, y + layout->art_h + 43,
+                           layout->card_w - 18, text, "Sans 8",
+                           0xAAB2C4u, 1.0, false);
+    else
+        draw_text_font(a, a->font_small, x + 8, y + layout->art_h + 56,
+                       text, a->colors.muted);
+}
+
+static void draw_browse_card_metadata(app_t *a,
+                                      const card_layout_t *layout,
+                                      vip_channel_t *ch,
+                                      size_t chidx,
+                                      int x,
+                                      int y) {
+    char meta[80];
+    if (a->series_season_select) {
+        size_t count = season_episode_count(a, ch);
+        snprintf(meta, sizeof(meta), "%zu episódio%s", count, count == 1u ? "" : "s");
+        draw_browse_card_meta_text(a, layout, x, y, meta);
+        return;
+    }
+
+    if (a->series_episode_mode) {
+        if (episode_card_meta(a, ch, meta, sizeof(meta)))
+            draw_browse_card_meta_text(a, layout, x, y, meta);
+        return;
+    }
+
+    if (a->content_kind != CONTENT_SERIES ||
+        !a->series_watched || !a->series_total || a->series_total[chidx] <= 0)
+        return;
+
+    snprintf(meta, sizeof(meta), "%d/%d episódios",
+             a->series_watched[chidx], a->series_total[chidx]);
+    draw_browse_card_meta_text(a, layout, x, y, meta);
+}
+
+static void draw_browse_card(app_t *a,
+                             const browse_grid_layout_t *grid,
+                             int row_offset,
+                             int col,
+                             size_t fidx,
+                             int base_y) {
+    size_t chidx = a->filtered[fidx];
+    vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
+    int x = grid->content_x + col * (grid->cards.card_w + GRID_GAP);
+
+    bool focused = a->browse_focus == BROWSE_FOCUS_GRID &&
+                   fidx == a->focused_filtered;
+    bool hovered = a->hovered_card_valid &&
+                   fidx == a->hovered_filtered &&
+                   a->hover_motion.value > 0.001f;
+    float hover_eased = hovered ? vip_ui_ease_out_cubic(a->hover_motion.value) : 0.0f;
+    int lift = (int)(8.0f * hover_eased + 0.5f);
+    int y = base_y - lift;
+    bool active = focused || hovered;
+
+    draw_browse_card_frame(a, &grid->cards, x, y, active, hovered, hover_eased);
+    draw_browse_card_image(a, &grid->cards, ch, x, y, row_offset, col, active);
+    draw_browse_card_open_hint(a, &grid->cards, x, y, hovered, hover_eased);
+    draw_browse_card_favorite(a, &grid->cards, chidx, x, y);
+    draw_browse_card_variant(a, &grid->cards, ch, x, y);
+    draw_browse_card_watch_progress(a, &grid->cards, chidx, x, y);
+
+    char grouped_title[256];
+    const char *title = m3u_series_display_name(a, ch, grouped_title, sizeof(grouped_title));
+    draw_card_title(a, x + 9, y + grid->cards.art_h + 9,
+                    grid->cards.card_w - 18, title, active);
+    draw_browse_card_metadata(a, &grid->cards, ch, chidx, x, y);
+}
+
+static bool draw_browse_grid(app_t *a, const browse_grid_layout_t *grid) {
+    if (a->filtered_len == 0u) {
+        char empty[160];
+        snprintf(empty, sizeof(empty), "Nenhum %s nesta seleção", content_plural(a));
+        draw_text(a, grid->content_x, grid->content_y + 32, empty, a->colors.muted);
+        return false;
+    }
+
+    bool clipped = begin_browse_grid_clip(a, grid);
+    for (int rr = 0; rr < grid->visible_rows; ++rr) {
+        int row = grid->first_row + rr;
+        int y = grid->content_y + grid->y_offset + rr * grid->cards.row_step;
+        if (y > a->height || y + grid->cards.card_h < grid->content_y)
             continue;
-        for (int col = 0; col < layout.cols; ++col) {
-            size_t fidx = (size_t)row * (size_t)layout.cols + (size_t)col;
+
+        for (int col = 0; col < grid->cards.cols; ++col) {
+            size_t fidx = (size_t)row * (size_t)grid->cards.cols + (size_t)col;
             if (fidx >= a->filtered_len)
                 break;
-            size_t chidx = a->filtered[fidx];
-            vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
-            int cx = content_x + col * (layout.card_w + GRID_GAP);
-            bool focused = a->browse_focus == BROWSE_FOCUS_GRID && fidx == a->focused_filtered;
-            bool hovered =
-                a->hovered_card_valid && fidx == a->hovered_filtered && a->hover_motion.value > 0.001f;
-            float hover_eased = hovered ? vip_ui_ease_out_cubic(a->hover_motion.value) : 0.0f;
-            int lift = (int)(8.0f * hover_eased + 0.5f);
-            int base_cy = cy;
-            cy = base_cy - lift;
-            bool active_card = focused || hovered;
-            if (a->renderer.active && active_card) {
-                vip_ui_render_round_rect(&a->renderer, cx + 5, cy + 8 + (int)(3.0f * hover_eased),
-                                         layout.card_w, layout.card_h, 18, 0x000000u, 0.62);
-                vip_ui_render_round_stroke(&a->renderer, cx - 3, cy - 3, layout.card_w + 6, layout.card_h + 6,
-                                           19, 0xFF5F2Eu, 0.80, 2.0);
-            } else {
-                fill_round_rect(a, cx + 4, cy + 6 + (int)(3.0f * hover_eased), layout.card_w, layout.card_h,
-                                16, a->colors.black);
-            }
-            fill_round_rect(a, cx, cy, layout.card_w, layout.card_h, 16, a->colors.panel2);
-            if (active_card) {
-                stroke_round_rect(a, cx - 3, cy - 3, layout.card_w + 6, layout.card_h + 6, 18,
-                                  a->colors.accent);
-                stroke_round_rect(a, cx - 1, cy - 1, layout.card_w + 2, layout.card_h + 2, 19,
-                                  a->colors.text);
-            }
-            fill_round_rect(a, cx, cy, layout.card_w, layout.art_h, 18, a->colors.black);
-            vip_error_t error = {0};
-            char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
-            bool image_ok = path && draw_cached_image_contain(a, path, cx, cy, layout.card_w, layout.art_h);
-            bool can_load_image =
-                (ch->logo_url && ch->logo_url[0]) ||
-                strncmp(ch->stream_url ? ch->stream_url : "", "series://", 9u) != 0;
-            if (!image_ok) {
-                const char *placeholder = can_load_image ? "carregando imagem..." : "sem capa";
-                if (a->renderer.active)
-                    vip_ui_render_text(&a->renderer, cx + 8, cy + layout.art_h / 2 - 7, layout.card_w - 16,
-                                       placeholder, "Sans 9", 0xAAB2C4u, 1.0, true);
-                else
-                    draw_centered(a, cx, cy + layout.art_h / 2 + 5, layout.card_w, placeholder,
-                                  a->colors.muted);
-                if (can_load_image) {
-                    int distance = rr >= 0 ? rr : -rr;
-                    int64_t priority = 1000000LL - (int64_t)distance * 1000LL - col;
-                    enqueue_thumbnail(a, ch, priority);
-                }
-            }
-            free(path);
-            stroke_round_rect(a, cx, cy, layout.card_w, layout.art_h, 18,
-                              active_card ? a->colors.accent : a->colors.border);
-            if (hovered && hover_eased > 0.30f) {
-                int open_w = 78, open_h = 30;
-                int open_x = cx + 8, open_y = cy + layout.art_h - open_h - 8;
-                fill_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent2);
-                stroke_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent);
-                if (a->renderer.active)
-                    vip_ui_render_text(&a->renderer, open_x, open_y + 7, open_w, "ABRIR", "Sans Bold 8",
-                                       0xF6F7FBu, 1.0, true);
-                else
-                    draw_centered_font(a, a->font_small, open_x, open_y + 20, open_w, "ABRIR",
-                                       a->colors.text);
-            }
-            bool favorite = a->favorite_flags && a->favorite_flags[chidx];
-            int card_fav_w = 58, card_fav_h = 28, card_fav_x = cx + layout.card_w - card_fav_w - 6,
-                card_fav_y = cy + 6;
-            fill_round_rect(a, card_fav_x, card_fav_y, card_fav_w, card_fav_h, 10,
-                            favorite ? a->colors.accent2 : a->colors.panel);
-            stroke_round_rect(a, card_fav_x, card_fav_y, card_fav_w, card_fav_h, 10,
-                              favorite ? a->colors.accent : a->colors.border);
-            draw_centered(a, card_fav_x, card_fav_y + 19, card_fav_w, favorite ? "SALVO" : "FAV",
-                          favorite ? a->colors.text : a->colors.muted);
-            const char *variant_label = media_variant_label(ch->name);
-            if (variant_label) {
-                int variant_w = strcmp(variant_label, "DUAL") == 0 ? 62 : 50;
-                int variant_x = cx + layout.card_w - variant_w - 6;
-                int variant_y = card_fav_y + card_fav_h + 6;
-                fill_round_rect(a, variant_x, variant_y, variant_w, 24, 9, a->colors.panel);
-                stroke_round_rect(a, variant_x, variant_y, variant_w, 24, 9, a->colors.accent);
-                draw_centered_font(a, a->font_small, variant_x, variant_y + 17, variant_w, variant_label,
-                                   a->colors.text);
-            }
-            if (a->progress_flags &&
-                (a->content_kind == CONTENT_VOD || (a->series_episode_mode && !a->series_season_select))) {
-                vip_watch_progress_t *pr = &a->progress_flags[chidx];
-                if (pr->duration_seconds > 1.0 || pr->completed) {
-                    double ratio = pr->completed ? 1.0 : pr->position_seconds / pr->duration_seconds;
-                    if (ratio < 0.0)
-                        ratio = 0.0;
-                    if (ratio > 1.0)
-                        ratio = 1.0;
-                    int pw = (int)((double)layout.card_w * ratio);
-                    fill_rect(a, cx, cy + layout.art_h - 5, (unsigned)layout.card_w, 5, a->colors.panel2);
-                    if (pw > 0)
-                        fill_rect(a, cx, cy + layout.art_h - 5, (unsigned)pw, 5, a->colors.accent);
-                    if (pr->completed) {
-                        int badge_w = 92;
-                        fill_rect(a, cx + 6, cy + 6, (unsigned)badge_w, 26, a->colors.accent2);
-                        stroke_rect(a, cx + 6, cy + 6, (unsigned)badge_w, 26, a->colors.accent);
-                        draw_centered(a, cx + 6, cy + 24, badge_w, "ASSISTIDO", a->colors.text);
-                    } else if (pr->duration_seconds > 1.0 && pr->position_seconds > 3.0) {
-                        int percent = (int)(ratio * 100.0 + 0.5);
-                        char badge[32];
-                        snprintf(badge, sizeof(badge), "%d%%", percent);
-                        fill_rect(a, cx + 6, cy + 6, 54, 26, a->colors.panel2);
-                        stroke_rect(a, cx + 6, cy + 6, 54, 26, a->colors.accent);
-                        draw_centered(a, cx + 6, cy + 24, 54, badge, a->colors.text);
-                    }
-                }
-            }
-            char grouped_title[256];
-            const char *display_title = m3u_series_display_name(a, ch, grouped_title, sizeof(grouped_title));
-            draw_card_title(a, cx + 9, cy + layout.art_h + 9, layout.card_w - 18, display_title,
-                            active_card);
-            if (a->series_season_select) {
-                size_t season_count = 0u;
-                for (size_t ei = 0; ei < a->episode_channels.len; ++ei) {
-                    const char *cid = a->episode_channels.items[ei].category_id;
-                    if (cid && ch->category_id && strcmp(cid, ch->category_id) == 0)
-                        ++season_count;
-                }
-                char meta[72];
-                snprintf(meta, sizeof(meta), "%zu episódio%s", season_count, season_count == 1u ? "" : "s");
-                if (a->renderer.active)
-                    vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 43, layout.card_w - 18, meta,
-                                       "Sans 8", 0xAAB2C4u, 1.0, false);
-                else
-                    draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 56, meta, a->colors.muted);
-            } else if (a->series_episode_mode) {
-                char meta[72];
-                if (episode_card_meta(a, ch, meta, sizeof(meta))) {
-                    if (a->renderer.active)
-                        vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 43, layout.card_w - 18,
-                                           meta, "Sans 8", 0xAAB2C4u, 1.0, false);
-                    else
-                        draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 56, meta,
-                                       a->colors.muted);
-                }
-            } else if (a->content_kind == CONTENT_SERIES && !a->series_episode_mode && a->series_watched &&
-                       a->series_total && a->series_total[chidx] > 0) {
-                char progress[80];
-                snprintf(progress, sizeof(progress), "%d/%d episódios", a->series_watched[chidx],
-                         a->series_total[chidx]);
-                if (a->renderer.active)
-                    vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 43, layout.card_w - 18,
-                                       progress, "Sans 8", 0xAAB2C4u, 1.0, false);
-                else
-                    draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 56, progress,
-                                   a->colors.muted);
-            }
-            cy = base_cy;
+            draw_browse_card(a, grid, rr, col, fidx, y);
         }
     }
 
-    XSetClipMask(a->dpy, a->gc, None);
-    draw_details_panel(a);
+    if (clipped)
+        XSetClipMask(a->dpy, a->gc, None);
+    return true;
+}
 
-    if (atomic_load(&a->series_running)) {
-        char loading[512];
-        pthread_mutex_lock(&a->data_mutex);
-        snprintf(loading, sizeof(loading), "%s", a->status);
-        pthread_mutex_unlock(&a->data_mutex);
-        int box_w = avail_w > 680 ? 680 : avail_w;
-        int box_x = content_x + (avail_w - box_w) / 2;
-        int box_y = content_y + 20;
-        fill_round_rect(a, box_x + 3, box_y + 4, box_w, 56, 16, a->colors.black);
-        fill_round_rect(a, box_x, box_y, box_w, 56, 16, a->colors.panel2);
-        stroke_round_rect(a, box_x, box_y, box_w, 56, 16, a->colors.accent);
-        draw_centered(a, box_x, box_y + 35, box_w, loading, a->colors.text);
-    }
+static void draw_series_loading_overlay(app_t *a, const browse_grid_layout_t *grid) {
+    if (!atomic_load(&a->series_running))
+        return;
+
+    char loading[512];
+    pthread_mutex_lock(&a->data_mutex);
+    snprintf(loading, sizeof(loading), "%s", a->status);
+    pthread_mutex_unlock(&a->data_mutex);
+
+    int box_w = grid->avail_w > 680 ? 680 : grid->avail_w;
+    int box_x = grid->content_x + (grid->avail_w - box_w) / 2;
+    int box_y = grid->content_y + 20;
+    fill_round_rect(a, box_x + 3, box_y + 4, box_w, 56, 16, a->colors.black);
+    fill_round_rect(a, box_x, box_y, box_w, 56, 16, a->colors.panel2);
+    stroke_round_rect(a, box_x, box_y, box_w, 56, 16, a->colors.accent);
+    draw_centered(a, box_x, box_y + 35, box_w, loading, a->colors.text);
+}
+
+static void draw_browse(app_t *a) {
+    draw_browse_background(a);
+    draw_browse_topbar(a);
+    draw_browse_sidebar(a);
+
+    browse_grid_layout_t grid = make_browse_grid_layout(a);
+    if (!draw_browse_grid(a, &grid))
+        return;
+
+    draw_details_panel(a);
+    draw_series_loading_overlay(a, &grid);
     draw_toast(a);
 }
 
