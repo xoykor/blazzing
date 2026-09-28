@@ -2908,21 +2908,10 @@ static bool same_text_case(const char *a, const char *b) {
     return a && b && strcasecmp(a, b) == 0;
 }
 
-/* Start m3u series load. */
-static bool start_m3u_series_load(app_t *a, size_t channel_index) {
-    if (!a || !m3u_series_root(a) || channel_index >= a->catalogs[CONTENT_SERIES].channels.len)
-        return false;
-    vip_channel_t *selected = &a->catalogs[CONTENT_SERIES].channels.items[channel_index];
-    char series_name[256];
-    int selected_season = 0, selected_episode = 0;
-    if (!vip_m3u_parse_episode_label(selected->name, series_name, sizeof(series_name), &selected_season,
-                                     &selected_episode))
-        return false;
-    (void)selected_season;
-    (void)selected_episode;
-
-    int seasons[256];
-    size_t season_count = 0u;
+/* Collect the distinct seasons belonging to one parsed M3U series. */
+static size_t collect_m3u_series_seasons(app_t *a, const char *series_name,
+                                         int *seasons, size_t capacity) {
+    size_t count = 0u;
     for (size_t i = 0u; i < a->catalogs[CONTENT_SERIES].channels.len; ++i) {
         vip_channel_t *ch = &a->catalogs[CONTENT_SERIES].channels.items[i];
         char candidate[256];
@@ -2930,18 +2919,23 @@ static bool start_m3u_series_load(app_t *a, size_t channel_index) {
         if (!vip_m3u_parse_episode_label(ch->name, candidate, sizeof(candidate), &season, &episode) ||
             !same_text_case(candidate, series_name))
             continue;
+
         bool exists = false;
-        for (size_t j = 0u; j < season_count; ++j)
+        for (size_t j = 0u; j < count; ++j) {
             if (seasons[j] == season) {
                 exists = true;
                 break;
             }
-        if (!exists && season_count < sizeof(seasons) / sizeof(seasons[0]))
-            seasons[season_count++] = season;
+        }
+        if (!exists && count < capacity)
+            seasons[count++] = season;
     }
-    if (season_count == 0u)
-        return false;
-    for (size_t i = 1u; i < season_count; ++i) {
+    return count;
+}
+
+/* Sort season numbers without allocating a temporary collection. */
+static void sort_m3u_seasons(int *seasons, size_t count) {
+    for (size_t i = 1u; i < count; ++i) {
         int value = seasons[i];
         size_t j = i;
         while (j > 0u && seasons[j - 1u] > value) {
@@ -2950,77 +2944,96 @@ static bool start_m3u_series_load(app_t *a, size_t channel_index) {
         }
         seasons[j] = value;
     }
+}
 
-    vip_category_list_t cats;
-    vip_category_list_init(&cats);
-    vip_channel_list_t episodes;
-    vip_channel_list_init(&episodes);
-    vip_channel_list_t cards;
-    vip_channel_list_init(&cards);
-    vip_error_t error = {0};
-    vip_status_t st = VIP_OK;
+/* Append the category/card and matching episodes for one M3U season. */
+static vip_status_t append_m3u_season(app_t *a, const vip_channel_t *selected,
+                                      const char *series_name, int season_number,
+                                      size_t season_position, uint64_t title_hash,
+                                      vip_category_list_t *cats, vip_channel_list_t *episodes,
+                                      vip_channel_list_t *cards, vip_error_t *error) {
+    char cat_id[96];
+    char cat_name[96];
+    char card_id[128];
+    snprintf(cat_id, sizeof(cat_id), "m3u-season:%016llx:%d",
+             (unsigned long long)title_hash, season_number);
+    snprintf(cat_name, sizeof(cat_name), season_number == 0 ? "Especiais" : "Temporada %d",
+             season_number);
+
+    vip_category_t cat = {
+        .provider_id = selected->provider_id,
+        .id = cat_id,
+        .name = cat_name,
+        .position = (int)season_position,
+    };
+    vip_status_t st = vip_category_list_push(cats, &cat, error);
+    if (st != VIP_OK)
+        return st;
+
+    snprintf(card_id, sizeof(card_id), "m3u-series-season:%016llx:%d",
+             (unsigned long long)title_hash, season_number);
+    vip_channel_t card = {
+        .provider_id = selected->provider_id,
+        .id = card_id,
+        .category_id = cat_id,
+        .name = cat_name,
+        .logo_url = selected->logo_url,
+        .stream_url = "series://season",
+        .epg_channel_id = NULL,
+        .position = (int)season_position,
+    };
+    st = vip_channel_list_push(cards, &card, error);
+    if (st != VIP_OK)
+        return st;
+
+    for (size_t i = 0u; i < a->catalogs[CONTENT_SERIES].channels.len; ++i) {
+        vip_channel_t *ch = &a->catalogs[CONTENT_SERIES].channels.items[i];
+        char candidate[256];
+        int season = 0, episode = 0;
+        if (!vip_m3u_parse_episode_label(ch->name, candidate, sizeof(candidate), &season, &episode) ||
+            season != season_number || !same_text_case(candidate, series_name))
+            continue;
+        vip_channel_t copy = *ch;
+        copy.category_id = cat_id;
+        copy.position = episode;
+        st = vip_channel_list_push(episodes, &copy, error);
+        if (st != VIP_OK)
+            return st;
+    }
+    return VIP_OK;
+}
+
+/* Build temporary season/category lists before swapping them into app state. */
+static vip_status_t build_m3u_series_lists(app_t *a, const vip_channel_t *selected,
+                                           const char *series_name, const int *seasons,
+                                           size_t season_count, vip_category_list_t *cats,
+                                           vip_channel_list_t *episodes, vip_channel_list_t *cards,
+                                           vip_error_t *error) {
     uint64_t title_hash = folded_name_hash(series_name);
-
-    for (size_t si = 0u; si < season_count && st == VIP_OK; ++si) {
-        char cat_id[96];
-        char cat_name[96];
-        char card_id[128];
-        snprintf(cat_id, sizeof(cat_id), "m3u-season:%016llx:%d", (unsigned long long)title_hash,
-                 seasons[si]);
-        snprintf(cat_name, sizeof(cat_name), seasons[si] == 0 ? "Especiais" : "Temporada %d", seasons[si]);
-        vip_category_t cat = {
-            .provider_id = selected->provider_id,
-            .id = cat_id,
-            .name = cat_name,
-            .position = (int)si,
-        };
-        st = vip_category_list_push(&cats, &cat, &error);
+    for (size_t i = 0u; i < season_count; ++i) {
+        vip_status_t st = append_m3u_season(
+            a, selected, series_name, seasons[i], i, title_hash,
+            cats, episodes, cards, error);
         if (st != VIP_OK)
-            break;
-        snprintf(card_id, sizeof(card_id), "m3u-series-season:%016llx:%d", (unsigned long long)title_hash,
-                 seasons[si]);
-        vip_channel_t card = {
-            .provider_id = selected->provider_id,
-            .id = card_id,
-            .category_id = cat_id,
-            .name = cat_name,
-            .logo_url = selected->logo_url,
-            .stream_url = "series://season",
-            .epg_channel_id = NULL,
-            .position = (int)si,
-        };
-        st = vip_channel_list_push(&cards, &card, &error);
-        if (st != VIP_OK)
-            break;
-
-        for (size_t i = 0u; i < a->catalogs[CONTENT_SERIES].channels.len && st == VIP_OK; ++i) {
-            vip_channel_t *ch = &a->catalogs[CONTENT_SERIES].channels.items[i];
-            char candidate[256];
-            int season = 0, episode = 0;
-            if (!vip_m3u_parse_episode_label(ch->name, candidate, sizeof(candidate), &season, &episode) ||
-                season != seasons[si] || !same_text_case(candidate, series_name))
-                continue;
-            vip_channel_t copy = *ch;
-            copy.category_id = cat_id;
-            copy.position = episode;
-            st = vip_channel_list_push(&episodes, &copy, &error);
-        }
+            return st;
     }
+    sort_episode_channels(episodes);
+    sort_season_channels(cards);
+    return VIP_OK;
+}
 
-    if (st == VIP_OK) {
-        sort_episode_channels(&episodes);
-        sort_season_channels(&cards);
-    }
+/* Release temporary M3U series lists after a failed build. */
+static void clear_m3u_series_lists(vip_category_list_t *cats, vip_channel_list_t *episodes,
+                                   vip_channel_list_t *cards) {
+    vip_category_list_clear(cats);
+    vip_channel_list_clear(episodes);
+    vip_channel_list_clear(cards);
+}
 
-    if (st != VIP_OK || cards.len == 0u || episodes.len == 0u) {
-        vip_category_list_clear(&cats);
-        vip_channel_list_clear(&episodes);
-        vip_channel_list_clear(&cards);
-        snprintf(a->status, sizeof(a->status), "Falha ao organizar série M3U: %s",
-                 error.message[0] ? error.message : "dados insuficientes");
-        return false;
-    }
-
+/* Swap a successful M3U series build into the current browse state. */
+static void activate_m3u_series_lists(app_t *a, const vip_channel_t *selected,
+                                      const char *series_name, vip_category_list_t cats,
+                                      vip_channel_list_t episodes, vip_channel_list_t cards) {
     vip_category_list_clear(&a->episode_categories);
     vip_channel_list_clear(&a->episode_channels);
     vip_channel_list_clear(&a->season_channels);
@@ -3037,11 +3050,55 @@ static bool start_m3u_series_load(app_t *a, size_t channel_index) {
     a->search[0] = '\0';
     browse_focus_grid(a);
     snprintf(a->series_title, sizeof(a->series_title), "%s", series_name);
-    snprintf(a->series_parent_id, sizeof(a->series_parent_id), "%s", selected->id ? selected->id : "");
-    snprintf(a->status, sizeof(a->status), "%zu temporadas • %zu episódios", cards.len, episodes.len);
+    snprintf(a->series_parent_id, sizeof(a->series_parent_id), "%s",
+             selected->id ? selected->id : "");
+    snprintf(a->status, sizeof(a->status), "%zu temporadas • %zu episódios",
+             cards.len, episodes.len);
     recalc_category_counts(a);
     load_media_state(a);
     rebuild_filter(a);
+}
+
+/* Start m3u series load. */
+static bool start_m3u_series_load(app_t *a, size_t channel_index) {
+    if (!a || !m3u_series_root(a) || channel_index >= a->catalogs[CONTENT_SERIES].channels.len)
+        return false;
+
+    vip_channel_t *selected = &a->catalogs[CONTENT_SERIES].channels.items[channel_index];
+    char series_name[256];
+    int selected_season = 0, selected_episode = 0;
+    if (!vip_m3u_parse_episode_label(selected->name, series_name, sizeof(series_name),
+                                     &selected_season, &selected_episode))
+        return false;
+    (void)selected_season;
+    (void)selected_episode;
+
+    int seasons[256];
+    size_t season_count = collect_m3u_series_seasons(
+        a, series_name, seasons, sizeof(seasons) / sizeof(seasons[0]));
+    if (season_count == 0u)
+        return false;
+    sort_m3u_seasons(seasons, season_count);
+
+    vip_category_list_t cats;
+    vip_channel_list_t episodes;
+    vip_channel_list_t cards;
+    vip_category_list_init(&cats);
+    vip_channel_list_init(&episodes);
+    vip_channel_list_init(&cards);
+    vip_error_t error = {0};
+
+    vip_status_t st = build_m3u_series_lists(
+        a, selected, series_name, seasons, season_count,
+        &cats, &episodes, &cards, &error);
+    if (st != VIP_OK || cards.len == 0u || episodes.len == 0u) {
+        clear_m3u_series_lists(&cats, &episodes, &cards);
+        snprintf(a->status, sizeof(a->status), "Falha ao organizar série M3U: %s",
+                 error.message[0] ? error.message : "dados insuficientes");
+        return false;
+    }
+
+    activate_m3u_series_lists(a, selected, series_name, cats, episodes, cards);
     return true;
 }
 
