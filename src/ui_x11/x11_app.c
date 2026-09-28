@@ -1399,58 +1399,85 @@ static bool episode_card_meta(const app_t *a, const vip_channel_t *ch, char *buf
     return true;
 }
 
-/* Rebuild filter. */
-static void rebuild_filter(app_t *a) {
-    pthread_mutex_lock(&a->data_mutex);
-    size_t need = ACTIVE_CHANNELS(a).len;
-    if (need > a->filtered_cap) {
-        size_t cap = need ? need : 1;
-        size_t *p = realloc(a->filtered, cap * sizeof(*p));
-        if (p) {
-            a->filtered = p;
-            a->filtered_cap = cap;
-        }
-    }
-    a->filtered_len = 0;
-    const char *cat = NULL;
-    if (a->selected_category >= 0 && (size_t)a->selected_category < ACTIVE_CATEGORIES(a).len)
-        cat = ACTIVE_CATEGORIES(a).items[a->selected_category].id;
+/* Ensure the filtered-index buffer can hold all active channels. */
+static bool ensure_filtered_capacity(app_t *a, size_t need) {
+    if (need <= a->filtered_cap)
+        return true;
+    size_t cap = need ? need : 1u;
+    size_t *items = realloc(a->filtered, cap * sizeof(*items));
+    if (!items)
+        return false;
+    a->filtered = items;
+    a->filtered_cap = cap;
+    return true;
+}
 
-    bool group_series = m3u_series_root(a);
-    uint64_t *seen = NULL;
-    size_t seen_cap = 0u;
-    if (group_series && need > 0u) {
-        seen_cap = 16u;
-        while (seen_cap < need * 2u && seen_cap < (SIZE_MAX / 2u))
-            seen_cap <<= 1u;
-        seen = calloc(seen_cap, sizeof(*seen));
-    }
+/* Return the currently selected category id, or NULL for all categories. */
+static const char *selected_filter_category(const app_t *a) {
+    if (a->selected_category < 0 ||
+        (size_t)a->selected_category >= ACTIVE_CATEGORIES(a).len)
+        return NULL;
+    return ACTIVE_CATEGORIES(a).items[a->selected_category].id;
+}
 
-    if (a->filtered) {
-        for (size_t i = 0; i < ACTIVE_CHANNELS(a).len; ++i) {
-            vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[i];
-            if (cat && (!ch->category_id || strcmp(ch->category_id, cat) != 0))
-                continue;
-            if (a->favorites_only && (!a->favorite_flags || !a->favorite_flags[i]))
-                continue;
-            char grouped_name[256];
-            const char *name = m3u_series_display_name(a, ch, grouped_name, sizeof(grouped_name));
-            if (!contains_ascii_case(name, a->search))
-                continue;
-            if (group_series && seen && seen_cap > 0u) {
-                uint64_t hash = folded_name_hash(name);
-                size_t slot = (size_t)hash & (seen_cap - 1u);
-                while (seen[slot] != 0u && seen[slot] != hash)
-                    slot = (slot + 1u) & (seen_cap - 1u);
-                if (seen[slot] == hash)
-                    continue;
-                seen[slot] = hash;
-            }
-            a->filtered[a->filtered_len++] = i;
-        }
+/* Allocate the open-addressed hash table used to collapse M3U series rows. */
+static uint64_t *create_series_seen_table(size_t need, size_t *capacity) {
+    *capacity = 0u;
+    if (need == 0u)
+        return NULL;
+
+    size_t cap = 16u;
+    while (cap < need * 2u && cap < (SIZE_MAX / 2u))
+        cap <<= 1u;
+    uint64_t *seen = calloc(cap, sizeof(*seen));
+    if (!seen)
+        return NULL;
+    *capacity = cap;
+    return seen;
+}
+
+/* Return whether a channel passes category, favorites and text filters. */
+static bool channel_matches_filter(const app_t *a, const vip_channel_t *ch,
+                                   size_t index, const char *category,
+                                   const char *display_name) {
+    if (category && (!ch->category_id || strcmp(ch->category_id, category) != 0))
+        return false;
+    if (a->favorites_only && (!a->favorite_flags || !a->favorite_flags[index]))
+        return false;
+    return contains_ascii_case(display_name, a->search);
+}
+
+/* Record one grouped series name and return whether it was already present. */
+static bool grouped_series_seen(uint64_t *seen, size_t capacity, const char *name) {
+    if (!seen || capacity == 0u)
+        return false;
+    uint64_t hash = folded_name_hash(name);
+    size_t slot = (size_t)hash & (capacity - 1u);
+    while (seen[slot] != 0u && seen[slot] != hash)
+        slot = (slot + 1u) & (capacity - 1u);
+    if (seen[slot] == hash)
+        return true;
+    seen[slot] = hash;
+    return false;
+}
+
+/* Populate filtered indexes while data_mutex is held. */
+static void rebuild_filter_locked(app_t *a, const char *category,
+                                  uint64_t *seen, size_t seen_cap) {
+    for (size_t i = 0u; i < ACTIVE_CHANNELS(a).len; ++i) {
+        vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[i];
+        char grouped_name[256];
+        const char *name = m3u_series_display_name(a, ch, grouped_name, sizeof(grouped_name));
+        if (!channel_matches_filter(a, ch, i, category, name))
+            continue;
+        if (grouped_series_seen(seen, seen_cap, name))
+            continue;
+        a->filtered[a->filtered_len++] = i;
     }
-    free(seen);
-    pthread_mutex_unlock(&a->data_mutex);
+}
+
+/* Reset scroll, hover and focus after the filtered collection changes. */
+static void reset_filter_view_state(app_t *a) {
     a->grid_scroll = 0;
     a->grid_scroll_target = 0;
     a->grid_scroll_animating = false;
@@ -1461,6 +1488,25 @@ static void rebuild_filter(app_t *a) {
     vip_ui_motion_init(&a->control_motion, 0.0f, a->grid_scroll_last_ms);
     a->ui_motion_active = false;
     a->focused_filtered = 0;
+}
+
+/* Rebuild filter. */
+static void rebuild_filter(app_t *a) {
+    pthread_mutex_lock(&a->data_mutex);
+    size_t need = ACTIVE_CHANNELS(a).len;
+    a->filtered_len = 0u;
+
+    if (ensure_filtered_capacity(a, need)) {
+        const char *category = selected_filter_category(a);
+        size_t seen_cap = 0u;
+        uint64_t *seen = m3u_series_root(a) ?
+            create_series_seen_table(need, &seen_cap) : NULL;
+        rebuild_filter_locked(a, category, seen, seen_cap);
+        free(seen);
+    }
+
+    pthread_mutex_unlock(&a->data_mutex);
+    reset_filter_view_state(a);
 }
 
 /* Handle the recalc category counts operation. */
