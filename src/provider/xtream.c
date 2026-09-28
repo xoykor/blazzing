@@ -856,9 +856,116 @@ static vip_status_t push_episode(json_object *episode, const char *season,
 }
 
 /* Parse series info json. */
+static vip_status_t push_series_season(const vip_credentials_t *credentials,
+                                       const char *season_id,
+                                       const char *season_name,
+                                       vip_category_list_t *seasons,
+                                       vip_error_t *error) {
+    vip_category_t category = {
+        .provider_id = (char *)credentials->provider_id,
+        .id = (char *)season_id,
+        .name = (char *)season_name,
+        .position = (int)seasons->len,
+    };
+    return vip_category_list_push(seasons, &category, error);
+}
+
+static vip_status_t push_episode_array(json_object *array,
+                                       const char *season_id,
+                                       const vip_credentials_t *credentials,
+                                       vip_channel_list_t *episodes,
+                                       int *position,
+                                       vip_error_t *error) {
+    size_t count = json_object_array_length(array);
+    for (size_t i = 0; i < count; ++i) {
+        vip_status_t st = push_episode(
+            json_object_array_get_idx(array, i),
+            season_id,
+            credentials,
+            episodes,
+            (*position)++,
+            error
+        );
+        if (st != VIP_OK)
+            return st;
+    }
+    return VIP_OK;
+}
+
+static vip_status_t parse_season_object(json_object *episodes,
+                                        const vip_credentials_t *credentials,
+                                        vip_category_list_t *seasons_out,
+                                        vip_channel_list_t *episodes_out,
+                                        int *position,
+                                        vip_error_t *error) {
+    json_object_object_foreach(episodes, season, array) {
+        if (!array || json_object_get_type(array) != json_type_array)
+            continue;
+
+        char season_name[96];
+        snprintf(season_name, sizeof(season_name), "Temporada %s", season);
+        vip_status_t st = push_series_season(
+            credentials, season, season_name, seasons_out, error
+        );
+        if (st != VIP_OK)
+            return st;
+
+        st = push_episode_array(
+            array, season, credentials, episodes_out, position, error
+        );
+        if (st != VIP_OK)
+            return st;
+    }
+    return VIP_OK;
+}
+
+static vip_status_t parse_flat_episode_array(json_object *episodes,
+                                             const vip_credentials_t *credentials,
+                                             vip_category_list_t *seasons_out,
+                                             vip_channel_list_t *episodes_out,
+                                             int *position,
+                                             vip_error_t *error) {
+    vip_status_t st = push_series_season(
+        credentials, "1", "Episódios", seasons_out, error
+    );
+    if (st != VIP_OK)
+        return st;
+    return push_episode_array(
+        episodes, "1", credentials, episodes_out, position, error
+    );
+}
+
+static vip_status_t parse_series_episode_payload(json_object *episodes,
+                                                 const vip_credentials_t *credentials,
+                                                 vip_category_list_t *seasons_out,
+                                                 vip_channel_list_t *episodes_out,
+                                                 vip_error_t *error) {
+    int position = 0;
+    enum json_type type = json_object_get_type(episodes);
+    if (type == json_type_object)
+        return parse_season_object(
+            episodes, credentials, seasons_out, episodes_out, &position, error
+        );
+    if (type == json_type_array)
+        return parse_flat_episode_array(
+            episodes, credentials, seasons_out, episodes_out, &position, error
+        );
+    return VIP_OK;
+}
+
+static void clear_failed_series_info(vip_media_metadata_t *metadata_out,
+                                     vip_category_list_t *seasons_out,
+                                     vip_channel_list_t *episodes_out) {
+    if (metadata_out)
+        vip_media_metadata_clear(metadata_out);
+    vip_category_list_clear(seasons_out);
+    vip_channel_list_clear(episodes_out);
+}
+
 static vip_status_t parse_series_info_json(const char *json, const vip_credentials_t *credentials,
                                            vip_media_metadata_t *metadata_out,
-                                           vip_category_list_t *seasons_out, vip_channel_list_t *episodes_out,
+                                           vip_category_list_t *seasons_out,
+                                           vip_channel_list_t *episodes_out,
                                            vip_error_t *error) {
     json_object *root = json_tokener_parse(json);
     if (!root || json_object_get_type(root) != json_type_object) {
@@ -867,12 +974,14 @@ static vip_status_t parse_series_info_json(const char *json, const vip_credentia
         vip_error_set(error, VIP_ERR_MALFORMED, "detalhes da série Xtream inválidos");
         return VIP_ERR_MALFORMED;
     }
+
     json_object *episodes = NULL;
     if (!json_object_object_get_ex(root, "episodes", &episodes) || !episodes) {
         json_object_put(root);
         vip_error_set(error, VIP_ERR_MALFORMED, "série sem episódios");
         return VIP_ERR_MALFORMED;
     }
+
     if (metadata_out) {
         json_object *info = NULL;
         (void)json_object_object_get_ex(root, "info", &info);
@@ -882,66 +991,26 @@ static vip_status_t parse_series_info_json(const char *json, const vip_credentia
             return metadata_st;
         }
     }
+
     vip_category_list_init(seasons_out);
     vip_channel_list_init(episodes_out);
-    int position = 0;
-    if (json_object_get_type(episodes) == json_type_object) {
-        json_object_object_foreach(episodes, season, arr) {
-            if (!arr || json_object_get_type(arr) != json_type_array)
-                continue;
-            char season_name[96];
-            snprintf(season_name, sizeof(season_name), "Temporada %s", season);
-            vip_category_t cat = {
-                .provider_id = (char *)credentials->provider_id,
-                .id = (char *)season,
-                .name = season_name,
-                .position = (int)seasons_out->len,
-            };
-            vip_status_t st = vip_category_list_push(seasons_out, &cat, error);
-            if (st != VIP_OK)
-                goto fail;
-            size_t count = json_object_array_length(arr);
-            for (size_t i = 0; i < count; ++i) {
-                st = push_episode(json_object_array_get_idx(arr, i), season, credentials, episodes_out,
-                                  position++, error);
-                if (st != VIP_OK)
-                    goto fail;
-            }
-        }
-    } else if (json_object_get_type(episodes) == json_type_array) {
-        vip_category_t cat = {
-            .provider_id = (char *)credentials->provider_id,
-            .id = "1",
-            .name = "Episódios",
-            .position = 0,
-        };
-        vip_status_t st = vip_category_list_push(seasons_out, &cat, error);
-        if (st != VIP_OK)
-            goto fail;
-        size_t count = json_object_array_length(episodes);
-        for (size_t i = 0; i < count; ++i) {
-            st = push_episode(json_object_array_get_idx(episodes, i), "1", credentials, episodes_out,
-                              position++, error);
-            if (st != VIP_OK)
-                goto fail;
-        }
-    }
+    vip_status_t st = parse_series_episode_payload(
+        episodes, credentials, seasons_out, episodes_out, error
+    );
     json_object_put(root);
+
+    if (st != VIP_OK) {
+        clear_failed_series_info(metadata_out, seasons_out, episodes_out);
+        return error ? error->code : VIP_ERR_NOMEM;
+    }
     if (episodes_out->len == 0u) {
-        vip_category_list_clear(seasons_out);
-        vip_channel_list_clear(episodes_out);
+        clear_failed_series_info(metadata_out, seasons_out, episodes_out);
         vip_error_set(error, VIP_ERR_MALFORMED, "nenhum episódio encontrado");
         return VIP_ERR_MALFORMED;
     }
+
     vip_error_clear(error);
     return VIP_OK;
-fail:
-    if (metadata_out)
-        vip_media_metadata_clear(metadata_out);
-    vip_category_list_clear(seasons_out);
-    vip_channel_list_clear(episodes_out);
-    json_object_put(root);
-    return error ? error->code : VIP_ERR_NOMEM;
 }
 
 /* Authenticate the requested state using the Xtream provider. */
