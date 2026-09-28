@@ -808,9 +808,13 @@
 
                 activeImageLoads += 1;
 
-                function done(success) {
+                function finishImageLoad(success) {
                     if (finished) { return; }
                     finished = true;
+                    if (task.timeout) {
+                        clearTimeout(task.timeout);
+                        task.timeout = 0;
+                    }
                     activeImageLoads = Math.max(0, activeImageLoads - 1);
 
                     if (image && image.parentNode &&
@@ -826,22 +830,16 @@
                     setTimeout(pumpImageQueue, 0);
                 }
 
-                image.onload = function () { done(true); };
-                image.onerror = function () { done(false); };
+                image.onload = function () { finishImageLoad(true); };
+                image.onerror = function () { finishImageLoad(false); };
 
                 /* Avoid keeping broken remote image requests alive forever. */
                 task.timeout = setTimeout(function () {
                     if (!finished) {
                         try { image.src = ""; } catch (ignoreAbort) {}
-                        done(false);
+                        finishImageLoad(false);
                     }
                 }, 12000);
-
-                var originalDone = done;
-                done = function (success) {
-                    clearTimeout(task.timeout);
-                    originalDone(success);
-                };
 
                 image.src = task.url;
             }(imageQueue.shift()));
