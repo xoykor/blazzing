@@ -42,6 +42,7 @@ struct vip_mpv_player {
     bool runtime_running;
     bool shutting_down;
     bool media_running;
+    bool stop_requested;
     /*
      * Number of loadfile commands that have been queued but whose start-file
      * event has not arrived yet. mpv emits end-file for the previous item
@@ -654,14 +655,18 @@ static void handle_ipc_line(vip_mpv_player_t *player, const char *line) {
     if (event && strcmp(event, "start-file") == 0) {
         if (player->pending_load_starts > 0u)
             --player->pending_load_starts;
-        player->media_running = true;
-        touch_state_locked(player, VIP_PLAYER_OPENING);
+        if (!player->stop_requested) {
+            player->media_running = true;
+            touch_state_locked(player, VIP_PLAYER_OPENING);
+        }
     } else if (event && strcmp(event, "file-loaded") == 0) {
-        player->media_running = true;
-        deferred_seek = player->pending_start_seconds;
-        player->pending_start_seconds = 0.0;
-        update_state_from_flags_locked(player);
-        ++player->serial;
+        if (!player->stop_requested) {
+            player->media_running = true;
+            deferred_seek = player->pending_start_seconds;
+            player->pending_start_seconds = 0.0;
+            update_state_from_flags_locked(player);
+            ++player->serial;
+        }
     } else if (event && strcmp(event, "playback-restart") == 0) {
         update_state_from_flags_locked(player);
         ++player->serial;
@@ -1107,6 +1112,7 @@ void vip_mpv_player_stop(vip_mpv_player_t *player) {
     pthread_mutex_lock(&player->mutex);
     bool media_running = player->media_running;
     bool runtime_running = player->runtime_running;
+    player->stop_requested = true;
     player->media_running = false;
     player->pending_load_starts = 0u;
     player->pending_start_seconds = 0.0;
@@ -1159,6 +1165,7 @@ static vip_status_t player_load_at_internal(vip_mpv_player_t *player, const char
      */
     pthread_mutex_lock(&player->mutex);
     reset_media_snapshot_locked(player, start_seconds);
+    player->stop_requested = false;
     player->media_running = true;
     ++player->pending_load_starts;
     touch_state_locked(player, VIP_PLAYER_OPENING);
