@@ -229,49 +229,82 @@
         }
     }
 
+    function isBackKey(name, keyCode) {
+        return name === "Back" || keyCode === 10009 || keyCode === 27;
+    }
+
+    function isPlaybackToggleKey(name, keyCode) {
+        return name === "MediaPlayPause" || name === "MediaPlay" ||
+            name === "MediaPause" || keyCode === 13 || keyCode === 32 ||
+            keyCode === 415 || keyCode === 19;
+    }
+
+    function playerItemIsLive() {
+        var item = window.BlazzingPlayer.item();
+        return !!item && item.kind === "live";
+    }
+
+    function seekOrZap(seconds, liveDelta) {
+        if (playerItemIsLive()) {
+            switchLive(liveDelta);
+        } else {
+            window.BlazzingPlayer.seek(seconds);
+        }
+        showHud();
+    }
+
     function handlePlayerKey(name, keyCode) {
-        if (name === "Back" || keyCode === 10009 || keyCode === 27) {
+        if (isBackKey(name, keyCode)) {
             goBack();
             return true;
         }
-
-        if (name === "MediaPlayPause" || name === "MediaPlay" ||
-                name === "MediaPause" || keyCode === 13 ||
-                keyCode === 32 || keyCode === 415 || keyCode === 19) {
+        if (isPlaybackToggleKey(name, keyCode)) {
             window.BlazzingPlayer.togglePause();
             showHud();
             return true;
         }
-
         if (name === "MediaStop" || keyCode === 413) {
             closePlayer();
             return true;
         }
-
         if (keyCode === 37 || name === "MediaRewind" || keyCode === 412) {
-            if (window.BlazzingPlayer.item() &&
-                    window.BlazzingPlayer.item().kind === "live") {
-                switchLive(-1);
-            } else {
-                window.BlazzingPlayer.seek(-10);
-            }
-            showHud();
+            seekOrZap(-10, -1);
             return true;
         }
-
         if (keyCode === 39 || name === "MediaFastForward" || keyCode === 417) {
-            if (window.BlazzingPlayer.item() &&
-                    window.BlazzingPlayer.item().kind === "live") {
-                switchLive(1);
-            } else {
-                window.BlazzingPlayer.seek(10);
-            }
-            showHud();
+            seekOrZap(10, 1);
             return true;
         }
-
         showHud();
         return false;
+    }
+
+    function handleNavigationKey(event, code, name, active, isInput) {
+        if (isBackKey(name, code)) {
+            event.preventDefault();
+            goBack();
+            return true;
+        }
+        if (code === 13 && !isInput) {
+            if (active && active.click) {
+                event.preventDefault();
+                active.click();
+            }
+            return true;
+        }
+        if (isInput && (code === 37 || code === 39)) {
+            return true;
+        }
+        if (code !== 37 && code !== 38 && code !== 39 && code !== 40) {
+            return false;
+        }
+        event.preventDefault();
+        geometricMove(
+            code === 37 ? "left" :
+            code === 38 ? "up" :
+            code === 39 ? "right" : "down"
+        );
+        return true;
     }
 
     document.addEventListener("keydown", function (event) {
@@ -282,38 +315,10 @@
             (active.tagName === "INPUT" || active.tagName === "TEXTAREA");
 
         if (state.view === "player") {
-            if (handlePlayerKey(name, code)) {
-                event.preventDefault();
-            }
+            if (handlePlayerKey(name, code)) { event.preventDefault(); }
             return;
         }
-
-        if (name === "Back" || code === 10009 || code === 27) {
-            event.preventDefault();
-            goBack();
-            return;
-        }
-
-        if (code === 13 && !isInput) {
-            if (active && active.click) {
-                event.preventDefault();
-                active.click();
-            }
-            return;
-        }
-
-        if (isInput && (code === 37 || code === 39)) {
-            return;
-        }
-
-        if (code === 37 || code === 38 || code === 39 || code === 40) {
-            event.preventDefault();
-            geometricMove(
-                code === 37 ? "left" :
-                code === 38 ? "up" :
-                code === 39 ? "right" : "down"
-            );
-        }
+        handleNavigationKey(event, code, name, active, isInput);
     });
 
     function setMode(mode) {
