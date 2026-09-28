@@ -840,38 +840,50 @@ static XImage *scale_ximage(app_t *a, const XImage *src, int width, int height) 
 }
 
 /* Draw cached image contain. */
-static bool draw_cached_image_contain(app_t *a, const char *path, int x, int y, int box_w, int box_h) {
-    image_slot_t *slot = image_cache_slot_get(a, path);
-    if (!slot || !slot->image || box_w < 1 || box_h < 1)
+static bool contained_image_size(const XImage *image, int box_w, int box_h, int *dw, int *dh) {
+    if (!image || box_w < 1 || box_h < 1 || image->width < 1 || image->height < 1)
         return false;
-    double sx = (double)box_w / (double)slot->image->width;
-    double sy = (double)box_h / (double)slot->image->height;
+    double sx = (double)box_w / (double)image->width;
+    double sy = (double)box_h / (double)image->height;
     double scale = sx < sy ? sx : sy;
     if (scale <= 0.0)
         return false;
-    int dw = (int)((double)slot->image->width * scale + 0.5);
-    int dh = (int)((double)slot->image->height * scale + 0.5);
-    if (dw < 1)
-        dw = 1;
-    if (dh < 1)
-        dh = 1;
-    if (dw > box_w)
-        dw = box_w;
-    if (dh > box_h)
-        dh = box_h;
-    if (!slot->scaled || slot->scaled_box_w != box_w || slot->scaled_box_h != box_h || slot->scaled_w != dw ||
-        slot->scaled_h != dh) {
-        if (slot->scaled) {
-            XDestroyImage(slot->scaled);
-            slot->scaled = NULL;
-        }
-        slot->scaled = scale_ximage(a, slot->image, dw, dh);
-        slot->scaled_box_w = box_w;
-        slot->scaled_box_h = box_h;
-        slot->scaled_w = dw;
-        slot->scaled_h = dh;
+    *dw = (int)((double)image->width * scale + 0.5);
+    *dh = (int)((double)image->height * scale + 0.5);
+    if (*dw < 1)
+        *dw = 1;
+    if (*dh < 1)
+        *dh = 1;
+    if (*dw > box_w)
+        *dw = box_w;
+    if (*dh > box_h)
+        *dh = box_h;
+    return true;
+}
+
+static bool ensure_contained_scaled_image(app_t *a, image_slot_t *slot, int box_w, int box_h, int dw, int dh) {
+    bool unchanged = slot->scaled && slot->scaled_box_w == box_w && slot->scaled_box_h == box_h &&
+                     slot->scaled_w == dw && slot->scaled_h == dh;
+    if (unchanged)
+        return true;
+    if (slot->scaled) {
+        XDestroyImage(slot->scaled);
+        slot->scaled = NULL;
     }
-    if (!slot->scaled)
+    slot->scaled = scale_ximage(a, slot->image, dw, dh);
+    slot->scaled_box_w = box_w;
+    slot->scaled_box_h = box_h;
+    slot->scaled_w = dw;
+    slot->scaled_h = dh;
+    return slot->scaled != NULL;
+}
+
+static bool draw_cached_image_contain(app_t *a, const char *path, int x, int y, int box_w, int box_h) {
+    image_slot_t *slot = image_cache_slot_get(a, path);
+    int dw = 0, dh = 0;
+    if (!slot || !contained_image_size(slot->image, box_w, box_h, &dw, &dh))
+        return false;
+    if (!ensure_contained_scaled_image(a, slot, box_w, box_h, dw, dh))
         return false;
     int dx = x + (box_w - dw) / 2;
     int dy = y + (box_h - dh) / 2;
@@ -1367,6 +1379,46 @@ static void sort_season_channels(vip_channel_list_t *channels) {
 }
 
 /* Draw up to two title lines so long work names stay identifiable. */
+static size_t card_title_breakpoint(app_t *a, const char *text, const char *font, int width) {
+    size_t len = strlen(text);
+    size_t best = 0u;
+    char first[256];
+    for (size_t i = 0u; i < len && i < sizeof(first) - 1u; ++i) {
+        if (text[i] != ' ')
+            continue;
+        size_t n = i;
+        while (n > 0u && text[n - 1u] == ' ')
+            --n;
+        if (n == 0u || n >= sizeof(first))
+            continue;
+        memcpy(first, text, n);
+        first[n] = '\0';
+        if (vip_ui_render_text_width(&a->renderer, first, font) > width)
+            break;
+        best = i + 1u;
+    }
+    return best;
+}
+
+static void draw_split_card_title(app_t *a, int x, int y, int width, const char *text,
+                                  const char *font, size_t split) {
+    char first[256];
+    size_t first_len = split;
+    while (first_len > 0u && text[first_len - 1u] == ' ')
+        --first_len;
+    if (first_len >= sizeof(first))
+        first_len = sizeof(first) - 1u;
+    memcpy(first, text, first_len);
+    first[first_len] = '\0';
+
+    const char *second = text + split;
+    while (*second == ' ')
+        ++second;
+    vip_ui_render_text(&a->renderer, x, y, width, first, font, 0xF6F7FBu, 1.0, false);
+    if (*second)
+        vip_ui_render_text(&a->renderer, x, y + 16, width, second, font, 0xF6F7FBu, 1.0, false);
+}
+
 static void draw_card_title(app_t *a, int x, int y, int width, const char *text, bool active) {
     if (!a || !text || !text[0] || width <= 0)
         return;
@@ -1383,44 +1435,12 @@ static void draw_card_title(app_t *a, int x, int y, int width, const char *text,
         return;
     }
 
-    size_t len = strlen(text);
-    size_t best = 0u;
-    char first[256];
-    for (size_t i = 0u; i < len && i < sizeof(first) - 1u; ++i) {
-        if (text[i] != ' ')
-            continue;
-        size_t n = i;
-        while (n > 0u && text[n - 1u] == ' ')
-            --n;
-        if (n == 0u || n >= sizeof(first))
-            continue;
-        memcpy(first, text, n);
-        first[n] = '\0';
-        if (vip_ui_render_text_width(&a->renderer, first, font) <= width)
-            best = i + 1u;
-        else
-            break;
-    }
-
-    if (best == 0u) {
+    size_t split = card_title_breakpoint(a, text, font, width);
+    if (split == 0u) {
         vip_ui_render_text(&a->renderer, x, y, width, text, font, 0xF6F7FBu, 1.0, false);
         return;
     }
-
-    size_t first_len = best;
-    while (first_len > 0u && text[first_len - 1u] == ' ')
-        --first_len;
-    if (first_len >= sizeof(first))
-        first_len = sizeof(first) - 1u;
-    memcpy(first, text, first_len);
-    first[first_len] = '\0';
-
-    const char *second = text + best;
-    while (*second == ' ')
-        ++second;
-    vip_ui_render_text(&a->renderer, x, y, width, first, font, 0xF6F7FBu, 1.0, false);
-    if (*second)
-        vip_ui_render_text(&a->renderer, x, y + 16, width, second, font, 0xF6F7FBu, 1.0, false);
+    draw_split_card_title(a, x, y, width, text, font, split);
 }
 
 /* Format the compact season/episode label shown under episode cards. */
@@ -4132,6 +4152,32 @@ static void maybe_failover_player(app_t *a) {
 }
 
 /* Draw input. */
+static const char *input_display_text(const char *value, const char *placeholder, bool search_focused,
+                                      bool password, char *masked, size_t masked_cap) {
+    const char *text = value && value[0] ? value : (search_focused ? "Digite para buscar..." : placeholder);
+    if (!password || !value || !value[0])
+        return text;
+    size_t n = strlen(value);
+    if (n >= masked_cap)
+        n = masked_cap - 1u;
+    memset(masked, '*', n);
+    masked[n] = '\0';
+    return masked;
+}
+
+static void draw_search_caret(app_t *a, int x, int y, int w, int h, const char *value) {
+    const char *caret_text = value && value[0] ? value : "";
+    int measured = a->renderer.active ? vip_ui_render_text_width(&a->renderer, caret_text, "Sans 10")
+                                      : text_width(a, caret_text);
+    int caret_x = x + 16 + measured;
+    if (caret_x < x + 16)
+        caret_x = x + 16;
+    if (caret_x > x + w - 18)
+        caret_x = x + w - 18;
+    set_fg(a, a->colors.accent);
+    XDrawLine(a->dpy, draw_target(a), a->gc, caret_x, y + 11, caret_x, y + h - 11);
+}
+
 static void draw_input(app_t *a, int x, int y, int w, int h, const char *value, const char *placeholder,
                        int focus_id, bool password) {
     bool focused = a->input_focus == focus_id;
@@ -4145,34 +4191,17 @@ static void draw_input(app_t *a, int x, int y, int w, int h, const char *value, 
         if (search_focused)
             fill_round_rect(a, x + 5, y + 8, 4, h - 16, 2, a->colors.accent);
     }
-    const char *text = value && value[0] ? value : (search_focused ? "Digite para buscar..." : placeholder);
+
     char masked[256];
-    if (password && value && value[0]) {
-        size_t n = strlen(value);
-        if (n > sizeof(masked) - 1)
-            n = sizeof(masked) - 1;
-        memset(masked, '*', n);
-        masked[n] = '\0';
-        text = masked;
-    }
+    const char *text = input_display_text(value, placeholder, search_focused, password, masked, sizeof(masked));
     bool bright = search_focused || (value && value[0]);
     if (a->renderer.active)
         vip_ui_render_text(&a->renderer, x + 16, y + (h - 16) / 2, w - 32, text, "Sans 10",
                            bright ? 0xF6F7FBu : 0xAAB2C4u, 1.0, false);
     else
         draw_text(a, x + 16, y + h / 2 + 6, text, bright ? a->colors.text : a->colors.muted);
-    if (search_focused) {
-        const char *caret_text = value && value[0] ? value : "";
-        int measured = a->renderer.active ? vip_ui_render_text_width(&a->renderer, caret_text, "Sans 10")
-                                          : text_width(a, caret_text);
-        int caret_x = x + 16 + measured;
-        if (caret_x < x + 16)
-            caret_x = x + 16;
-        if (caret_x > x + w - 18)
-            caret_x = x + w - 18;
-        set_fg(a, a->colors.accent);
-        XDrawLine(a->dpy, draw_target(a), a->gc, caret_x, y + 11, caret_x, y + h - 11);
-    }
+    if (search_focused)
+        draw_search_caret(a, x, y, w, h, value);
 }
 
 /* Draw login. */
@@ -6445,13 +6474,16 @@ static void init_runtime(app_t *a) {
 }
 
 /* Destroy app. */
-static void destroy_app(app_t *a) {
+static void join_app_threads(app_t *a) {
     if (a->login_thread_started)
         pthread_join(a->login_thread, NULL);
     if (a->series_thread_started)
         pthread_join(a->series_thread, NULL);
     if (a->details_thread_started)
         pthread_join(a->details_thread, NULL);
+}
+
+static void destroy_app_services(app_t *a) {
     if (a->player)
         vip_mpv_player_destroy(a->player);
     if (a->thumbs)
@@ -6461,6 +6493,9 @@ static void destroy_app(app_t *a) {
         vip_thumbnail_decoder_destroy(a->decoder);
     if (a->db)
         vip_database_close(a->db);
+}
+
+static void clear_app_data(app_t *a) {
     for (size_t i = 0; i < CACHE_SLOTS; ++i)
         image_slot_clear(&a->image_cache[i]);
     free(a->filtered);
@@ -6478,34 +6513,44 @@ static void destroy_app(app_t *a) {
     vip_category_list_clear(&a->episode_categories);
     vip_channel_list_clear(&a->episode_channels);
     vip_channel_list_clear(&a->season_channels);
+}
+
+static void destroy_x11_resources(app_t *a) {
+    if (!a->dpy)
+        return;
+    if (a->font_title)
+        XFreeFont(a->dpy, a->font_title);
+    if (a->font_heading)
+        XFreeFont(a->dpy, a->font_heading);
+    if (a->font_small)
+        XFreeFont(a->dpy, a->font_small);
+    if (a->font)
+        XFreeFont(a->dpy, a->font);
+    if (a->backbuffer)
+        XFreePixmap(a->dpy, a->backbuffer);
+    if (a->gc)
+        XFreeGC(a->dpy, a->gc);
+    if (a->player_input_win)
+        XDestroyWindow(a->dpy, a->player_input_win);
+    if (a->video_win)
+        XDestroyWindow(a->dpy, a->video_win);
+    if (a->win)
+        XDestroyWindow(a->dpy, a->win);
+    XCloseDisplay(a->dpy);
+}
+
+static void destroy_app(app_t *a) {
+    join_app_threads(a);
+    destroy_app_services(a);
+    clear_app_data(a);
     stop_phone_pairing(a);
     pthread_mutex_destroy(&a->data_mutex);
-    if (a->dpy) {
-        if (a->font_title)
-            XFreeFont(a->dpy, a->font_title);
-        if (a->font_heading)
-            XFreeFont(a->dpy, a->font_heading);
-        if (a->font_small)
-            XFreeFont(a->dpy, a->font_small);
-        if (a->font)
-            XFreeFont(a->dpy, a->font);
-        if (a->backbuffer)
-            XFreePixmap(a->dpy, a->backbuffer);
-        if (a->gc)
-            XFreeGC(a->dpy, a->gc);
-        if (a->player_input_win)
-            XDestroyWindow(a->dpy, a->player_input_win);
-        if (a->video_win)
-            XDestroyWindow(a->dpy, a->video_win);
-        if (a->win)
-            XDestroyWindow(a->dpy, a->win);
-        XCloseDisplay(a->dpy);
-    }
+    destroy_x11_resources(a);
     curl_global_cleanup();
 }
 
 /* Handle async. */
-static void handle_async(app_t *a) {
+static void handle_pairing_async(app_t *a) {
     if (atomic_exchange(&a->pairing_submission, false)) {
         char url[sizeof(a->server)];
         char name[sizeof(a->profile_name)];
@@ -6523,68 +6568,89 @@ static void handle_async(app_t *a) {
         snprintf(a->profile_name, sizeof(a->profile_name), "%s", name);
         snprintf(a->status, sizeof(a->status), "Playlist recebida do celular; carregando...");
         start_login(a, false);
-    } else if (a->pairing_relay && vip_pairing_relay_finished(a->pairing_relay)) {
+        return;
+    }
+    if (a->pairing_relay && vip_pairing_relay_finished(a->pairing_relay)) {
         stop_phone_pairing(a);
         a->pairing_retry_ready = true;
         a->input_focus = INPUT_PHONE;
         snprintf(a->status, sizeof(a->status),
                  "Sessão expirou após 45 s; selecione Tentar novamente (QR)");
     }
-    if (atomic_exchange(&a->login_done, false)) {
-        if (a->login_thread_started) {
-            pthread_join(a->login_thread, NULL);
-            a->login_thread_started = false;
-        }
-        if (atomic_load(&a->login_success)) {
-            save_active_profile(a);
-            recalc_category_counts(a);
-            load_media_state(a);
-            a->favorites_only = false;
-            a->selected_category = -1;
-            a->category_scroll = 0;
-            a->search[0] = '\0';
-            rebuild_filter(a);
-            a->screen = SCREEN_BROWSE;
-            a->browse_top_focus = (int)a->content_kind;
-            a->browse_sidebar_focus = -1;
-            browse_focus_grid(a);
-            fprintf(stderr, "[catalog] %zu canais, %zu categorias\n", ACTIVE_CHANNELS(a).len,
-                    ACTIVE_CATEGORIES(a).len);
-            if (a->test_series) {
-                switch_content(a, CONTENT_SERIES);
-                if (ACTIVE_CHANNELS(a).len > 0)
-                    start_series_load(a, 0);
-            } else if (a->test_autoplay && ACTIVE_CHANNELS(a).len > 0)
-                enter_player(a, 0);
-        }
+}
+
+static void handle_login_async(app_t *a) {
+    if (!atomic_exchange(&a->login_done, false))
+        return;
+    if (a->login_thread_started) {
+        pthread_join(a->login_thread, NULL);
+        a->login_thread_started = false;
     }
-    if (atomic_exchange(&a->series_done, false)) {
-        if (a->series_thread_started) {
-            pthread_join(a->series_thread, NULL);
-            a->series_thread_started = false;
-        }
-        if (atomic_load(&a->series_success) && a->content_kind == CONTENT_SERIES) {
-            clear_details_view(a);
-            a->series_episode_mode = true;
-            a->series_season_select = true;
-            a->favorites_only = false;
-            a->selected_category = -1;
-            a->category_scroll = 0;
-            a->grid_scroll = 0;
-            a->focused_filtered = 0;
-            a->search[0] = '\0';
-            recalc_category_counts(a);
-            load_media_state(a);
-            rebuild_filter(a);
-            fprintf(stderr, "[series] %zu episódios carregados\n", ACTIVE_CHANNELS(a).len);
-        }
+    if (!atomic_load(&a->login_success))
+        return;
+
+    save_active_profile(a);
+    recalc_category_counts(a);
+    load_media_state(a);
+    a->favorites_only = false;
+    a->selected_category = -1;
+    a->category_scroll = 0;
+    a->search[0] = '\0';
+    rebuild_filter(a);
+    a->screen = SCREEN_BROWSE;
+    a->browse_top_focus = (int)a->content_kind;
+    a->browse_sidebar_focus = -1;
+    browse_focus_grid(a);
+    fprintf(stderr, "[catalog] %zu canais, %zu categorias\n", ACTIVE_CHANNELS(a).len,
+            ACTIVE_CATEGORIES(a).len);
+    if (a->test_series) {
+        switch_content(a, CONTENT_SERIES);
+        if (ACTIVE_CHANNELS(a).len > 0)
+            start_series_load(a, 0);
+    } else if (a->test_autoplay && ACTIVE_CHANNELS(a).len > 0) {
+        enter_player(a, 0);
     }
-    if (atomic_exchange(&a->details_done, false)) {
-        if (a->details_thread_started) {
-            pthread_join(a->details_thread, NULL);
-            a->details_thread_started = false;
-        }
+}
+
+static void handle_series_async(app_t *a) {
+    if (!atomic_exchange(&a->series_done, false))
+        return;
+    if (a->series_thread_started) {
+        pthread_join(a->series_thread, NULL);
+        a->series_thread_started = false;
     }
+    if (!atomic_load(&a->series_success) || a->content_kind != CONTENT_SERIES)
+        return;
+
+    clear_details_view(a);
+    a->series_episode_mode = true;
+    a->series_season_select = true;
+    a->favorites_only = false;
+    a->selected_category = -1;
+    a->category_scroll = 0;
+    a->grid_scroll = 0;
+    a->focused_filtered = 0;
+    a->search[0] = '\0';
+    recalc_category_counts(a);
+    load_media_state(a);
+    rebuild_filter(a);
+    fprintf(stderr, "[series] %zu episódios carregados\n", ACTIVE_CHANNELS(a).len);
+}
+
+static void handle_details_async(app_t *a) {
+    if (!atomic_exchange(&a->details_done, false))
+        return;
+    if (a->details_thread_started) {
+        pthread_join(a->details_thread, NULL);
+        a->details_thread_started = false;
+    }
+}
+
+static void handle_async(app_t *a) {
+    handle_pairing_async(a);
+    handle_login_async(a);
+    handle_series_async(a);
+    handle_details_async(a);
     (void)atomic_exchange(&a->thumbs_dirty, false);
 }
 
