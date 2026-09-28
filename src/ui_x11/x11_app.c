@@ -477,46 +477,54 @@ static void draw_surface(app_t *a, int x, int y, int w, int h, int r, bool focus
 }
 
 /* Handle the utf8 to latin1 operation. */
+static uint32_t decode_utf8_codepoint(const unsigned char *p, size_t remaining, size_t *advance) {
+    *advance = 1u;
+    if (*p < 0x80u)
+        return *p;
+    if (remaining >= 2u && (*p & 0xe0u) == 0xc0u && (p[1] & 0xc0u) == 0x80u) {
+        *advance = 2u;
+        return ((uint32_t)(p[0] & 0x1fu) << 6) | (uint32_t)(p[1] & 0x3fu);
+    }
+    if (remaining >= 3u && (*p & 0xf0u) == 0xe0u && (p[1] & 0xc0u) == 0x80u &&
+        (p[2] & 0xc0u) == 0x80u) {
+        *advance = 3u;
+        return ((uint32_t)(p[0] & 0x0fu) << 12) | ((uint32_t)(p[1] & 0x3fu) << 6) |
+               (uint32_t)(p[2] & 0x3fu);
+    }
+    if (remaining >= 4u && (*p & 0xf8u) == 0xf0u && (p[1] & 0xc0u) == 0x80u &&
+        (p[2] & 0xc0u) == 0x80u && (p[3] & 0xc0u) == 0x80u) {
+        *advance = 4u;
+        return ((uint32_t)(p[0] & 0x07u) << 18) | ((uint32_t)(p[1] & 0x3fu) << 12) |
+               ((uint32_t)(p[2] & 0x3fu) << 6) | (uint32_t)(p[3] & 0x3fu);
+    }
+    return (uint32_t)'?';
+}
+
+static char latin1_char_for_codepoint(uint32_t cp) {
+    if (cp <= 0xffu)
+        return (char)cp;
+    if (cp == 0x2018u || cp == 0x2019u)
+        return '\'';
+    if (cp == 0x201cu || cp == 0x201du)
+        return '"';
+    if (cp == 0x2013u || cp == 0x2014u)
+        return '-';
+    return '?';
+}
+
 static size_t utf8_to_latin1(char *dst, size_t cap, const char *src) {
     if (!dst || cap == 0u)
         return 0u;
     if (!src)
         src = "";
+
     size_t out = 0u;
     const unsigned char *p = (const unsigned char *)src;
     const unsigned char *end = p + strlen(src);
     while (p < end && out + 1u < cap) {
-        size_t remaining = (size_t)(end - p);
-        uint32_t cp = 0u;
         size_t advance = 1u;
-        if (*p < 0x80u) {
-            cp = *p;
-        } else if (remaining >= 2u && (*p & 0xe0u) == 0xc0u && (p[1] & 0xc0u) == 0x80u) {
-            cp = ((uint32_t)(p[0] & 0x1fu) << 6) | (uint32_t)(p[1] & 0x3fu);
-            advance = 2u;
-        } else if (remaining >= 3u && (*p & 0xf0u) == 0xe0u && (p[1] & 0xc0u) == 0x80u &&
-                   (p[2] & 0xc0u) == 0x80u) {
-            cp =
-                ((uint32_t)(p[0] & 0x0fu) << 12) | ((uint32_t)(p[1] & 0x3fu) << 6) | (uint32_t)(p[2] & 0x3fu);
-            advance = 3u;
-        } else if (remaining >= 4u && (*p & 0xf8u) == 0xf0u && (p[1] & 0xc0u) == 0x80u &&
-                   (p[2] & 0xc0u) == 0x80u && (p[3] & 0xc0u) == 0x80u) {
-            cp = ((uint32_t)(p[0] & 0x07u) << 18) | ((uint32_t)(p[1] & 0x3fu) << 12) |
-                 ((uint32_t)(p[2] & 0x3fu) << 6) | (uint32_t)(p[3] & 0x3fu);
-            advance = 4u;
-        } else {
-            cp = (uint32_t)'?';
-        }
-        if (cp <= 0xffu)
-            dst[out++] = (char)cp;
-        else if (cp == 0x2018u || cp == 0x2019u)
-            dst[out++] = '\'';
-        else if (cp == 0x201cu || cp == 0x201du)
-            dst[out++] = '"';
-        else if (cp == 0x2013u || cp == 0x2014u)
-            dst[out++] = '-';
-        else
-            dst[out++] = '?';
+        uint32_t cp = decode_utf8_codepoint(p, (size_t)(end - p), &advance);
+        dst[out++] = latin1_char_for_codepoint(cp);
         p += advance;
     }
     dst[out] = '\0';
@@ -883,30 +891,31 @@ static artwork_mode_t default_artwork_mode(const app_t *a) {
 }
 
 /* Handle the detect artwork mode operation. */
-static artwork_mode_t detect_artwork_mode(app_t *a) {
-    int portrait = 0, landscape = 0, square = 0, sampled = 0;
-    size_t limit = a->filtered_len < 24u ? a->filtered_len : 24u;
-    for (size_t i = 0; i < limit; ++i) {
-        size_t chidx = a->filtered[i];
-        if (chidx >= ACTIVE_CHANNELS(a).len)
-            continue;
-        vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
-        vip_error_t error = {0};
-        char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
-        image_slot_t *slot = path ? image_cache_slot_get(a, path) : NULL;
-        free(path);
-        if (!slot || !slot->image || slot->image->height <= 0)
-            continue;
-        double ratio = (double)slot->image->width / (double)slot->image->height;
-        if (ratio < 0.88)
-            ++portrait;
-        else if (ratio > 1.18)
-            ++landscape;
-        else
-            ++square;
-        ++sampled;
-    }
-    artwork_mode_t fallback = default_artwork_mode(a);
+static void count_artwork_ratio(double ratio, int *portrait, int *landscape, int *square) {
+    if (ratio < 0.88)
+        ++*portrait;
+    else if (ratio > 1.18)
+        ++*landscape;
+    else
+        ++*square;
+}
+
+static bool sample_artwork_ratio(app_t *a, size_t chidx, double *ratio) {
+    if (chidx >= ACTIVE_CHANNELS(a).len)
+        return false;
+    vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
+    vip_error_t error = {0};
+    char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
+    image_slot_t *slot = path ? image_cache_slot_get(a, path) : NULL;
+    free(path);
+    if (!slot || !slot->image || slot->image->height <= 0)
+        return false;
+    *ratio = (double)slot->image->width / (double)slot->image->height;
+    return true;
+}
+
+static artwork_mode_t dominant_artwork_mode(int portrait, int landscape, int square,
+                                           artwork_mode_t fallback, int sampled) {
     if (sampled < 3)
         return fallback;
     if (portrait >= landscape && portrait >= square)
@@ -914,6 +923,19 @@ static artwork_mode_t detect_artwork_mode(app_t *a) {
     if (landscape >= portrait && landscape >= square)
         return ART_LANDSCAPE;
     return ART_SQUARE;
+}
+
+static artwork_mode_t detect_artwork_mode(app_t *a) {
+    int portrait = 0, landscape = 0, square = 0, sampled = 0;
+    size_t limit = a->filtered_len < 24u ? a->filtered_len : 24u;
+    for (size_t i = 0; i < limit; ++i) {
+        double ratio = 0.0;
+        if (!sample_artwork_ratio(a, a->filtered[i], &ratio))
+            continue;
+        count_artwork_ratio(ratio, &portrait, &landscape, &square);
+        ++sampled;
+    }
+    return dominant_artwork_mode(portrait, landscape, square, default_artwork_mode(a), sampled);
 }
 
 /* Handle the details panel active operation. */
@@ -991,29 +1013,39 @@ static card_layout_t browse_layout(app_t *a) {
 }
 
 /* Handle the browse card at operation. */
-static bool browse_card_at(app_t *a, int x, int y, size_t *fidx_out) {
-    if (!a || a->screen != SCREEN_BROWSE || a->filtered_len == 0u)
+static bool browse_point_over_details(app_t *a, int x, int y) {
+    if (!details_panel_active(a))
         return false;
-    card_layout_t layout = browse_layout(a);
+    int px, py, pw, ph;
+    details_panel_geometry(a, &px, &py, &pw, &ph);
+    return point_in(x, y, px, py, pw, ph) || x >= px - 12;
+}
+
+static bool browse_grid_position(app_t *a, int x, int y, card_layout_t layout, int *row, int *col) {
     int content_x = SIDEBAR_W + 20;
     int content_y = TOPBAR_H + 18;
     if (x < content_x || y < content_y || x >= a->width || y >= a->height)
         return false;
-    if (details_panel_active(a)) {
-        int px, py, pw, ph;
-        details_panel_geometry(a, &px, &py, &pw, &ph);
-        if (point_in(x, y, px, py, pw, ph) || x >= px - 12)
-            return false;
-    }
     int relx = x - content_x;
     int rely = y - content_y + a->grid_scroll;
     if (relx < 0 || rely < 0)
         return false;
-    int col = relx / (layout.card_w + GRID_GAP);
-    int row = rely / layout.row_step;
-    if (col < 0 || col >= layout.cols || relx % (layout.card_w + GRID_GAP) >= layout.card_w ||
-        rely % layout.row_step >= layout.card_h)
+    *col = relx / (layout.card_w + GRID_GAP);
+    *row = rely / layout.row_step;
+    return *col >= 0 && *col < layout.cols &&
+           relx % (layout.card_w + GRID_GAP) < layout.card_w &&
+           rely % layout.row_step < layout.card_h;
+}
+
+static bool browse_card_at(app_t *a, int x, int y, size_t *fidx_out) {
+    if (!a || a->screen != SCREEN_BROWSE || a->filtered_len == 0u || browse_point_over_details(a, x, y))
         return false;
+
+    card_layout_t layout = browse_layout(a);
+    int row = 0, col = 0;
+    if (!browse_grid_position(a, x, y, layout, &row, &col))
+        return false;
+
     size_t fidx = (size_t)row * (size_t)layout.cols + (size_t)col;
     if (fidx >= a->filtered_len)
         return false;
@@ -1023,9 +1055,7 @@ static bool browse_card_at(app_t *a, int x, int y, size_t *fidx_out) {
 }
 
 /* Handle the browse control at operation. */
-static int browse_control_at(app_t *a, int x, int y) {
-    if (!a || a->screen != SCREEN_BROWSE)
-        return HOVER_NONE;
+static int browse_top_control_at(app_t *a, int x, int y) {
     const int tab_x[3] = {8, 88, 174};
     const int tab_w[3] = {74, 80, 88};
     if (y >= 12 && y < 58 && x < SIDEBAR_W) {
@@ -1033,6 +1063,7 @@ static int browse_control_at(app_t *a, int x, int y) {
             if (point_in(x, y, tab_x[k], 12, tab_w[k], 46))
                 return HOVER_TAB_BASE + k;
     }
+
     int list_w = 94, fav_w = 174;
     int list_x = a->width - list_w - 18;
     int fav_x = list_x - fav_w - 10;
@@ -1045,26 +1076,34 @@ static int browse_control_at(app_t *a, int x, int y) {
         return HOVER_FAVORITES;
     if (point_in(x, y, list_x, 12, list_w, 46))
         return HOVER_LISTS;
-    if (x < SIDEBAR_W && y >= TOPBAR_H) {
-        int base = TOPBAR_H + 12;
-        if (a->series_episode_mode) {
-            if (point_in(x, y, 8, base, SIDEBAR_W - 16, 38))
-                return HOVER_BACK;
-            base += 48;
-        }
-        if (point_in(x, y, 8, base, SIDEBAR_W - 16, 36))
-            return HOVER_CATEGORY_ALL;
-        int local = y - (base + 42);
-        if (local >= 0) {
-            int row = local / 42;
-            if (local % 42 < 36) {
-                int idx = a->category_scroll + row;
-                if (idx >= 0 && (size_t)idx < ACTIVE_CATEGORIES(a).len)
-                    return HOVER_CATEGORY_BASE + idx;
-            }
-        }
-    }
     return HOVER_NONE;
+}
+
+static int browse_sidebar_control_at(app_t *a, int x, int y) {
+    if (x >= SIDEBAR_W || y < TOPBAR_H)
+        return HOVER_NONE;
+    int base = TOPBAR_H + 12;
+    if (a->series_episode_mode && point_in(x, y, 8, base, SIDEBAR_W - 16, 38))
+        return HOVER_BACK;
+    if (a->series_episode_mode)
+        base += 48;
+    if (point_in(x, y, 8, base, SIDEBAR_W - 16, 36))
+        return HOVER_CATEGORY_ALL;
+
+    int local = y - (base + 42);
+    if (local < 0 || local % 42 >= 36)
+        return HOVER_NONE;
+    int idx = a->category_scroll + local / 42;
+    if (idx < 0 || (size_t)idx >= ACTIVE_CATEGORIES(a).len)
+        return HOVER_NONE;
+    return HOVER_CATEGORY_BASE + idx;
+}
+
+static int browse_control_at(app_t *a, int x, int y) {
+    if (!a || a->screen != SCREEN_BROWSE)
+        return HOVER_NONE;
+    int control = browse_top_control_at(a, x, y);
+    return control != HOVER_NONE ? control : browse_sidebar_control_at(a, x, y);
 }
 
 /* Update browse hover. */
@@ -1103,49 +1142,59 @@ static void update_browse_hover(app_t *a, int x, int y) {
 }
 
 /* Handle the step browse animations operation. */
+static bool step_grid_scroll_animation(app_t *a, int64_t now, bool *scroll_changed) {
+    if (!a->grid_scroll_animating)
+        return false;
+    if (a->grid_scroll_last_ms <= 0)
+        a->grid_scroll_last_ms = now;
+    int64_t elapsed = now - a->grid_scroll_last_ms;
+    if (elapsed < 1)
+        elapsed = 1;
+    if (elapsed > 32)
+        elapsed = 32;
+    a->grid_scroll_last_ms = now;
+
+    int diff = a->grid_scroll_target - a->grid_scroll;
+    if (diff == 0) {
+        a->grid_scroll_animating = false;
+        return false;
+    }
+    int step = (int)((int64_t)diff * elapsed / 85LL);
+    if (step == 0)
+        step = diff > 0 ? 1 : -1;
+    if ((diff > 0 && step > diff) || (diff < 0 && step < diff))
+        step = diff;
+    a->grid_scroll += step;
+    *scroll_changed = true;
+    a->grid_scroll_animating = a->grid_scroll != a->grid_scroll_target;
+    return a->grid_scroll_animating;
+}
+
+static bool step_card_hover_animation(app_t *a, int64_t now) {
+    if (!a->hovered_card_valid)
+        return false;
+    bool active = vip_ui_motion_step(&a->hover_motion, now, 140);
+    if (a->hover_motion.value <= 0.0f && a->hover_motion.target <= 0.0f)
+        a->hovered_card_valid = false;
+    return active;
+}
+
+static bool step_control_hover_animation(app_t *a, int64_t now) {
+    return a->hovered_control != HOVER_NONE && vip_ui_motion_step(&a->control_motion, now, 120);
+}
+
 static bool step_browse_animations(app_t *a, int64_t now) {
     if (!a || a->screen != SCREEN_BROWSE)
         return false;
-    bool active = false;
+
     bool scroll_changed = false;
-    if (a->grid_scroll_animating) {
-        if (a->grid_scroll_last_ms <= 0)
-            a->grid_scroll_last_ms = now;
-        int64_t elapsed = now - a->grid_scroll_last_ms;
-        if (elapsed < 1)
-            elapsed = 1;
-        if (elapsed > 32)
-            elapsed = 32;
-        a->grid_scroll_last_ms = now;
-        int diff = a->grid_scroll_target - a->grid_scroll;
-        if (diff == 0) {
-            a->grid_scroll_animating = false;
-        } else {
-            int step = (int)((int64_t)diff * elapsed / 85LL);
-            if (step == 0)
-                step = diff > 0 ? 1 : -1;
-            if ((diff > 0 && step > diff) || (diff < 0 && step < diff))
-                step = diff;
-            a->grid_scroll += step;
-            scroll_changed = true;
-            if (a->grid_scroll == a->grid_scroll_target)
-                a->grid_scroll_animating = false;
-            else
-                active = true;
-        }
-    }
+    bool active = step_grid_scroll_animation(a, now, &scroll_changed);
     if (scroll_changed && a->mouse_inside)
         update_browse_hover(a, a->mouse_x, a->mouse_y);
-    if (a->hovered_card_valid) {
-        if (vip_ui_motion_step(&a->hover_motion, now, 140))
-            active = true;
-        if (a->hover_motion.value <= 0.0f && a->hover_motion.target <= 0.0f)
-            a->hovered_card_valid = false;
-    }
-    if (a->hovered_control != HOVER_NONE) {
-        if (vip_ui_motion_step(&a->control_motion, now, 120))
-            active = true;
-    }
+    if (step_card_hover_animation(a, now))
+        active = true;
+    if (step_control_hover_animation(a, now))
+        active = true;
     a->ui_motion_active = active;
     return active;
 }
@@ -1275,29 +1324,35 @@ static int compare_episode_channels(const void *lhs, const void *rhs) {
 }
 
 /* Sort season cards numerically while preserving their original category index in position. */
+static long season_category_number(const vip_channel_t *channel) {
+    if (!channel || !channel->category_id || !channel->category_id[0])
+        return LONG_MAX;
+    char *end = NULL;
+    long parsed = strtol(channel->category_id, &end, 10);
+    return end != channel->category_id && end && *end == '\0' ? parsed : LONG_MAX;
+}
+
+static int compare_long_values(long a, long b) {
+    if (a == b)
+        return 0;
+    return a < b ? -1 : 1;
+}
+
+static int compare_int_values(int a, int b) {
+    if (a == b)
+        return 0;
+    return a < b ? -1 : 1;
+}
+
 static int compare_season_channels(const void *lhs, const void *rhs) {
     const vip_channel_t *a = lhs;
     const vip_channel_t *b = rhs;
-    long av = LONG_MAX;
-    long bv = LONG_MAX;
-    if (a && a->category_id && a->category_id[0]) {
-        char *end = NULL;
-        long parsed = strtol(a->category_id, &end, 10);
-        if (end != a->category_id && end && *end == '\0')
-            av = parsed;
-    }
-    if (b && b->category_id && b->category_id[0]) {
-        char *end = NULL;
-        long parsed = strtol(b->category_id, &end, 10);
-        if (end != b->category_id && end && *end == '\0')
-            bv = parsed;
-    }
-    if (av != bv)
-        return av < bv ? -1 : 1;
-    int ap = a ? a->position : INT_MAX;
-    int bp = b ? b->position : INT_MAX;
-    if (ap != bp)
-        return ap < bp ? -1 : 1;
+    int by_category = compare_long_values(season_category_number(a), season_category_number(b));
+    if (by_category)
+        return by_category;
+    int by_position = compare_int_values(a ? a->position : INT_MAX, b ? b->position : INT_MAX);
+    if (by_position)
+        return by_position;
     return strcasecmp(a && a->name ? a->name : "", b && b->name ? b->name : "");
 }
 
