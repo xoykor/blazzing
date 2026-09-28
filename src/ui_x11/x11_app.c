@@ -5011,84 +5011,122 @@ static void draw_browse_sidebar(app_t *a) {
     }
 }
 
-/* Draw artwork, card chrome and artwork-local overlays. */
-static void draw_browse_card_artwork(app_t *a, vip_channel_t *ch, size_t chidx, const card_layout_t *layout,
-                                     int cx, int cy, int rr, int col, bool active_card, bool hovered,
-                                     float hover_eased) {
+/* Draw the card body and active/hover chrome before artwork content. */
+static void draw_browse_card_shell(app_t *a, const card_layout_t *layout, int cx, int cy,
+                                   bool active_card, float hover_eased) {
     if (a->renderer.active && active_card) {
         vip_ui_render_round_rect(&a->renderer, cx + 5, cy + 8 + (int)(3.0f * hover_eased),
                                  layout->card_w, layout->card_h, 18, 0x000000u, 0.62);
-        vip_ui_render_round_stroke(&a->renderer, cx - 3, cy - 3, layout->card_w + 6, layout->card_h + 6,
-                                   19, 0xFF5F2Eu, 0.80, 2.0);
+        vip_ui_render_round_stroke(&a->renderer, cx - 3, cy - 3, layout->card_w + 6,
+                                   layout->card_h + 6, 19, 0xFF5F2Eu, 0.80, 2.0);
     } else {
-        fill_round_rect(a, cx + 4, cy + 6 + (int)(3.0f * hover_eased), layout->card_w, layout->card_h,
-                        16, a->colors.black);
+        fill_round_rect(a, cx + 4, cy + 6 + (int)(3.0f * hover_eased),
+                        layout->card_w, layout->card_h, 16, a->colors.black);
     }
 
     fill_round_rect(a, cx, cy, layout->card_w, layout->card_h, 16, a->colors.panel2);
     if (active_card) {
-        stroke_round_rect(a, cx - 3, cy - 3, layout->card_w + 6, layout->card_h + 6, 18,
-                          a->colors.accent);
-        stroke_round_rect(a, cx - 1, cy - 1, layout->card_w + 2, layout->card_h + 2, 19,
-                          a->colors.text);
+        stroke_round_rect(a, cx - 3, cy - 3, layout->card_w + 6,
+                          layout->card_h + 6, 18, a->colors.accent);
+        stroke_round_rect(a, cx - 1, cy - 1, layout->card_w + 2,
+                          layout->card_h + 2, 19, a->colors.text);
     }
     fill_round_rect(a, cx, cy, layout->card_w, layout->art_h, 18, a->colors.black);
+}
 
+/* Load cached artwork or enqueue the same thumbnail request as before. */
+static void draw_browse_card_image(app_t *a, vip_channel_t *channel, const card_layout_t *layout,
+                                   int cx, int cy, int row_offset, int col, bool active_card) {
     vip_error_t error = {0};
-    char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
-    bool image_ok = path && draw_cached_image_contain(a, path, cx, cy, layout->card_w, layout->art_h);
+    char *path = vip_thumbnail_cache_path(a->cache_dir, channel->provider_id, channel->id, &error);
+    bool image_ok = path &&
+                    draw_cached_image_contain(a, path, cx, cy, layout->card_w, layout->art_h);
     bool can_load_image =
-        (ch->logo_url && ch->logo_url[0]) ||
-        strncmp(ch->stream_url ? ch->stream_url : "", "series://", 9u) != 0;
+        (channel->logo_url && channel->logo_url[0]) ||
+        strncmp(channel->stream_url ? channel->stream_url : "", "series://", 9u) != 0;
+
     if (!image_ok) {
         const char *placeholder = can_load_image ? "carregando imagem..." : "sem capa";
         if (a->renderer.active)
-            vip_ui_render_text(&a->renderer, cx + 8, cy + layout->art_h / 2 - 7, layout->card_w - 16,
-                               placeholder, "Sans 9", 0xAAB2C4u, 1.0, true);
+            vip_ui_render_text(&a->renderer, cx + 8, cy + layout->art_h / 2 - 7,
+                               layout->card_w - 16, placeholder, "Sans 9", 0xAAB2C4u,
+                               1.0, true);
         else
-            draw_centered(a, cx, cy + layout->art_h / 2 + 5, layout->card_w, placeholder, a->colors.muted);
+            draw_centered(a, cx, cy + layout->art_h / 2 + 5, layout->card_w,
+                          placeholder, a->colors.muted);
+
         if (can_load_image) {
-            int distance = rr >= 0 ? rr : -rr;
+            int distance = row_offset >= 0 ? row_offset : -row_offset;
             int64_t priority = 1000000LL - (int64_t)distance * 1000LL - col;
-            enqueue_thumbnail(a, ch, priority);
+            enqueue_thumbnail(a, channel, priority);
         }
     }
     free(path);
 
     stroke_round_rect(a, cx, cy, layout->card_w, layout->art_h, 18,
                       active_card ? a->colors.accent : a->colors.border);
-    if (hovered && hover_eased > 0.30f) {
-        int open_w = 78, open_h = 30;
-        int open_x = cx + 8, open_y = cy + layout->art_h - open_h - 8;
-        fill_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent2);
-        stroke_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent);
-        if (a->renderer.active)
-            vip_ui_render_text(&a->renderer, open_x, open_y + 7, open_w, "ABRIR", "Sans Bold 8",
-                               0xF6F7FBu, 1.0, true);
-        else
-            draw_centered_font(a, a->font_small, open_x, open_y + 20, open_w, "ABRIR", a->colors.text);
-    }
+}
 
-    bool favorite = a->favorite_flags && a->favorite_flags[chidx];
-    int card_fav_w = 58, card_fav_h = 28, card_fav_x = cx + layout->card_w - card_fav_w - 6,
-        card_fav_y = cy + 6;
-    fill_round_rect(a, card_fav_x, card_fav_y, card_fav_w, card_fav_h, 10,
-                    favorite ? a->colors.accent2 : a->colors.panel);
-    stroke_round_rect(a, card_fav_x, card_fav_y, card_fav_w, card_fav_h, 10,
-                      favorite ? a->colors.accent : a->colors.border);
-    draw_centered(a, card_fav_x, card_fav_y + 19, card_fav_w, favorite ? "SALVO" : "FAV",
-                  favorite ? a->colors.text : a->colors.muted);
+/* Draw the hover-only action over the artwork. */
+static void draw_browse_card_open_action(app_t *a, const card_layout_t *layout, int cx, int cy,
+                                         bool hovered, float hover_eased) {
+    if (!hovered || hover_eased <= 0.30f)
+        return;
 
-    const char *variant_label = media_variant_label(ch->name);
-    if (variant_label) {
-        int variant_w = strcmp(variant_label, "DUAL") == 0 ? 62 : 50;
-        int variant_x = cx + layout->card_w - variant_w - 6;
-        int variant_y = card_fav_y + card_fav_h + 6;
-        fill_round_rect(a, variant_x, variant_y, variant_w, 24, 9, a->colors.panel);
-        stroke_round_rect(a, variant_x, variant_y, variant_w, 24, 9, a->colors.accent);
-        draw_centered_font(a, a->font_small, variant_x, variant_y + 17, variant_w, variant_label,
+    const int open_w = 78, open_h = 30;
+    int open_x = cx + 8;
+    int open_y = cy + layout->art_h - open_h - 8;
+    fill_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent2);
+    stroke_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent);
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, open_x, open_y + 7, open_w, "ABRIR",
+                           "Sans Bold 8", 0xF6F7FBu, 1.0, true);
+    else
+        draw_centered_font(a, a->font_small, open_x, open_y + 20, open_w, "ABRIR",
                            a->colors.text);
-    }
+}
+
+/* Draw the favorite badge and return its bottom edge for stacked badges. */
+static int draw_browse_card_favorite_badge(app_t *a, size_t chidx, const card_layout_t *layout,
+                                           int cx, int cy) {
+    bool favorite = a->favorite_flags && a->favorite_flags[chidx];
+    const int width = 58, height = 28;
+    int x = cx + layout->card_w - width - 6;
+    int y = cy + 6;
+
+    fill_round_rect(a, x, y, width, height, 10,
+                    favorite ? a->colors.accent2 : a->colors.panel);
+    stroke_round_rect(a, x, y, width, height, 10,
+                      favorite ? a->colors.accent : a->colors.border);
+    draw_centered(a, x, y + 19, width, favorite ? "SALVO" : "FAV",
+                  favorite ? a->colors.text : a->colors.muted);
+    return y + height;
+}
+
+/* Draw the optional DUAL/LEG variant badge below the favorite badge. */
+static void draw_browse_card_variant_badge(app_t *a, const vip_channel_t *channel,
+                                           const card_layout_t *layout, int cx, int favorite_bottom) {
+    const char *label = media_variant_label(channel->name);
+    if (!label)
+        return;
+
+    int width = strcmp(label, "DUAL") == 0 ? 62 : 50;
+    int x = cx + layout->card_w - width - 6;
+    int y = favorite_bottom + 6;
+    fill_round_rect(a, x, y, width, 24, 9, a->colors.panel);
+    stroke_round_rect(a, x, y, width, 24, 9, a->colors.accent);
+    draw_centered_font(a, a->font_small, x, y + 17, width, label, a->colors.text);
+}
+
+/* Draw artwork, card chrome and artwork-local overlays. */
+static void draw_browse_card_artwork(app_t *a, vip_channel_t *channel, size_t chidx,
+                                     const card_layout_t *layout, int cx, int cy, int row_offset,
+                                     int col, bool active_card, bool hovered, float hover_eased) {
+    draw_browse_card_shell(a, layout, cx, cy, active_card, hover_eased);
+    draw_browse_card_image(a, channel, layout, cx, cy, row_offset, col, active_card);
+    draw_browse_card_open_action(a, layout, cx, cy, hovered, hover_eased);
+    int favorite_bottom = draw_browse_card_favorite_badge(a, chidx, layout, cx, cy);
+    draw_browse_card_variant_badge(a, channel, layout, cx, favorite_bottom);
 }
 
 /* Convert persisted progress to the clamped ratio used by the progress bar. */
