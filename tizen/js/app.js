@@ -795,61 +795,73 @@
         });
     }
 
-    function downloadAndStoreM3u(profile, kind, refreshing) {
-        setBusy(true, refreshing ? "Atualizando playlist…" : "Baixando playlist pela primeira vez…");
+    function showM3uDownloadError(error) {
+        setBusy(false);
+        showToast(error.message || "Falha ao baixar ou armazenar a playlist.");
+    }
 
-        if (realTizenDevice()) {
-            /*
-             * O XMLHttpRequest mantém responseText inteiro na heap JavaScript.
-             * Em uma playlist de ~85 MiB isso pode derrubar o Web Runtime da TV.
-             * O Download API do Tizen grava direto no filesystem e mantém a
-             * playlist fora da heap durante a transferência.
-             */
-            window.BlazzingStorage.downloadPlaylistToCache(profile.url, {
-                timeout: 180000,
-                maxBytes: window.BlazzingNet.MAX_RESPONSE_BYTES,
-                onProgress: function (receivedSize, totalSize) {
-                    var receivedMiB = Math.floor(receivedSize / (1024 * 1024));
-                    var totalMiB = totalSize > 0 ?
-                        Math.floor(totalSize / (1024 * 1024)) : 0;
-                    setBusy(
-                        true,
-                        refreshing ?
-                            "Atualizando playlist… " + receivedMiB +
-                                (totalMiB ? "/" + totalMiB : "") + " MiB" :
-                            "Baixando playlist… " + receivedMiB +
-                                (totalMiB ? "/" + totalMiB : "") + " MiB"
-                    );
-                }
-            }).then(function () {
-                return openStoredM3u(profile, kind);
-            }).catch(function (error) {
-                setBusy(false);
-                showToast(error.message || "Falha ao baixar ou armazenar a playlist.");
-            });
-            return;
+    function playlistDownloadProgress(refreshing, receivedSize, totalSize) {
+        var receivedMiB = Math.floor(receivedSize / (1024 * 1024));
+        var totalMiB = totalSize > 0 ?
+            Math.floor(totalSize / (1024 * 1024)) : 0;
+        var prefix = refreshing ? "Atualizando playlist… " : "Baixando playlist… ";
+
+        setBusy(
+            true,
+            prefix + receivedMiB + (totalMiB ? "/" + totalMiB : "") + " MiB"
+        );
+    }
+
+    function downloadM3uToTizenCache(profile, kind, refreshing) {
+        /*
+         * O XMLHttpRequest mantém responseText inteiro na heap JavaScript.
+         * Em uma playlist de ~85 MiB isso pode derrubar o Web Runtime da TV.
+         * O Download API do Tizen grava direto no filesystem e mantém a
+         * playlist fora da heap durante a transferência.
+         */
+        return window.BlazzingStorage.downloadPlaylistToCache(profile.url, {
+            timeout: 180000,
+            maxBytes: window.BlazzingNet.MAX_RESPONSE_BYTES,
+            onProgress: function (receivedSize, totalSize) {
+                playlistDownloadProgress(refreshing, receivedSize, totalSize);
+            }
+        }).then(function () {
+            return openStoredM3u(profile, kind);
+        });
+    }
+
+    function cacheDownloadedM3u(profile, text) {
+        if (text.indexOf("#EXTM3U") === -1 &&
+                text.indexOf("#EXTINF:") === -1) {
+            throw new Error("O conteúdo recebido não parece ser uma playlist M3U.");
         }
+        return window.BlazzingStorage.saveCachedPlaylist(profile.url, text);
+    }
 
+    function downloadM3uInBrowser(profile, kind) {
         /*
          * Fallback para navegador/ambiente de desenvolvimento. Em TV real
          * nunca caímos neste XHR, pois materializar listas gigantes em
          * responseText é justamente o comportamento que queremos evitar.
          */
-        window.BlazzingNet.text(profile.url, {
+        return window.BlazzingNet.text(profile.url, {
             timeout: 60000,
             maxBytes: window.BlazzingNet.MAX_RESPONSE_BYTES
         }).then(function (text) {
-            if (text.indexOf("#EXTM3U") === -1 &&
-                    text.indexOf("#EXTINF:") === -1) {
-                throw new Error("O conteúdo recebido não parece ser uma playlist M3U.");
-            }
-            return window.BlazzingStorage.saveCachedPlaylist(profile.url, text);
+            return cacheDownloadedM3u(profile, text);
         }).then(function () {
             return openStoredM3u(profile, kind);
-        }).catch(function (error) {
-            setBusy(false);
-            showToast(error.message || "Falha ao baixar ou armazenar a playlist.");
         });
+    }
+
+    function downloadAndStoreM3u(profile, kind, refreshing) {
+        var download;
+
+        setBusy(true, refreshing ? "Atualizando playlist…" : "Baixando playlist pela primeira vez…");
+        download = realTizenDevice() ?
+            downloadM3uToTizenCache(profile, kind, refreshing) :
+            downloadM3uInBrowser(profile, kind);
+        download.catch(showM3uDownloadError);
     }
 
     function connectM3u(profile, forceReload, kind) {
