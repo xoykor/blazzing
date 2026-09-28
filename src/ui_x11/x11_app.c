@@ -883,37 +883,61 @@ static artwork_mode_t default_artwork_mode(const app_t *a) {
 }
 
 /* Handle the detect artwork mode operation. */
-static artwork_mode_t detect_artwork_mode(app_t *a) {
-    int portrait = 0, landscape = 0, square = 0, sampled = 0;
-    size_t limit = a->filtered_len < 24u ? a->filtered_len : 24u;
-    for (size_t i = 0; i < limit; ++i) {
-        size_t chidx = a->filtered[i];
-        if (chidx >= ACTIVE_CHANNELS(a).len)
-            continue;
-        vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
-        vip_error_t error = {0};
-        char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
-        image_slot_t *slot = path ? image_cache_slot_get(a, path) : NULL;
-        free(path);
-        if (!slot || !slot->image || slot->image->height <= 0)
-            continue;
-        double ratio = (double)slot->image->width / (double)slot->image->height;
-        if (ratio < 0.88)
-            ++portrait;
-        else if (ratio > 1.18)
-            ++landscape;
-        else
-            ++square;
-        ++sampled;
-    }
-    artwork_mode_t fallback = default_artwork_mode(a);
-    if (sampled < 3)
-        return fallback;
+static bool sample_artwork_shape(app_t *a,
+                                 const vip_channel_t *ch,
+                                 int *portrait,
+                                 int *landscape,
+                                 int *square) {
+    vip_error_t error = {0};
+    char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
+    image_slot_t *slot = path ? image_cache_slot_get(a, path) : NULL;
+    free(path);
+    if (!slot || !slot->image || slot->image->height <= 0)
+        return false;
+
+    double ratio = (double)slot->image->width / (double)slot->image->height;
+    if (ratio < 0.88)
+        ++*portrait;
+    else if (ratio > 1.18)
+        ++*landscape;
+    else
+        ++*square;
+    return true;
+}
+
+static artwork_mode_t dominant_artwork_mode(int portrait,
+                                            int landscape,
+                                            int square,
+                                            artwork_mode_t fallback) {
     if (portrait >= landscape && portrait >= square)
         return ART_PORTRAIT;
     if (landscape >= portrait && landscape >= square)
         return ART_LANDSCAPE;
-    return ART_SQUARE;
+    if (square > 0)
+        return ART_SQUARE;
+    return fallback;
+}
+
+static artwork_mode_t detect_artwork_mode(app_t *a) {
+    int portrait = 0;
+    int landscape = 0;
+    int square = 0;
+    int sampled = 0;
+    size_t limit = a->filtered_len < 24u ? a->filtered_len : 24u;
+
+    for (size_t i = 0; i < limit; ++i) {
+        size_t chidx = a->filtered[i];
+        if (chidx >= ACTIVE_CHANNELS(a).len)
+            continue;
+        if (sample_artwork_shape(a, &ACTIVE_CHANNELS(a).items[chidx],
+                                 &portrait, &landscape, &square))
+            ++sampled;
+    }
+
+    artwork_mode_t fallback = default_artwork_mode(a);
+    if (sampled < 3)
+        return fallback;
+    return dominant_artwork_mode(portrait, landscape, square, fallback);
 }
 
 /* Handle the details panel active operation. */
@@ -991,29 +1015,54 @@ static card_layout_t browse_layout(app_t *a) {
 }
 
 /* Handle the browse card at operation. */
+static bool details_panel_blocks_point(app_t *a, int x, int y) {
+    if (!details_panel_active(a))
+        return false;
+
+    int px, py, pw, ph;
+    details_panel_geometry(a, &px, &py, &pw, &ph);
+    return point_in(x, y, px, py, pw, ph) || x >= px - 12;
+}
+
+static bool browse_grid_position(card_layout_t layout,
+                                 int relx,
+                                 int rely,
+                                 int *col_out,
+                                 int *row_out) {
+    if (relx < 0 || rely < 0)
+        return false;
+
+    int col = relx / (layout.card_w + GRID_GAP);
+    int row = rely / layout.row_step;
+    if (col < 0 || col >= layout.cols)
+        return false;
+    if (relx % (layout.card_w + GRID_GAP) >= layout.card_w)
+        return false;
+    if (rely % layout.row_step >= layout.card_h)
+        return false;
+
+    *col_out = col;
+    *row_out = row;
+    return true;
+}
+
 static bool browse_card_at(app_t *a, int x, int y, size_t *fidx_out) {
     if (!a || a->screen != SCREEN_BROWSE || a->filtered_len == 0u)
         return false;
-    card_layout_t layout = browse_layout(a);
+
     int content_x = SIDEBAR_W + 20;
     int content_y = TOPBAR_H + 18;
     if (x < content_x || y < content_y || x >= a->width || y >= a->height)
         return false;
-    if (details_panel_active(a)) {
-        int px, py, pw, ph;
-        details_panel_geometry(a, &px, &py, &pw, &ph);
-        if (point_in(x, y, px, py, pw, ph) || x >= px - 12)
-            return false;
-    }
-    int relx = x - content_x;
-    int rely = y - content_y + a->grid_scroll;
-    if (relx < 0 || rely < 0)
+    if (details_panel_blocks_point(a, x, y))
         return false;
-    int col = relx / (layout.card_w + GRID_GAP);
-    int row = rely / layout.row_step;
-    if (col < 0 || col >= layout.cols || relx % (layout.card_w + GRID_GAP) >= layout.card_w ||
-        rely % layout.row_step >= layout.card_h)
+
+    card_layout_t layout = browse_layout(a);
+    int col = 0;
+    int row = 0;
+    if (!browse_grid_position(layout, x - content_x, y - content_y + a->grid_scroll, &col, &row))
         return false;
+
     size_t fidx = (size_t)row * (size_t)layout.cols + (size_t)col;
     if (fidx >= a->filtered_len)
         return false;
@@ -1023,48 +1072,69 @@ static bool browse_card_at(app_t *a, int x, int y, size_t *fidx_out) {
 }
 
 /* Handle the browse control at operation. */
-static int browse_control_at(app_t *a, int x, int y) {
-    if (!a || a->screen != SCREEN_BROWSE)
-        return HOVER_NONE;
+static int browse_topbar_control_at(app_t *a, int x, int y) {
     const int tab_x[3] = {8, 88, 174};
     const int tab_w[3] = {74, 80, 88};
     if (y >= 12 && y < 58 && x < SIDEBAR_W) {
-        for (int k = 0; k < 3; ++k)
+        for (int k = 0; k < 3; ++k) {
             if (point_in(x, y, tab_x[k], 12, tab_w[k], 46))
                 return HOVER_TAB_BASE + k;
+        }
     }
-    int list_w = 94, fav_w = 174;
+
+    int list_w = 94;
+    int fav_w = 174;
     int list_x = a->width - list_w - 18;
     int fav_x = list_x - fav_w - 10;
     int search_w = fav_x - (SIDEBAR_W + 18) - 10;
     if (search_w < 180)
         search_w = 180;
+
     if (point_in(x, y, SIDEBAR_W + 18, 12, search_w, 46))
         return HOVER_SEARCH;
     if (point_in(x, y, fav_x, 12, fav_w, 46))
         return HOVER_FAVORITES;
     if (point_in(x, y, list_x, 12, list_w, 46))
         return HOVER_LISTS;
-    if (x < SIDEBAR_W && y >= TOPBAR_H) {
-        int base = TOPBAR_H + 12;
-        if (a->series_episode_mode) {
-            if (point_in(x, y, 8, base, SIDEBAR_W - 16, 38))
-                return HOVER_BACK;
-            base += 48;
-        }
-        if (point_in(x, y, 8, base, SIDEBAR_W - 16, 36))
-            return HOVER_CATEGORY_ALL;
-        int local = y - (base + 42);
-        if (local >= 0) {
-            int row = local / 42;
-            if (local % 42 < 36) {
-                int idx = a->category_scroll + row;
-                if (idx >= 0 && (size_t)idx < ACTIVE_CATEGORIES(a).len)
-                    return HOVER_CATEGORY_BASE + idx;
-            }
-        }
-    }
     return HOVER_NONE;
+}
+
+static int browse_sidebar_control_at(app_t *a, int x, int y) {
+    if (x >= SIDEBAR_W || y < TOPBAR_H)
+        return HOVER_NONE;
+
+    int base = TOPBAR_H + 12;
+    if (a->series_episode_mode) {
+        if (point_in(x, y, 8, base, SIDEBAR_W - 16, 38))
+            return HOVER_BACK;
+        base += 48;
+    }
+
+    if (point_in(x, y, 8, base, SIDEBAR_W - 16, 36))
+        return HOVER_CATEGORY_ALL;
+
+    int local = y - (base + 42);
+    if (local < 0)
+        return HOVER_NONE;
+
+    int row = local / 42;
+    if (local % 42 >= 36)
+        return HOVER_NONE;
+
+    int idx = a->category_scroll + row;
+    if (idx < 0 || (size_t)idx >= ACTIVE_CATEGORIES(a).len)
+        return HOVER_NONE;
+    return HOVER_CATEGORY_BASE + idx;
+}
+
+static int browse_control_at(app_t *a, int x, int y) {
+    if (!a || a->screen != SCREEN_BROWSE)
+        return HOVER_NONE;
+
+    int topbar = browse_topbar_control_at(a, x, y);
+    if (topbar != HOVER_NONE)
+        return topbar;
+    return browse_sidebar_control_at(a, x, y);
 }
 
 /* Update browse hover. */
@@ -1275,30 +1345,33 @@ static int compare_episode_channels(const void *lhs, const void *rhs) {
 }
 
 /* Sort season cards numerically while preserving their original category index in position. */
+static long season_category_number(const vip_channel_t *channel) {
+    if (!channel || !channel->category_id || !channel->category_id[0])
+        return LONG_MAX;
+
+    char *end = NULL;
+    long parsed = strtol(channel->category_id, &end, 10);
+    if (end == channel->category_id || !end || *end != '\0')
+        return LONG_MAX;
+    return parsed;
+}
+
 static int compare_season_channels(const void *lhs, const void *rhs) {
     const vip_channel_t *a = lhs;
     const vip_channel_t *b = rhs;
-    long av = LONG_MAX;
-    long bv = LONG_MAX;
-    if (a && a->category_id && a->category_id[0]) {
-        char *end = NULL;
-        long parsed = strtol(a->category_id, &end, 10);
-        if (end != a->category_id && end && *end == '\0')
-            av = parsed;
-    }
-    if (b && b->category_id && b->category_id[0]) {
-        char *end = NULL;
-        long parsed = strtol(b->category_id, &end, 10);
-        if (end != b->category_id && end && *end == '\0')
-            bv = parsed;
-    }
+    long av = season_category_number(a);
+    long bv = season_category_number(b);
     if (av != bv)
         return av < bv ? -1 : 1;
+
     int ap = a ? a->position : INT_MAX;
     int bp = b ? b->position : INT_MAX;
     if (ap != bp)
         return ap < bp ? -1 : 1;
-    return strcasecmp(a && a->name ? a->name : "", b && b->name ? b->name : "");
+
+    const char *an = a && a->name ? a->name : "";
+    const char *bn = b && b->name ? b->name : "";
+    return strcasecmp(an, bn);
 }
 
 static void sort_episode_channels(vip_channel_list_t *channels) {
@@ -1388,29 +1461,44 @@ static void draw_card_title(app_t *a, int x, int y, int width, const char *text,
 }
 
 /* Format the compact season/episode label shown under episode cards. */
+static int xtream_episode_season(const vip_channel_t *ch) {
+    if (!ch || !ch->category_id || !ch->category_id[0])
+        return 0;
+
+    char *end = NULL;
+    long parsed = strtol(ch->category_id, &end, 10);
+    if (end == ch->category_id || !end || *end != '\0')
+        return 0;
+    if (parsed < 0 || parsed > INT_MAX)
+        return 0;
+    return (int)parsed;
+}
+
+static bool episode_numbers(const app_t *a,
+                            const vip_channel_t *ch,
+                            int *season,
+                            int *episode) {
+    if (a->login_mode == LOGIN_M3U) {
+        char series_name[256];
+        return vip_m3u_parse_episode_label(ch->name, series_name, sizeof(series_name), season, episode);
+    }
+
+    *season = xtream_episode_season(ch);
+    *episode = ch->position;
+    return true;
+}
+
 static bool episode_card_meta(const app_t *a, const vip_channel_t *ch, char *buffer, size_t cap) {
-    if (!a || !ch || !buffer || cap == 0u || !a->series_episode_mode || a->series_season_select)
+    if (!a || !ch || !buffer || cap == 0u)
+        return false;
+    if (!a->series_episode_mode || a->series_season_select)
         return false;
 
     int season = 0;
     int episode = 0;
-
-    if (a->login_mode == LOGIN_M3U) {
-        char series_name[256];
-        if (!vip_m3u_parse_episode_label(ch->name, series_name, sizeof(series_name), &season, &episode))
-            return false;
-    } else {
-        if (ch->category_id && ch->category_id[0]) {
-            char *end = NULL;
-            long parsed = strtol(ch->category_id, &end, 10);
-            if (end != ch->category_id && end && *end == '\0' && parsed >= 0 && parsed <= INT_MAX)
-                season = (int)parsed;
-        }
-        episode = ch->position;
-    }
-
-    if (episode <= 0)
+    if (!episode_numbers(a, ch, &season, &episode) || episode <= 0)
         return false;
+
     if (season > 0)
         snprintf(buffer, cap, "T%d · E%d", season, episode);
     else
@@ -1924,6 +2012,60 @@ static size_t prefetch_thumbnail_list(app_t *a, vip_channel_list_t *channels, si
  * Quando uma imagem falha, a próxima volta pelo catálogo a coloca na fila
  * novamente; portanto o carregamento não morre silenciosamente.
  */
+static size_t consume_prefetch_budget(size_t budget, size_t used) {
+    return budget - (used > budget ? budget : used);
+}
+
+static size_t prefetch_primary_thumbnails(app_t *a,
+                                          bool episode_source,
+                                          vip_channel_list_t *series_source,
+                                          int active_kind,
+                                          size_t budget) {
+    const size_t primary_budget = (THUMB_PREFETCH_BATCH * 3u) / 4u;
+    size_t used = 0u;
+    if (episode_source) {
+        used = prefetch_thumbnail_list(a, series_source, &a->episode_prefetch_cursor, primary_budget,
+                                       THUMB_BACKGROUND_PRIORITY + 1000LL);
+    } else if (active_kind >= 0 && active_kind < 3 && a->catalogs[active_kind].loaded) {
+        used = prefetch_thumbnail_list(a, &a->catalogs[active_kind].channels,
+                                       &a->thumb_prefetch_cursor[active_kind], primary_budget,
+                                       THUMB_BACKGROUND_PRIORITY + 1000LL);
+    }
+    return consume_prefetch_budget(budget, used);
+}
+
+static size_t count_secondary_thumbnail_sources(app_t *a, bool episode_source, int active_kind) {
+    size_t count = 0u;
+    for (int k = 0; k < 3; ++k) {
+        if (!episode_source && k == active_kind)
+            continue;
+        if (a->catalogs[k].loaded && a->catalogs[k].channels.len > 0u)
+            ++count;
+    }
+    return count;
+}
+
+static void prefetch_secondary_thumbnails(app_t *a,
+                                          bool episode_source,
+                                          int active_kind,
+                                          size_t budget) {
+    size_t sources = count_secondary_thumbnail_sources(a, episode_source, active_kind);
+    for (int k = 0; k < 3 && budget > 0u && sources > 0u; ++k) {
+        if (!episode_source && k == active_kind)
+            continue;
+
+        catalog_t *catalog = &a->catalogs[k];
+        if (!catalog->loaded || catalog->channels.len == 0u)
+            continue;
+
+        size_t quota = (budget + sources - 1u) / sources;
+        size_t used = prefetch_thumbnail_list(a, &catalog->channels, &a->thumb_prefetch_cursor[k], quota,
+                                              THUMB_BACKGROUND_PRIORITY);
+        budget = consume_prefetch_budget(budget, used);
+        --sources;
+    }
+}
+
 static void prefetch_thumbnail_batch(app_t *a) {
     if (!a || !a->thumbs || a->screen == SCREEN_LOGIN || !a->active_profile_id[0])
         return;
@@ -1933,45 +2075,14 @@ static void prefetch_thumbnail_batch(app_t *a) {
         return;
     a->thumb_prefetch_next_ms = now + THUMB_PREFETCH_INTERVAL_MS;
 
-    size_t budget = THUMB_PREFETCH_BATCH;
-    const size_t primary_budget = (THUMB_PREFETCH_BATCH * 3u) / 4u;
-    vip_channel_list_t *series_source = a->series_season_select ? &a->season_channels : &a->episode_channels;
+    vip_channel_list_t *series_source =
+        a->series_season_select ? &a->season_channels : &a->episode_channels;
     bool episode_source = a->series_episode_mode && series_source->len > 0u;
     int active_kind = (int)a->content_kind;
 
-    /* Spend most of every batch on what the user can actually see. Older
-       versions split bandwidth evenly across TV/VOD/series, making the active
-       catalog look slow even while invisible catalogs were downloading. */
-    if (episode_source) {
-        size_t used = prefetch_thumbnail_list(a, series_source, &a->episode_prefetch_cursor, primary_budget,
-                                              THUMB_BACKGROUND_PRIORITY + 1000LL);
-        budget -= used > budget ? budget : used;
-    } else if (active_kind >= 0 && active_kind < 3 && a->catalogs[active_kind].loaded) {
-        size_t used = prefetch_thumbnail_list(a, &a->catalogs[active_kind].channels,
-                                              &a->thumb_prefetch_cursor[active_kind], primary_budget,
-                                              THUMB_BACKGROUND_PRIORITY + 1000LL);
-        budget -= used > budget ? budget : used;
-    }
-
-    size_t secondary_sources = 0u;
-    for (int k = 0; k < 3; ++k) {
-        if (!episode_source && k == active_kind)
-            continue;
-        if (a->catalogs[k].loaded && a->catalogs[k].channels.len > 0u)
-            ++secondary_sources;
-    }
-    for (int k = 0; k < 3 && budget > 0u && secondary_sources > 0u; ++k) {
-        if (!episode_source && k == active_kind)
-            continue;
-        catalog_t *catalog = &a->catalogs[k];
-        if (!catalog->loaded || catalog->channels.len == 0u)
-            continue;
-        size_t quota = (budget + secondary_sources - 1u) / secondary_sources;
-        size_t used = prefetch_thumbnail_list(a, &catalog->channels, &a->thumb_prefetch_cursor[k], quota,
-                                              THUMB_BACKGROUND_PRIORITY);
-        budget -= used > budget ? budget : used;
-        --secondary_sources;
-    }
+    size_t budget = prefetch_primary_thumbnails(a, episode_source, series_source, active_kind,
+                                                THUMB_PREFETCH_BATCH);
+    prefetch_secondary_thumbnails(a, episode_source, active_kind, budget);
 }
 
 /* Handle the login one server operation. */
@@ -3888,16 +3999,16 @@ static bool stream_needs_forced_hls(const char *url) {
 
 /* Enter playback without destroying the mpv process: loadfile is sent over
  * IPC and optional resume position is applied after the file is loaded. */
-static void enter_player(app_t *a, size_t channel_index) {
-    if (channel_index >= ACTIVE_CHANNELS(a).len || !a->player)
-        return;
+static void begin_player_session(app_t *a, size_t channel_index) {
     if (a->screen == SCREEN_PLAYER)
         save_current_progress(a, true);
+
     a->current_channel = channel_index;
     a->player_item_live = a->content_kind == CONTENT_LIVE && !a->series_episode_mode;
     a->screen = SCREEN_PLAYER;
     if (!a->fullscreen_requested)
         set_fullscreen(a, true);
+
     snprintf(a->player_status, sizeof(a->player_status), "Abrindo stream...");
     a->player_open_ms = monotonic_ms();
     a->player_last_progress_save_ms = a->player_open_ms;
@@ -3905,38 +4016,58 @@ static void enter_player(app_t *a, size_t channel_index) {
     a->player_fallback_attempt = 0u;
     a->player_xtream_alt_attempted = false;
     a->timeline_dragging = false;
-    /* O player não pausa mais o pipeline de thumbnails: o cache continua
-       sendo preenchido mesmo durante a reprodução. */
     set_video_visible(a, true);
     focus_player_input(a);
-    /* This child is only a graphics container. mpv creates its own native
-       X11/GL window, which the player backend reparents into this container. */
     XSync(a->dpy, False);
-    if (getenv("VIPTV_MPV_DEBUG")) {
-        XWindowAttributes wa;
-        if (XGetWindowAttributes(a->dpy, a->video_win, &wa))
-            fprintf(stderr, "[mpv-debug] container-window mapped=%s size=%dx%d\n",
-                    wa.map_state == IsViewable ? "yes" : "no", wa.width, wa.height);
-    }
+}
+
+static void log_player_container(app_t *a) {
+    if (!getenv("VIPTV_MPV_DEBUG"))
+        return;
+
+    XWindowAttributes wa;
+    if (XGetWindowAttributes(a->dpy, a->video_win, &wa))
+        fprintf(stderr, "[mpv-debug] container-window mapped=%s size=%dx%d\n",
+                wa.map_state == IsViewable ? "yes" : "no", wa.width, wa.height);
+}
+
+static double saved_resume_position(app_t *a, const vip_channel_t *ch) {
+    if (a->player_item_live || !a->db)
+        return 0.0;
+
+    vip_watch_progress_t saved = {0};
+    vip_error_t db_error = {0};
+    if (vip_database_get_progress(a->db, ch->provider_id, ch->id, &saved, &db_error) != VIP_OK)
+        return 0.0;
+    if (saved.completed || saved.position_seconds <= 5.0)
+        return 0.0;
+    if (saved.duration_seconds > 0.0 && saved.position_seconds >= saved.duration_seconds - 20.0)
+        return 0.0;
+    return saved.position_seconds;
+}
+
+static vip_status_t load_player_channel(app_t *a,
+                                        const vip_channel_t *ch,
+                                        double resume,
+                                        vip_error_t *error) {
+    if (a->player_item_live && stream_needs_forced_hls(ch->stream_url))
+        return vip_mpv_player_load_hls(a->player, ch->stream_url, error);
+    if (resume > 0.0)
+        return vip_mpv_player_load_at(a->player, ch->stream_url, resume, error);
+    return vip_mpv_player_load(a->player, ch->stream_url, error);
+}
+
+static void enter_player(app_t *a, size_t channel_index) {
+    if (channel_index >= ACTIVE_CHANNELS(a).len || !a->player)
+        return;
+
+    begin_player_session(a, channel_index);
+    log_player_container(a);
+
     vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[channel_index];
-    double resume = 0.0;
-    if (!a->player_item_live && a->db) {
-        vip_watch_progress_t saved = {0};
-        vip_error_t db_error = {0};
-        if (vip_database_get_progress(a->db, ch->provider_id, ch->id, &saved, &db_error) == VIP_OK &&
-            !saved.completed && saved.position_seconds > 5.0 &&
-            (saved.duration_seconds <= 0.0 || saved.position_seconds < saved.duration_seconds - 20.0))
-            resume = saved.position_seconds;
-    }
+    double resume = saved_resume_position(a, ch);
     vip_error_t error = {0};
-    vip_status_t st;
-    if (a->player_item_live && stream_needs_forced_hls(ch->stream_url)) {
-        st = vip_mpv_player_load_hls(a->player, ch->stream_url, &error);
-    } else if (resume > 0.0) {
-        st = vip_mpv_player_load_at(a->player, ch->stream_url, resume, &error);
-    } else {
-        st = vip_mpv_player_load(a->player, ch->stream_url, &error);
-    }
+    vip_status_t st = load_player_channel(a, ch, resume, &error);
     if (st != VIP_OK)
         snprintf(a->player_status, sizeof(a->player_status), "%s", error.message);
     fprintf(stderr, "[player] %s%s\n", ch->name, resume > 0.0 ? " (retomado)" : "");
