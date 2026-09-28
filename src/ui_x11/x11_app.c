@@ -4555,48 +4555,56 @@ static void enqueue_detail_artwork(app_t *a, const vip_channel_t *ch, const char
 }
 
 /* Draw details panel. */
-static void draw_details_panel(app_t *a) {
-    if (!details_panel_active(a) || a->filtered_len == 0u)
-        return;
-    if (a->focused_filtered >= a->filtered_len)
-        a->focused_filtered = a->filtered_len - 1u;
-    size_t chidx = a->filtered[a->focused_filtered];
-    if (chidx >= ACTIVE_CHANNELS(a).len)
-        return;
-    vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
+typedef struct {
+    char loaded_id[128];
+    char status[256];
+    char plot[3072];
+    char cover[1024];
+    char backdrop[1024];
+    char genre[256];
+    char release_date[128];
+    char rating[64];
+    char duration[128];
+    char cast[768];
+    char director[512];
+} details_view_data_t;
 
-    int px, py, pw, ph;
-    details_panel_geometry(a, &px, &py, &pw, &ph);
+static void read_details_view_data(app_t *a, details_view_data_t *data) {
+    pthread_mutex_lock(&a->data_mutex);
+    snprintf(data->loaded_id, sizeof(data->loaded_id), "%s", a->details_media_id);
+    snprintf(data->status, sizeof(data->status), "%s", a->details_status);
+    snprintf(data->plot, sizeof(data->plot), "%s", a->details_metadata.plot ? a->details_metadata.plot : "");
+    snprintf(data->cover, sizeof(data->cover), "%s",
+             a->details_metadata.cover_url ? a->details_metadata.cover_url : "");
+    snprintf(data->backdrop, sizeof(data->backdrop), "%s",
+             a->details_metadata.backdrop_url ? a->details_metadata.backdrop_url : "");
+    snprintf(data->genre, sizeof(data->genre), "%s",
+             a->details_metadata.genre ? a->details_metadata.genre : "");
+    snprintf(data->release_date, sizeof(data->release_date), "%s",
+             a->details_metadata.release_date ? a->details_metadata.release_date : "");
+    snprintf(data->rating, sizeof(data->rating), "%s",
+             a->details_metadata.rating ? a->details_metadata.rating : "");
+    snprintf(data->duration, sizeof(data->duration), "%s",
+             a->details_metadata.duration ? a->details_metadata.duration : "");
+    snprintf(data->cast, sizeof(data->cast), "%s", a->details_metadata.cast ? a->details_metadata.cast : "");
+    snprintf(data->director, sizeof(data->director), "%s",
+             a->details_metadata.director ? a->details_metadata.director : "");
+    pthread_mutex_unlock(&a->data_mutex);
+}
+
+static void draw_details_surface(app_t *a, int px, int py, int pw, int ph) {
     if (a->renderer.active) {
         vip_ui_render_round_rect(&a->renderer, px + 5, py + 8, pw, ph, 20, 0x000000u, 0.55);
         vip_ui_render_round_rect(&a->renderer, px, py, pw, ph, 20, 0x111722u, 0.97);
         vip_ui_render_round_stroke(&a->renderer, px, py, pw, ph, 20, 0x343A48u, 1.0, 1.0);
-    } else {
-        fill_round_rect(a, px + 4, py + 6, pw, ph, 18, a->colors.black);
-        fill_round_rect(a, px, py, pw, ph, 18, a->colors.panel);
-        stroke_round_rect(a, px, py, pw, ph, 18, a->colors.border);
+        return;
     }
+    fill_round_rect(a, px + 4, py + 6, pw, ph, 18, a->colors.black);
+    fill_round_rect(a, px, py, pw, ph, 18, a->colors.panel);
+    stroke_round_rect(a, px, py, pw, ph, 18, a->colors.border);
+}
 
-    char loaded_id[128], status[256], plot[3072], cover[1024], backdrop[1024];
-    char genre[256], release_date[128], rating[64], duration[128], cast[768], director[512];
-    pthread_mutex_lock(&a->data_mutex);
-    snprintf(loaded_id, sizeof(loaded_id), "%s", a->details_media_id);
-    snprintf(status, sizeof(status), "%s", a->details_status);
-    snprintf(plot, sizeof(plot), "%s", a->details_metadata.plot ? a->details_metadata.plot : "");
-    snprintf(cover, sizeof(cover), "%s", a->details_metadata.cover_url ? a->details_metadata.cover_url : "");
-    snprintf(backdrop, sizeof(backdrop), "%s",
-             a->details_metadata.backdrop_url ? a->details_metadata.backdrop_url : "");
-    snprintf(genre, sizeof(genre), "%s", a->details_metadata.genre ? a->details_metadata.genre : "");
-    snprintf(release_date, sizeof(release_date), "%s",
-             a->details_metadata.release_date ? a->details_metadata.release_date : "");
-    snprintf(rating, sizeof(rating), "%s", a->details_metadata.rating ? a->details_metadata.rating : "");
-    snprintf(duration, sizeof(duration), "%s",
-             a->details_metadata.duration ? a->details_metadata.duration : "");
-    snprintf(cast, sizeof(cast), "%s", a->details_metadata.cast ? a->details_metadata.cast : "");
-    snprintf(director, sizeof(director), "%s",
-             a->details_metadata.director ? a->details_metadata.director : "");
-    pthread_mutex_unlock(&a->data_mutex);
-
+static void draw_details_header(app_t *a, const vip_channel_t *ch, size_t chidx, int px, int py, int pw) {
     char title[256];
     bounded_text(title, sizeof(title), ch->name, 72);
     if (a->renderer.active)
@@ -4604,6 +4612,7 @@ static void draw_details_panel(app_t *a) {
                            false);
     else
         draw_text_font(a, a->font_heading, px + 16, py + 31, title, a->colors.text);
+
     bool favorite = a->favorite_flags && a->favorite_flags[chidx];
     int fav_w = 92, fav_h = 32, fav_x = px + pw - fav_w - 14, fav_y = py + 10;
     if (a->renderer.active) {
@@ -4613,18 +4622,21 @@ static void draw_details_panel(app_t *a) {
                                    favorite ? 0xFF5F2Eu : 0x343A48u, 1.0, 1.0);
         vip_ui_render_text(&a->renderer, fav_x, fav_y + 9, fav_w, favorite ? "SALVO" : "FAVORITAR",
                            favorite ? "Sans Bold 8" : "Sans 8", favorite ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
-    } else {
-        fill_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12, favorite ? a->colors.accent2 : a->colors.panel2);
-        stroke_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12, favorite ? a->colors.accent : a->colors.border);
-        draw_centered(a, fav_x, fav_y + 21, fav_w, favorite ? "SALVO" : "FAVORITAR",
-                      favorite ? a->colors.text : a->colors.muted);
+        return;
     }
+    fill_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12, favorite ? a->colors.accent2 : a->colors.panel2);
+    stroke_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12, favorite ? a->colors.accent : a->colors.border);
+    draw_centered(a, fav_x, fav_y + 21, fav_w, favorite ? "SALVO" : "FAVORITAR",
+                  favorite ? a->colors.text : a->colors.muted);
+}
 
-    bool current = ch->id && strcmp(loaded_id, ch->id) == 0;
+static int draw_details_art(app_t *a, const vip_channel_t *ch, const details_view_data_t *data,
+                            bool current, int px, int py, int pw) {
     int art_x = px + 16, art_y = py + 50, art_w = pw - 32, art_h = 170;
     fill_rect(a, art_x, art_y, (unsigned)art_w, (unsigned)art_h, a->colors.black);
+
     bool art_ok = false;
-    const char *art_url = backdrop[0] ? backdrop : cover;
+    const char *art_url = data->backdrop[0] ? data->backdrop : data->cover;
     if (current && art_url[0]) {
         char art_id[256];
         detail_art_id(art_id, sizeof(art_id), ch->id);
@@ -4639,51 +4651,77 @@ static void draw_details_panel(app_t *a) {
         draw_centered(a, art_x, art_y + art_h / 2 + 5, art_w,
                       current ? "carregando banner..." : "carregando detalhes...", a->colors.muted);
     stroke_rect(a, art_x, art_y, (unsigned)art_w, (unsigned)art_h, a->colors.border);
+    return art_y + art_h + 24;
+}
 
-    int y = art_y + art_h + 24;
-    if (!current) {
-        draw_text(a, px + 16, y, "Carregando detalhes da obra...", a->colors.muted);
-        return;
-    }
-
-    char facts[640] = {0};
+static void build_details_facts(const details_view_data_t *data, char *facts, size_t cap) {
     size_t used = 0u;
-    const char *values[4] = {release_date, genre, rating, duration};
+    const char *values[4] = {data->release_date, data->genre, data->rating, data->duration};
     const char *labels[4] = {"Data", "Gênero", "Nota", "Duração"};
     for (size_t i = 0; i < 4u; ++i) {
         if (!values[i][0])
             continue;
-        int n =
-            snprintf(facts + used, sizeof(facts) - used, "%s%s: %s", used ? " | " : "", labels[i], values[i]);
-        if (n < 0 || (size_t)n >= sizeof(facts) - used)
+        int n = snprintf(facts + used, cap - used, "%s%s: %s", used ? " | " : "", labels[i], values[i]);
+        if (n < 0 || (size_t)n >= cap - used)
             break;
         used += (size_t)n;
     }
+}
+
+static void draw_details_text(app_t *a, const details_view_data_t *data, int px, int py, int pw, int ph, int y) {
+    char facts[640] = {0};
+    build_details_facts(data, facts, sizeof(facts));
     if (facts[0]) {
         y = draw_wrapped_text(a, px + 16, y, pw - 32, facts, 2, a->colors.muted);
         y += 6;
     }
     draw_text(a, px + 16, y, "Sinopse", a->colors.text);
     y += 22;
-    if (plot[0])
-        y = draw_wrapped_text(a, px + 16, y, pw - 32, plot, 8, a->colors.muted);
+    if (data->plot[0])
+        y = draw_wrapped_text(a, px + 16, y, pw - 32, data->plot, 8, a->colors.muted);
     else {
         draw_text(a, px + 16, y, "O provider não enviou sinopse para este item.", a->colors.muted);
         y += 20;
     }
     y += 8;
-    if (director[0] && y < py + ph - 72) {
+    if (data->director[0] && y < py + ph - 72) {
         char line[600];
-        snprintf(line, sizeof(line), "Direção: %s", director);
+        snprintf(line, sizeof(line), "Direção: %s", data->director);
         y = draw_wrapped_text(a, px + 16, y, pw - 32, line, 2, a->colors.muted);
     }
-    if (cast[0] && y < py + ph - 48) {
+    if (data->cast[0] && y < py + ph - 48) {
         char line[880];
-        snprintf(line, sizeof(line), "Elenco: %s", cast);
+        snprintf(line, sizeof(line), "Elenco: %s", data->cast);
         (void)draw_wrapped_text(a, px + 16, y, pw - 32, line, 2, a->colors.muted);
     }
-    if (!plot[0] && status[0])
-        draw_text(a, px + 16, py + ph - 18, status, a->colors.muted);
+    if (!data->plot[0] && data->status[0])
+        draw_text(a, px + 16, py + ph - 18, data->status, a->colors.muted);
+}
+
+static void draw_details_panel(app_t *a) {
+    if (!details_panel_active(a) || a->filtered_len == 0u)
+        return;
+    if (a->focused_filtered >= a->filtered_len)
+        a->focused_filtered = a->filtered_len - 1u;
+    size_t chidx = a->filtered[a->focused_filtered];
+    if (chidx >= ACTIVE_CHANNELS(a).len)
+        return;
+    vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
+
+    int px, py, pw, ph;
+    details_panel_geometry(a, &px, &py, &pw, &ph);
+    draw_details_surface(a, px, py, pw, ph);
+
+    details_view_data_t data = {0};
+    read_details_view_data(a, &data);
+    draw_details_header(a, ch, chidx, px, py, pw);
+    bool current = ch->id && strcmp(data.loaded_id, ch->id) == 0;
+    int y = draw_details_art(a, ch, &data, current, px, py, pw);
+    if (!current) {
+        draw_text(a, px + 16, y, "Carregando detalhes da obra...", a->colors.muted);
+        return;
+    }
+    draw_details_text(a, &data, px, py, pw, ph, y);
 }
 
 /* Draw toast. */
@@ -5137,122 +5175,121 @@ static void sync_video_window(app_t *a) {
 }
 
 /* Draw player. */
-static void draw_player(app_t *a) {
-    fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.black);
-    vip_mpv_player_snapshot_t snap = {0};
-    if (a->player)
-        vip_mpv_player_snapshot(a->player, &snap);
-    vip_player_state_t player_state = a->player ? snap.state : VIP_PLAYER_ERROR;
-    const char *state_text = a->player ? vip_mpv_player_state_name(player_state) : a->player_status;
-    bool hud = player_hud_visible(a);
+static void draw_player_header(app_t *a) {
+    if (a->fullscreen)
+        return;
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, 0, 0, a->width, PLAYER_HEADER_H, 0, 0x111722u, 0.97);
+        vip_ui_render_round_rect(&a->renderer, 12, 10, 132, 44, 13, 0x171C28u, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, 12, 10, 132, 44, 13, 0x343A48u, 1.0, 1.0);
+        vip_ui_render_text(&a->renderer, 28, 24, 104, "<  Voltar", "Sans SemiBold 10", 0xF6F7FBu, 1.0,
+                           false);
+        if (a->current_channel < ACTIVE_CHANNELS(a).len)
+            vip_ui_render_text(&a->renderer, 168, 22, a->width - 190,
+                               ACTIVE_CHANNELS(a).items[a->current_channel].name, "Sans Bold 12",
+                               0xF6F7FBu, 1.0, false);
+        return;
+    }
+    fill_rect(a, 0, 0, (unsigned)a->width, PLAYER_HEADER_H, a->colors.panel);
+    fill_round_rect(a, 12, 10, 132, 44, 13, a->colors.panel2);
+    stroke_round_rect(a, 12, 10, 132, 44, 13, a->colors.border);
+    draw_text(a, 28, 39, "< Voltar", a->colors.text);
+    if (a->current_channel < ACTIVE_CHANNELS(a).len)
+        draw_text_font(a, a->font_heading, 168, 39, ACTIVE_CHANNELS(a).items[a->current_channel].name,
+                       a->colors.text);
+}
 
-    if (!a->fullscreen) {
-        if (a->renderer.active) {
-            vip_ui_render_round_rect(&a->renderer, 0, 0, a->width, PLAYER_HEADER_H, 0, 0x111722u, 0.97);
-            vip_ui_render_round_rect(&a->renderer, 12, 10, 132, 44, 13, 0x171C28u, 1.0);
-            vip_ui_render_round_stroke(&a->renderer, 12, 10, 132, 44, 13, 0x343A48u, 1.0, 1.0);
-            vip_ui_render_text(&a->renderer, 28, 24, 104, "<  Voltar", "Sans SemiBold 10", 0xF6F7FBu, 1.0,
-                               false);
-            if (a->current_channel < ACTIVE_CHANNELS(a).len)
-                vip_ui_render_text(&a->renderer, 168, 22, a->width - 190,
-                                   ACTIVE_CHANNELS(a).items[a->current_channel].name, "Sans Bold 12",
-                                   0xF6F7FBu, 1.0, false);
-        } else {
-            fill_rect(a, 0, 0, (unsigned)a->width, PLAYER_HEADER_H, a->colors.panel);
-            fill_round_rect(a, 12, 10, 132, 44, 13, a->colors.panel2);
-            stroke_round_rect(a, 12, 10, 132, 44, 13, a->colors.border);
-            draw_text(a, 28, 39, "< Voltar", a->colors.text);
-            if (a->current_channel < ACTIVE_CHANNELS(a).len)
-                draw_text_font(a, a->font_heading, 168, 39, ACTIVE_CHANNELS(a).items[a->current_channel].name,
-                               a->colors.text);
-        }
+static void draw_player_control_buttons(app_t *a, const vip_mpv_player_snapshot_t *snap, int y) {
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, 10, y + 7, a->width - 20, PLAYER_CONTROLS_H - 12, 18,
+                                 0x111722u, 0.96);
+        vip_ui_render_round_stroke(&a->renderer, 10, y + 7, a->width - 20, PLAYER_CONTROLS_H - 12, 18,
+                                   0x343A48u, 0.95, 1.0);
+        vip_ui_render_round_rect(&a->renderer, 16, y + 18, 52, 46, 14, 0x171C28u, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, 16, y + 18, 52, 46, 14, 0x343A48u, 1.0, 1.0);
+        vip_ui_render_text(&a->renderer, 16, y + 31, 52, snap->paused ? ">" : "||", "Sans Bold 12",
+                           0xF6F7FBu, 1.0, true);
+        vip_ui_render_round_rect(&a->renderer, 76, y + 18, 82, 46, 14, 0x171C28u, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, 76, y + 18, 82, 46, 14, 0x343A48u, 1.0, 1.0);
+        vip_ui_render_text(&a->renderer, 76, y + 32, 82, "Voltar", "Sans SemiBold 9", 0xF6F7FBu, 1.0,
+                           true);
+        return;
+    }
+    fill_rect(a, 0, y, (unsigned)a->width, PLAYER_CONTROLS_H, a->colors.panel);
+    fill_rect(a, 0, y, (unsigned)a->width, 1, a->colors.border);
+    fill_round_rect(a, 16, y + 18, 52, 46, 14, a->colors.panel2);
+    stroke_round_rect(a, 16, y + 18, 52, 46, 14, a->colors.border);
+    draw_centered_font(a, a->font_heading, 16, y + 48, 52, snap->paused ? ">" : "||", a->colors.text);
+    fill_round_rect(a, 76, y + 18, 82, 46, 14, a->colors.panel2);
+    stroke_round_rect(a, 76, y + 18, 82, 46, 14, a->colors.border);
+    draw_centered(a, 76, y + 47, 82, "Voltar", a->colors.text);
+}
+
+static void draw_live_player_controls(app_t *a, int y) {
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, 176, y + 22, 76, 30, 12, 0xFF7185u, 0.96);
+        vip_ui_render_text(&a->renderer, 176, y + 30, 76, "AO VIVO", "Sans Bold 8", 0xF6F7FBu, 1.0, true);
+        vip_ui_render_text(&a->renderer, 270, y + 31, 220, "<-  ->  troca canal", "Sans 9", 0xAAB2C4u,
+                           1.0, false);
+        return;
+    }
+    fill_round_rect(a, 176, y + 22, 76, 30, 12, a->colors.danger);
+    draw_centered(a, 176, y + 43, 76, "AO VIVO", a->colors.text);
+    draw_text(a, 270, y + 44, "<- -> troca canal", a->colors.muted);
+}
+
+static void draw_vod_timeline(app_t *a, const vip_mpv_player_snapshot_t *snap, int y) {
+    int tx, ty, tw, th;
+    timeline_geometry(a, &tx, &ty, &tw, &th);
+    if (a->renderer.active)
+        vip_ui_render_round_rect(&a->renderer, tx, ty, tw, th, th / 2, 0x343A48u, 1.0);
+    else
+        fill_round_rect(a, tx, ty, tw, th, th / 2, a->colors.panel2);
+
+    double ratio = snap->duration_seconds > 0.0 ? snap->position_seconds / snap->duration_seconds : 0.0;
+    if (ratio < 0.0)
+        ratio = 0.0;
+    if (ratio > 1.0)
+        ratio = 1.0;
+    int fill = (int)((double)tw * ratio);
+    if (fill > 0) {
+        if (a->renderer.active)
+            vip_ui_render_round_rect(&a->renderer, tx, ty, fill, th, th / 2, 0xFF5F2Eu, 1.0);
+        else
+            fill_round_rect(a, tx, ty, fill, th, th / 2, a->colors.accent);
     }
 
-    if (hud) {
-        int y = a->height - PLAYER_CONTROLS_H;
-        if (a->renderer.active) {
-            vip_ui_render_round_rect(&a->renderer, 10, y + 7, a->width - 20, PLAYER_CONTROLS_H - 12, 18,
-                                     0x111722u, 0.96);
-            vip_ui_render_round_stroke(&a->renderer, 10, y + 7, a->width - 20, PLAYER_CONTROLS_H - 12, 18,
-                                       0x343A48u, 0.95, 1.0);
-            vip_ui_render_round_rect(&a->renderer, 16, y + 18, 52, 46, 14, 0x171C28u, 1.0);
-            vip_ui_render_round_stroke(&a->renderer, 16, y + 18, 52, 46, 14, 0x343A48u, 1.0, 1.0);
-            vip_ui_render_text(&a->renderer, 16, y + 31, 52, snap.paused ? ">" : "||", "Sans Bold 12",
-                               0xF6F7FBu, 1.0, true);
-            vip_ui_render_round_rect(&a->renderer, 76, y + 18, 82, 46, 14, 0x171C28u, 1.0);
-            vip_ui_render_round_stroke(&a->renderer, 76, y + 18, 82, 46, 14, 0x343A48u, 1.0, 1.0);
-            vip_ui_render_text(&a->renderer, 76, y + 32, 82, "Voltar", "Sans SemiBold 9", 0xF6F7FBu, 1.0,
-                               true);
-        } else {
-            fill_rect(a, 0, y, (unsigned)a->width, PLAYER_CONTROLS_H, a->colors.panel);
-            fill_rect(a, 0, y, (unsigned)a->width, 1, a->colors.border);
-            fill_round_rect(a, 16, y + 18, 52, 46, 14, a->colors.panel2);
-            stroke_round_rect(a, 16, y + 18, 52, 46, 14, a->colors.border);
-            draw_centered_font(a, a->font_heading, 16, y + 48, 52, snap.paused ? ">" : "||", a->colors.text);
-            fill_round_rect(a, 76, y + 18, 82, 46, 14, a->colors.panel2);
-            stroke_round_rect(a, 76, y + 18, 82, 46, 14, a->colors.border);
-            draw_centered(a, 76, y + 47, 82, "Voltar", a->colors.text);
-        }
-        if (a->player_item_live) {
-            if (a->renderer.active) {
-                vip_ui_render_round_rect(&a->renderer, 176, y + 22, 76, 30, 12, 0xFF7185u, 0.96);
-                vip_ui_render_text(&a->renderer, 176, y + 30, 76, "AO VIVO", "Sans Bold 8", 0xF6F7FBu, 1.0,
-                                   true);
-                vip_ui_render_text(&a->renderer, 270, y + 31, 220, "<-  ->  troca canal", "Sans 9", 0xAAB2C4u,
-                                   1.0, false);
-            } else {
-                fill_round_rect(a, 176, y + 22, 76, 30, 12, a->colors.danger);
-                draw_centered(a, 176, y + 43, 76, "AO VIVO", a->colors.text);
-                draw_text(a, 270, y + 44, "<- -> troca canal", a->colors.muted);
-            }
-        } else {
-            int tx, ty, tw, th;
-            timeline_geometry(a, &tx, &ty, &tw, &th);
-            if (a->renderer.active)
-                vip_ui_render_round_rect(&a->renderer, tx, ty, tw, th, th / 2, 0x343A48u, 1.0);
-            else
-                fill_round_rect(a, tx, ty, tw, th, th / 2, a->colors.panel2);
-            double ratio = snap.duration_seconds > 0.0 ? snap.position_seconds / snap.duration_seconds : 0.0;
-            if (ratio < 0.0)
-                ratio = 0.0;
-            if (ratio > 1.0)
-                ratio = 1.0;
-            int fill = (int)((double)tw * ratio);
-            if (fill > 0) {
-                if (a->renderer.active)
-                    vip_ui_render_round_rect(&a->renderer, tx, ty, fill, th, th / 2, 0xFF5F2Eu, 1.0);
-                else
-                    fill_round_rect(a, tx, ty, fill, th, th / 2, a->colors.accent);
-            }
-            char pos[32], dur[32];
-            format_clock(snap.position_seconds, pos);
-            format_clock(snap.duration_seconds, dur);
-            if (a->renderer.active) {
-                vip_ui_render_text(&a->renderer, 166, y + 31, 60, pos, "Sans SemiBold 9", 0xF6F7FBu, 1.0,
-                                   false);
-                vip_ui_render_text(&a->renderer, a->width - 150, y + 31, 132, dur, "Sans SemiBold 9",
-                                   0xF6F7FBu, 1.0, false);
-                vip_ui_render_text(&a->renderer, tx, y + 57, tw, "Clique/arraste para buscar  ·  <- -> 10s",
-                                   "Sans 8", 0xAAB2C4u, 1.0, false);
-            } else {
-                draw_text(a, 166, y + 45, pos, a->colors.text);
-                draw_text(a, a->width - 150, y + 45, dur, a->colors.text);
-                draw_text_font(a, a->font_small, tx, y + 70, "Clique/arraste para buscar  ·  <- -> 10s",
-                               a->colors.muted);
-            }
-        }
-        if (a->renderer.active) {
-            int sw = vip_ui_render_text_width(&a->renderer, state_text, "Sans 8");
-            vip_ui_render_text(&a->renderer, a->width - sw - 18, y + 58, sw + 2, state_text, "Sans 8",
-                               player_state == VIP_PLAYER_ERROR ? 0xFF7185u : 0xAAB2C4u, 1.0, false);
-        } else {
-            int sw = text_width(a, state_text);
-            draw_text_font(a, a->font_small, a->width - sw - 18, y + 72, state_text,
-                           player_state == VIP_PLAYER_ERROR ? a->colors.danger : a->colors.muted);
-        }
+    char pos[32], dur[32];
+    format_clock(snap->position_seconds, pos);
+    format_clock(snap->duration_seconds, dur);
+    if (a->renderer.active) {
+        vip_ui_render_text(&a->renderer, 166, y + 31, 60, pos, "Sans SemiBold 9", 0xF6F7FBu, 1.0, false);
+        vip_ui_render_text(&a->renderer, a->width - 150, y + 31, 132, dur, "Sans SemiBold 9",
+                           0xF6F7FBu, 1.0, false);
+        vip_ui_render_text(&a->renderer, tx, y + 57, tw, "Clique/arraste para buscar  ·  <- -> 10s",
+                           "Sans 8", 0xAAB2C4u, 1.0, false);
+        return;
     }
+    draw_text(a, 166, y + 45, pos, a->colors.text);
+    draw_text(a, a->width - 150, y + 45, dur, a->colors.text);
+    draw_text_font(a, a->font_small, tx, y + 70, "Clique/arraste para buscar  ·  <- -> 10s",
+                   a->colors.muted);
+}
 
-    if (player_state == VIP_PLAYER_ERROR) {
+static void draw_player_state_label(app_t *a, const char *state_text, vip_player_state_t state, int y) {
+    if (a->renderer.active) {
+        int sw = vip_ui_render_text_width(&a->renderer, state_text, "Sans 8");
+        vip_ui_render_text(&a->renderer, a->width - sw - 18, y + 58, sw + 2, state_text, "Sans 8",
+                           state == VIP_PLAYER_ERROR ? 0xFF7185u : 0xAAB2C4u, 1.0, false);
+        return;
+    }
+    int sw = text_width(a, state_text);
+    draw_text_font(a, a->font_small, a->width - sw - 18, y + 72, state_text,
+                   state == VIP_PLAYER_ERROR ? a->colors.danger : a->colors.muted);
+}
+
+static void draw_player_status_center(app_t *a, vip_player_state_t state, const char *state_text) {
+    if (state == VIP_PLAYER_ERROR) {
         const char *err = a->player ? vip_mpv_player_last_error(a->player) : a->player_status;
         char bounded[220];
         bounded_text(bounded, sizeof(bounded), err && err[0] ? err : "Falha desconhecida no stream", 90);
@@ -5263,6 +5300,27 @@ static void draw_player(app_t *a) {
     } else if (!a->video_mapped) {
         draw_centered_font(a, a->font_heading, 0, a->height / 2, a->width, state_text, a->colors.muted);
     }
+}
+
+static void draw_player(app_t *a) {
+    fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.black);
+    vip_mpv_player_snapshot_t snap = {0};
+    if (a->player)
+        vip_mpv_player_snapshot(a->player, &snap);
+    vip_player_state_t state = a->player ? snap.state : VIP_PLAYER_ERROR;
+    const char *state_text = a->player ? vip_mpv_player_state_name(state) : a->player_status;
+
+    draw_player_header(a);
+    if (player_hud_visible(a)) {
+        int y = a->height - PLAYER_CONTROLS_H;
+        draw_player_control_buttons(a, &snap, y);
+        if (a->player_item_live)
+            draw_live_player_controls(a, y);
+        else
+            draw_vod_timeline(a, &snap, y);
+        draw_player_state_label(a, state_text, state, y);
+    }
+    draw_player_status_center(a, state, state_text);
 }
 
 /* Ensure backbuffer. */
