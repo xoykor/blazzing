@@ -1424,28 +1424,34 @@ static void draw_card_title(app_t *a, int x, int y, int width, const char *text,
 }
 
 /* Format the compact season/episode label shown under episode cards. */
+static int xtream_episode_season(const vip_channel_t *ch) {
+    if (!ch->category_id || !ch->category_id[0])
+        return 0;
+    char *end = NULL;
+    long parsed = strtol(ch->category_id, &end, 10);
+    if (end == ch->category_id || !end || *end != '\0' || parsed < 0 || parsed > INT_MAX)
+        return 0;
+    return (int)parsed;
+}
+
+static bool episode_numbers(const app_t *a, const vip_channel_t *ch, int *season, int *episode) {
+    *season = 0;
+    *episode = 0;
+    if (a->login_mode == LOGIN_M3U) {
+        char series_name[256];
+        return vip_m3u_parse_episode_label(ch->name, series_name, sizeof(series_name), season, episode);
+    }
+    *season = xtream_episode_season(ch);
+    *episode = ch->position;
+    return true;
+}
+
 static bool episode_card_meta(const app_t *a, const vip_channel_t *ch, char *buffer, size_t cap) {
     if (!a || !ch || !buffer || cap == 0u || !a->series_episode_mode || a->series_season_select)
         return false;
 
-    int season = 0;
-    int episode = 0;
-
-    if (a->login_mode == LOGIN_M3U) {
-        char series_name[256];
-        if (!vip_m3u_parse_episode_label(ch->name, series_name, sizeof(series_name), &season, &episode))
-            return false;
-    } else {
-        if (ch->category_id && ch->category_id[0]) {
-            char *end = NULL;
-            long parsed = strtol(ch->category_id, &end, 10);
-            if (end != ch->category_id && end && *end == '\0' && parsed >= 0 && parsed <= INT_MAX)
-                season = (int)parsed;
-        }
-        episode = ch->position;
-    }
-
-    if (episode <= 0)
+    int season = 0, episode = 0;
+    if (!episode_numbers(a, ch, &season, &episode) || episode <= 0)
         return false;
     if (season > 0)
         snprintf(buffer, cap, "T%d · E%d", season, episode);
@@ -1960,6 +1966,45 @@ static size_t prefetch_thumbnail_list(app_t *a, vip_channel_list_t *channels, si
  * Quando uma imagem falha, a próxima volta pelo catálogo a coloca na fila
  * novamente; portanto o carregamento não morre silenciosamente.
  */
+static size_t prefetch_primary_thumbnails(app_t *a, bool episode_source, int active_kind, size_t budget) {
+    vip_channel_list_t *series_source = a->series_season_select ? &a->season_channels : &a->episode_channels;
+    if (episode_source)
+        return prefetch_thumbnail_list(a, series_source, &a->episode_prefetch_cursor, budget,
+                                       THUMB_BACKGROUND_PRIORITY + 1000LL);
+    if (active_kind >= 0 && active_kind < 3 && a->catalogs[active_kind].loaded)
+        return prefetch_thumbnail_list(a, &a->catalogs[active_kind].channels,
+                                       &a->thumb_prefetch_cursor[active_kind], budget,
+                                       THUMB_BACKGROUND_PRIORITY + 1000LL);
+    return 0u;
+}
+
+static size_t count_secondary_thumbnail_sources(app_t *a, bool episode_source, int active_kind) {
+    size_t count = 0u;
+    for (int k = 0; k < 3; ++k) {
+        if (!episode_source && k == active_kind)
+            continue;
+        if (a->catalogs[k].loaded && a->catalogs[k].channels.len > 0u)
+            ++count;
+    }
+    return count;
+}
+
+static void prefetch_secondary_thumbnails(app_t *a, bool episode_source, int active_kind, size_t budget) {
+    size_t remaining_sources = count_secondary_thumbnail_sources(a, episode_source, active_kind);
+    for (int k = 0; k < 3 && budget > 0u && remaining_sources > 0u; ++k) {
+        if (!episode_source && k == active_kind)
+            continue;
+        catalog_t *catalog = &a->catalogs[k];
+        if (!catalog->loaded || catalog->channels.len == 0u)
+            continue;
+        size_t quota = (budget + remaining_sources - 1u) / remaining_sources;
+        size_t used = prefetch_thumbnail_list(a, &catalog->channels, &a->thumb_prefetch_cursor[k], quota,
+                                              THUMB_BACKGROUND_PRIORITY);
+        budget -= used > budget ? budget : used;
+        --remaining_sources;
+    }
+}
+
 static void prefetch_thumbnail_batch(app_t *a) {
     if (!a || !a->thumbs || a->screen == SCREEN_LOGIN || !a->active_profile_id[0])
         return;
@@ -1969,48 +2014,55 @@ static void prefetch_thumbnail_batch(app_t *a) {
         return;
     a->thumb_prefetch_next_ms = now + THUMB_PREFETCH_INTERVAL_MS;
 
-    size_t budget = THUMB_PREFETCH_BATCH;
-    const size_t primary_budget = (THUMB_PREFETCH_BATCH * 3u) / 4u;
     vip_channel_list_t *series_source = a->series_season_select ? &a->season_channels : &a->episode_channels;
     bool episode_source = a->series_episode_mode && series_source->len > 0u;
     int active_kind = (int)a->content_kind;
-
-    /* Spend most of every batch on what the user can actually see. Older
-       versions split bandwidth evenly across TV/VOD/series, making the active
-       catalog look slow even while invisible catalogs were downloading. */
-    if (episode_source) {
-        size_t used = prefetch_thumbnail_list(a, series_source, &a->episode_prefetch_cursor, primary_budget,
-                                              THUMB_BACKGROUND_PRIORITY + 1000LL);
-        budget -= used > budget ? budget : used;
-    } else if (active_kind >= 0 && active_kind < 3 && a->catalogs[active_kind].loaded) {
-        size_t used = prefetch_thumbnail_list(a, &a->catalogs[active_kind].channels,
-                                              &a->thumb_prefetch_cursor[active_kind], primary_budget,
-                                              THUMB_BACKGROUND_PRIORITY + 1000LL);
-        budget -= used > budget ? budget : used;
-    }
-
-    size_t secondary_sources = 0u;
-    for (int k = 0; k < 3; ++k) {
-        if (!episode_source && k == active_kind)
-            continue;
-        if (a->catalogs[k].loaded && a->catalogs[k].channels.len > 0u)
-            ++secondary_sources;
-    }
-    for (int k = 0; k < 3 && budget > 0u && secondary_sources > 0u; ++k) {
-        if (!episode_source && k == active_kind)
-            continue;
-        catalog_t *catalog = &a->catalogs[k];
-        if (!catalog->loaded || catalog->channels.len == 0u)
-            continue;
-        size_t quota = (budget + secondary_sources - 1u) / secondary_sources;
-        size_t used = prefetch_thumbnail_list(a, &catalog->channels, &a->thumb_prefetch_cursor[k], quota,
-                                              THUMB_BACKGROUND_PRIORITY);
-        budget -= used > budget ? budget : used;
-        --secondary_sources;
-    }
+    size_t budget = THUMB_PREFETCH_BATCH;
+    const size_t primary_budget = (THUMB_PREFETCH_BATCH * 3u) / 4u;
+    size_t used = prefetch_primary_thumbnails(a, episode_source, active_kind, primary_budget);
+    budget -= used > budget ? budget : used;
+    prefetch_secondary_thumbnails(a, episode_source, active_kind, budget);
 }
 
 /* Handle the login one server operation. */
+static void load_optional_vod_catalog(vip_xtream_client_t *client, catalog_t *vod) {
+    if (!vod)
+        return;
+    vip_error_t error = {0};
+    vip_category_list_init(&vod->categories);
+    vip_channel_list_init(&vod->channels);
+    vip_status_t st = vip_xtream_vod_categories(client, &vod->categories, &error);
+    if (st == VIP_OK)
+        st = vip_xtream_vod_streams(client, &vod->channels, &error);
+    if (st == VIP_OK) {
+        vod->loaded = true;
+        return;
+    }
+    fprintf(stderr, "[catalog] filmes indisponíveis: %s\n", error.message);
+    vip_category_list_clear(&vod->categories);
+    vip_channel_list_clear(&vod->channels);
+    vod->loaded = false;
+}
+
+static void load_optional_series_catalog(vip_xtream_client_t *client, catalog_t *series) {
+    if (!series)
+        return;
+    vip_error_t error = {0};
+    vip_category_list_init(&series->categories);
+    vip_channel_list_init(&series->channels);
+    vip_status_t st = vip_xtream_series_categories(client, &series->categories, &error);
+    if (st == VIP_OK)
+        st = vip_xtream_series(client, &series->channels, &error);
+    if (st == VIP_OK) {
+        series->loaded = true;
+        return;
+    }
+    fprintf(stderr, "[catalog] séries indisponíveis: %s\n", error.message);
+    vip_category_list_clear(&series->categories);
+    vip_channel_list_clear(&series->channels);
+    series->loaded = false;
+}
+
 static vip_status_t login_one_server(const char *server, const char *username, const char *password,
                                      vip_credentials_t *credentials, vip_category_list_t *cats,
                                      vip_channel_list_t *channels, catalog_t *vod, catalog_t *series,
@@ -2026,37 +2078,9 @@ static vip_status_t login_one_server(const char *server, const char *username, c
     if (st == VIP_OK)
         st = vip_xtream_live_streams(client, channels, error);
 
-    if (st == VIP_OK && vod) {
-        vip_error_t optional_error = {0};
-        vip_category_list_init(&vod->categories);
-        vip_channel_list_init(&vod->channels);
-        vip_status_t vst = vip_xtream_vod_categories(client, &vod->categories, &optional_error);
-        if (vst == VIP_OK)
-            vst = vip_xtream_vod_streams(client, &vod->channels, &optional_error);
-        if (vst == VIP_OK) {
-            vod->loaded = true;
-        } else {
-            fprintf(stderr, "[catalog] filmes indisponíveis: %s\n", optional_error.message);
-            vip_category_list_clear(&vod->categories);
-            vip_channel_list_clear(&vod->channels);
-            vod->loaded = false;
-        }
-    }
-    if (st == VIP_OK && series) {
-        vip_error_t optional_error = {0};
-        vip_category_list_init(&series->categories);
-        vip_channel_list_init(&series->channels);
-        vip_status_t sst = vip_xtream_series_categories(client, &series->categories, &optional_error);
-        if (sst == VIP_OK)
-            sst = vip_xtream_series(client, &series->channels, &optional_error);
-        if (sst == VIP_OK) {
-            series->loaded = true;
-        } else {
-            fprintf(stderr, "[catalog] séries indisponíveis: %s\n", optional_error.message);
-            vip_category_list_clear(&series->categories);
-            vip_channel_list_clear(&series->channels);
-            series->loaded = false;
-        }
+    if (st == VIP_OK) {
+        load_optional_vod_catalog(client, vod);
+        load_optional_series_catalog(client, series);
     }
     if (client)
         vip_xtream_client_destroy(client);
@@ -3472,14 +3496,31 @@ static bool keyring_store_password(const char *profile_id, const char *password)
 }
 
 /* Handle the keyring lookup password operation. */
+static bool wait_secret_tool(pid_t pid) {
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR)
+            return false;
+    }
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+static ssize_t trim_secret_output(char *out, ssize_t n) {
+    if (n <= 0)
+        return 0;
+    out[n] = '\0';
+    while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r'))
+        out[--n] = '\0';
+    return n;
+}
+
 static bool keyring_lookup_password(const char *profile_id, char *out, size_t cap) {
     if (!out || cap == 0u)
         return false;
     out[0] = '\0';
 
     char secret_tool[256];
-    if (!keyring_profile_id_is_safe(profile_id) ||
-        !find_secret_tool(secret_tool, sizeof(secret_tool)))
+    if (!keyring_profile_id_is_safe(profile_id) || !find_secret_tool(secret_tool, sizeof(secret_tool)))
         return false;
 
     int outpipe[2];
@@ -3500,19 +3541,11 @@ static bool keyring_lookup_password(const char *profile_id, char *out, size_t ca
 
     ssize_t n = read(outpipe[0], out, cap - 1u);
     close(outpipe[0]);
-
-    int status = 0;
-    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
-    }
-    if (n <= 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    if (!wait_secret_tool(pid) || n <= 0) {
         out[0] = '\0';
         return false;
     }
-
-    out[n] = '\0';
-    while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r'))
-        out[--n] = '\0';
-    return n > 0;
+    return trim_secret_output(out, n) > 0;
 }
 
 /* Handle the refresh profiles operation. */
@@ -3604,38 +3637,57 @@ static void update_series_progress(app_t *a, const char *last_episode_id) {
 
 /* Throttle routine writes during playback, but force persistence on pause,
  * seek/exit and other lifecycle boundaries. */
+static bool progress_snapshot_valid(app_t *a, const vip_mpv_player_snapshot_t *snap, bool force, int64_t now) {
+    if (snap->natural_end && a->progress_flags && a->current_channel < ACTIVE_CHANNELS(a).len &&
+        a->progress_flags[a->current_channel].completed)
+        return false;
+    if (!force && !snap->natural_end && now - a->player_last_progress_save_ms < 5000)
+        return false;
+    return snap->position_seconds >= 0.0 && (snap->duration_seconds > 1.0 || snap->natural_end);
+}
+
+static bool progress_snapshot_completed(const vip_mpv_player_snapshot_t *snap) {
+    if (snap->natural_end)
+        return true;
+    if (snap->duration_seconds <= 0.0)
+        return false;
+    double ratio = snap->position_seconds / snap->duration_seconds;
+    bool near_end = snap->duration_seconds > 300.0 &&
+                    snap->duration_seconds - snap->position_seconds <= 60.0;
+    return ratio >= 0.95 || near_end;
+}
+
+static void update_progress_cache(app_t *a, const vip_mpv_player_snapshot_t *snap, bool completed) {
+    if (!a->progress_flags || a->current_channel >= ACTIVE_CHANNELS(a).len)
+        return;
+    vip_watch_progress_t *progress = &a->progress_flags[a->current_channel];
+    progress->position_seconds = snap->position_seconds;
+    progress->duration_seconds = snap->duration_seconds;
+    progress->completed = completed;
+    progress->updated_at = (int64_t)time(NULL);
+}
+
 static void save_current_progress(app_t *a, bool force) {
     if (!current_item_has_progress(a) || !a->player)
         return;
+
     int64_t now = monotonic_ms();
     vip_mpv_player_snapshot_t snap = {0};
     vip_mpv_player_snapshot(a->player, &snap);
-    if (snap.natural_end && a->progress_flags && a->current_channel < ACTIVE_CHANNELS(a).len &&
-        a->progress_flags[a->current_channel].completed)
+    if (!progress_snapshot_valid(a, &snap, force, now))
         return;
-    if (!force && !snap.natural_end && now - a->player_last_progress_save_ms < 5000)
-        return;
-    if (snap.position_seconds < 0.0 || (snap.duration_seconds <= 1.0 && !snap.natural_end))
-        return;
-    bool completed =
-        snap.natural_end ||
-        (snap.duration_seconds > 0.0 &&
-         (snap.position_seconds / snap.duration_seconds >= 0.95 ||
-          (snap.duration_seconds > 300.0 && snap.duration_seconds - snap.position_seconds <= 60.0)));
+
+    bool completed = progress_snapshot_completed(&snap);
     vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[a->current_channel];
     vip_error_t error = {0};
     if (vip_database_set_progress(a->db, ch->provider_id, ch->id, snap.position_seconds,
-                                  snap.duration_seconds, completed, &error) == VIP_OK) {
-        if (a->progress_flags && a->current_channel < ACTIVE_CHANNELS(a).len) {
-            a->progress_flags[a->current_channel].position_seconds = snap.position_seconds;
-            a->progress_flags[a->current_channel].duration_seconds = snap.duration_seconds;
-            a->progress_flags[a->current_channel].completed = completed;
-            a->progress_flags[a->current_channel].updated_at = (int64_t)time(NULL);
-        }
-        if (a->series_episode_mode)
-            update_series_progress(a, ch->id);
-        a->player_last_progress_save_ms = now;
-    }
+                                  snap.duration_seconds, completed, &error) != VIP_OK)
+        return;
+
+    update_progress_cache(a, &snap, completed);
+    if (a->series_episode_mode)
+        update_series_progress(a, ch->id);
+    a->player_last_progress_save_ms = now;
 }
 
 /* Handle the player hud visible operation. */
@@ -4397,45 +4449,52 @@ static void draw_login(app_t *a) {
 }
 
 /* Draw wrapped text. */
+static void normalize_wrapped_text(char *text) {
+    for (char *p = text; *p; ++p)
+        if (*p == '\n' || *p == '\r' || *p == '\t')
+            *p = ' ';
+}
+
+static void build_wrapped_candidate(char *candidate, size_t cap, const char *line, const char *word) {
+    size_t used = strlen(line);
+    if (used >= cap)
+        used = cap - 1u;
+    memcpy(candidate, line, used);
+    if (used > 0u && used + 1u < cap)
+        candidate[used++] = ' ';
+    size_t room = cap - used - 1u;
+    size_t word_len = strlen(word);
+    if (word_len > room)
+        word_len = room;
+    memcpy(candidate + used, word, word_len);
+    candidate[used + word_len] = '\0';
+}
+
 static int draw_wrapped_text(app_t *a, int x, int y, int width, const char *text, int max_lines,
                              unsigned long color) {
     if (!text || !text[0] || max_lines <= 0)
         return y;
+
     char copy[3072];
     snprintf(copy, sizeof(copy), "%s", text);
-    for (char *p = copy; *p; ++p)
-        if (*p == '\n' || *p == '\r' || *p == '\t')
-            *p = ' ';
+    normalize_wrapped_text(copy);
+
     char line[768] = {0};
     char *save = NULL;
     int lines = 0;
     for (char *word = strtok_r(copy, " ", &save); word && lines < max_lines;
          word = strtok_r(NULL, " ", &save)) {
         char candidate[768];
-        /* Build the candidate explicitly so very long provider text is safely
-         * truncated without triggering format-truncation warnings. */
-        size_t candidate_len = strlen(line);
-        if (candidate_len >= sizeof(candidate))
-            candidate_len = sizeof(candidate) - 1u;
-        memcpy(candidate, line, candidate_len);
-        if (candidate_len > 0u && candidate_len + 1u < sizeof(candidate))
-            candidate[candidate_len++] = ' ';
-        size_t room = sizeof(candidate) - candidate_len - 1u;
-        size_t word_len = strlen(word);
-        if (word_len > room)
-            word_len = room;
-        memcpy(candidate + candidate_len, word, word_len);
-        candidate[candidate_len + word_len] = '\0';
+        build_wrapped_candidate(candidate, sizeof(candidate), line, word);
         if (line[0] && text_width(a, candidate) > width) {
             draw_text(a, x, y, line, color);
             y += 20;
-            ++lines;
-            if (lines >= max_lines)
+            if (++lines >= max_lines)
                 break;
             snprintf(line, sizeof(line), "%s", word);
-        } else {
-            snprintf(line, sizeof(line), "%s", candidate);
+            continue;
         }
+        snprintf(line, sizeof(line), "%s", candidate);
     }
     if (line[0] && lines < max_lines) {
         draw_text(a, x, y, line, color);
@@ -5482,66 +5541,66 @@ static void handle_click(app_t *a, int x, int y) {
 }
 
 /* Handle wheel. */
-static void handle_wheel(app_t *a, int x, int y, int direction) {
-    /* The login screen scrolls saved profiles independently of the catalog. */
-    if (a->screen == SCREEN_LOGIN) {
-        if (a->input_focus == INPUT_SAVED_PROFILE && a->profiles.len > 0u) {
-            a->profile_focus += direction;
-            login_profile_ensure_visible(a);
-            return;
-        }
-        int max_scroll = (int)a->profiles.len - 6;
-        if (max_scroll < 0)
-            max_scroll = 0;
-
-        a->profile_scroll += direction;
-        if (a->profile_scroll < 0)
-            a->profile_scroll = 0;
-        if (a->profile_scroll > max_scroll)
-            a->profile_scroll = max_scroll;
+static void handle_login_wheel(app_t *a, int direction) {
+    if (a->input_focus == INPUT_SAVED_PROFILE && a->profiles.len > 0u) {
+        a->profile_focus += direction;
+        login_profile_ensure_visible(a);
         return;
     }
+    int max_scroll = (int)a->profiles.len - 6;
+    if (max_scroll < 0)
+        max_scroll = 0;
+    a->profile_scroll += direction;
+    if (a->profile_scroll < 0)
+        a->profile_scroll = 0;
+    if (a->profile_scroll > max_scroll)
+        a->profile_scroll = max_scroll;
+}
 
-    /* Other screens either have their own input handling or do not scroll. */
+static void handle_category_wheel(app_t *a, int direction) {
+    int max_scroll = (int)ACTIVE_CATEGORIES(a).len - (category_visible_rows(a) - 1);
+    if (max_scroll < 0)
+        max_scroll = 0;
+    a->category_scroll += direction * 3;
+    if (a->category_scroll < 0)
+        a->category_scroll = 0;
+    if (a->category_scroll > max_scroll)
+        a->category_scroll = max_scroll;
+}
+
+static void handle_grid_wheel(app_t *a, int direction) {
+    card_layout_t layout = browse_layout(a);
+    int rows = (int)((a->filtered_len + (size_t)layout.cols - 1u) / (size_t)layout.cols);
+    int max_scroll = rows * layout.row_step - (a->height - TOPBAR_H - 18);
+    if (max_scroll < 0)
+        max_scroll = 0;
+
+    int base = a->grid_scroll_animating ? a->grid_scroll_target : a->grid_scroll;
+    int step = layout.mode == ART_PORTRAIT ? 220 : 180;
+    int target = base + direction * step;
+    if (target < 0)
+        target = 0;
+    if (target > max_scroll)
+        target = max_scroll;
+
+    a->grid_scroll_target = target;
+    a->grid_scroll_last_ms = monotonic_ms();
+    a->grid_scroll_animating = target != a->grid_scroll;
+    if (a->grid_scroll_animating)
+        a->ui_motion_active = true;
+}
+
+static void handle_wheel(app_t *a, int x, int y, int direction) {
+    if (a->screen == SCREEN_LOGIN) {
+        handle_login_wheel(a, direction);
+        return;
+    }
     if (a->screen != SCREEN_BROWSE)
         return;
-
-    if (x < SIDEBAR_W) {
-        /* Wheel events over the sidebar move the category list. */
-        int max_scroll = (int)ACTIVE_CATEGORIES(a).len - (category_visible_rows(a) - 1);
-        if (max_scroll < 0)
-            max_scroll = 0;
-
-        a->category_scroll += direction * 3;
-        if (a->category_scroll < 0)
-            a->category_scroll = 0;
-        if (a->category_scroll > max_scroll)
-            a->category_scroll = max_scroll;
-    } else {
-        /* Wheel events over the main grid animate between bounded row offsets. */
-        card_layout_t layout = browse_layout(a);
-        int rows = (int)((a->filtered_len + (size_t)layout.cols - 1u) / (size_t)layout.cols);
-        int content_h = rows * layout.row_step;
-        int max_scroll = content_h - (a->height - TOPBAR_H - 18);
-        if (max_scroll < 0)
-            max_scroll = 0;
-
-        int base = a->grid_scroll_animating ? a->grid_scroll_target : a->grid_scroll;
-        int step = layout.mode == ART_PORTRAIT ? 220 : 180;
-        int target = base + direction * step;
-        if (target < 0)
-            target = 0;
-        if (target > max_scroll)
-            target = max_scroll;
-
-        a->grid_scroll_target = target;
-        a->grid_scroll_last_ms = monotonic_ms();
-        a->grid_scroll_animating = target != a->grid_scroll;
-        if (a->grid_scroll_animating)
-            a->ui_motion_active = true;
-    }
-
-    /* y is intentionally unused: only the horizontal region selects a scroller. */
+    if (x < SIDEBAR_W)
+        handle_category_wheel(a, direction);
+    else
+        handle_grid_wheel(a, direction);
     (void)y;
 }
 
