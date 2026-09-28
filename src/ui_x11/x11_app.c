@@ -2877,6 +2877,89 @@ static void details_job_free(details_job_t *job) {
 }
 
 /* Run the details background worker. */
+static bool details_cache_is_fresh(int64_t updated_at) {
+    if (updated_at <= 0)
+        return false;
+    int64_t age = (int64_t)time(NULL) - updated_at;
+    return age >= 0 && age < 7LL * 24LL * 60LL * 60LL;
+}
+
+static vip_status_t load_details_from_cache(app_t *a, const details_job_t *job, vip_media_metadata_t *metadata,
+                                            vip_media_metadata_t *cached, bool *cache_found, bool *used_cache) {
+    if (!a->db)
+        return VIP_ERR_NETWORK;
+
+    int64_t updated_at = 0;
+    vip_error_t cache_error = {0};
+    vip_status_t st = vip_database_get_media_metadata(a->db, job->provider_id, job->media_id, cached,
+                                                      &updated_at, cache_found, &cache_error);
+    if (st != VIP_OK || !*cache_found || !metadata_has_content(cached) || !details_cache_is_fresh(updated_at))
+        return VIP_ERR_NETWORK;
+
+    *metadata = *cached;
+    memset(cached, 0, sizeof(*cached));
+    *used_cache = true;
+    return VIP_OK;
+}
+
+static vip_status_t fetch_details_remote(app_t *a, const details_job_t *job, vip_media_metadata_t *metadata,
+                                         vip_error_t *error) {
+    vip_credentials_t credentials = {0};
+    vip_xtream_client_t *client = NULL;
+    vip_status_t st = vip_credentials_init(&credentials, job->server, job->username, job->password, error);
+    if (st == VIP_OK)
+        st = vip_xtream_client_create(&client, &credentials, error);
+    if (st == VIP_OK) {
+        if (job->kind == CONTENT_VOD)
+            st = vip_xtream_vod_info(client, job->media_id, metadata, error);
+        else
+            st = vip_xtream_series_metadata(client, job->media_id, metadata, error);
+    }
+    if (client)
+        vip_xtream_client_destroy(client);
+    vip_credentials_clear(&credentials);
+
+    if (st == VIP_OK && metadata_has_content(metadata) && a->db) {
+        vip_error_t db_error = {0};
+        (void)vip_database_set_media_metadata(a->db, job->provider_id, job->media_id, metadata, &db_error);
+    }
+    return st;
+}
+
+static vip_status_t fallback_to_cached_details(vip_status_t st, bool cache_found,
+                                               vip_media_metadata_t *metadata, vip_media_metadata_t *cached,
+                                               bool *used_cache) {
+    if (st == VIP_OK || !cache_found || !metadata_has_content(cached))
+        return st;
+    vip_media_metadata_clear(metadata);
+    *metadata = *cached;
+    memset(cached, 0, sizeof(*cached));
+    *used_cache = true;
+    return VIP_OK;
+}
+
+static bool publish_details_result(app_t *a, const details_job_t *job, vip_media_metadata_t *metadata,
+                                   vip_status_t st, const vip_error_t *error, bool used_cache) {
+    pthread_mutex_lock(&a->data_mutex);
+    bool current = strcmp(a->details_media_id, job->media_id) == 0;
+    if (current) {
+        vip_media_metadata_clear(&a->details_metadata);
+        if (st == VIP_OK) {
+            a->details_metadata = *metadata;
+            memset(metadata, 0, sizeof(*metadata));
+            snprintf(a->details_status, sizeof(a->details_status), "%s",
+                     used_cache ? "Detalhes carregados do cache" : "Detalhes carregados");
+        } else {
+            char bounded_error[220];
+            bounded_text(bounded_error, sizeof(bounded_error),
+                         error->message[0] ? error->message : "provider não retornou metadados", 90);
+            snprintf(a->details_status, sizeof(a->details_status), "Sem detalhes: %.220s", bounded_error);
+        }
+    }
+    pthread_mutex_unlock(&a->data_mutex);
+    return current;
+}
+
 static void *details_worker(void *userdata) {
     details_job_t *job = userdata;
     app_t *a = job->app;
@@ -2886,75 +2969,18 @@ static void *details_worker(void *userdata) {
     vip_media_metadata_init(&cached);
     vip_error_t error = {0};
     bool cache_found = false;
-    int64_t cache_updated = 0;
     bool used_cache = false;
-    vip_status_t st = VIP_ERR_NETWORK;
 
-    if (a->db) {
-        vip_error_t cache_error = {0};
-        if (vip_database_get_media_metadata(a->db, job->provider_id, job->media_id, &cached, &cache_updated,
-                                            &cache_found, &cache_error) == VIP_OK &&
-            cache_found && metadata_has_content(&cached)) {
-            int64_t age = (int64_t)time(NULL) - cache_updated;
-            if (cache_updated > 0 && age >= 0 && age < 7LL * 24LL * 60LL * 60LL) {
-                metadata = cached;
-                memset(&cached, 0, sizeof(cached));
-                st = VIP_OK;
-                used_cache = true;
-            }
-        }
-    }
-
+    vip_status_t st = load_details_from_cache(a, job, &metadata, &cached, &cache_found, &used_cache);
     if (st != VIP_OK) {
-        vip_credentials_t credentials = {0};
-        vip_xtream_client_t *client = NULL;
-        st = vip_credentials_init(&credentials, job->server, job->username, job->password, &error);
-        if (st == VIP_OK)
-            st = vip_xtream_client_create(&client, &credentials, &error);
-        if (st == VIP_OK) {
-            if (job->kind == CONTENT_VOD)
-                st = vip_xtream_vod_info(client, job->media_id, &metadata, &error);
-            else
-                st = vip_xtream_series_metadata(client, job->media_id, &metadata, &error);
-        }
-        if (client)
-            vip_xtream_client_destroy(client);
-        vip_credentials_clear(&credentials);
-
-        if (st == VIP_OK && metadata_has_content(&metadata) && a->db) {
-            vip_error_t db_error = {0};
-            (void)vip_database_set_media_metadata(a->db, job->provider_id, job->media_id, &metadata,
-                                                  &db_error);
-        } else if (st != VIP_OK && cache_found && metadata_has_content(&cached)) {
-            vip_media_metadata_clear(&metadata);
-            metadata = cached;
-            memset(&cached, 0, sizeof(cached));
-            st = VIP_OK;
-            used_cache = true;
-        }
+        st = fetch_details_remote(a, job, &metadata, &error);
+        st = fallback_to_cached_details(st, cache_found, &metadata, &cached, &used_cache);
     }
 
-    pthread_mutex_lock(&a->data_mutex);
-    bool still_current = strcmp(a->details_media_id, job->media_id) == 0;
-    if (still_current) {
-        vip_media_metadata_clear(&a->details_metadata);
-        if (st == VIP_OK) {
-            a->details_metadata = metadata;
-            memset(&metadata, 0, sizeof(metadata));
-            snprintf(a->details_status, sizeof(a->details_status), "%s",
-                     used_cache ? "Detalhes carregados do cache" : "Detalhes carregados");
-        } else {
-            char bounded_error[220];
-            bounded_text(bounded_error, sizeof(bounded_error),
-                         error.message[0] ? error.message : "provider não retornou metadados", 90);
-            snprintf(a->details_status, sizeof(a->details_status), "Sem detalhes: %.220s", bounded_error);
-        }
-    }
-    pthread_mutex_unlock(&a->data_mutex);
-
+    bool current = publish_details_result(a, job, &metadata, st, &error, used_cache);
     vip_media_metadata_clear(&metadata);
     vip_media_metadata_clear(&cached);
-    atomic_store(&a->details_success, still_current && st == VIP_OK);
+    atomic_store(&a->details_success, current && st == VIP_OK);
     atomic_store(&a->details_running, false);
     atomic_store(&a->details_done, true);
     details_job_free(job);
@@ -3954,9 +3980,38 @@ static bool stream_needs_forced_hls(const char *url) {
 
 /* Enter playback without destroying the mpv process: loadfile is sent over
  * IPC and optional resume position is applied after the file is loaded. */
-static void enter_player(app_t *a, size_t channel_index) {
-    if (channel_index >= ACTIVE_CHANNELS(a).len || !a->player)
+static void debug_player_container(app_t *a) {
+    if (!getenv("VIPTV_MPV_DEBUG"))
         return;
+    XWindowAttributes wa;
+    if (XGetWindowAttributes(a->dpy, a->video_win, &wa))
+        fprintf(stderr, "[mpv-debug] container-window mapped=%s size=%dx%d\n",
+                wa.map_state == IsViewable ? "yes" : "no", wa.width, wa.height);
+}
+
+static double saved_resume_position(app_t *a, const vip_channel_t *ch) {
+    if (a->player_item_live || !a->db)
+        return 0.0;
+    vip_watch_progress_t saved = {0};
+    vip_error_t error = {0};
+    if (vip_database_get_progress(a->db, ch->provider_id, ch->id, &saved, &error) != VIP_OK)
+        return 0.0;
+    if (saved.completed || saved.position_seconds <= 5.0)
+        return 0.0;
+    if (saved.duration_seconds > 0.0 && saved.position_seconds >= saved.duration_seconds - 20.0)
+        return 0.0;
+    return saved.position_seconds;
+}
+
+static vip_status_t load_player_stream(app_t *a, const vip_channel_t *ch, double resume, vip_error_t *error) {
+    if (a->player_item_live && stream_needs_forced_hls(ch->stream_url))
+        return vip_mpv_player_load_hls(a->player, ch->stream_url, error);
+    if (resume > 0.0)
+        return vip_mpv_player_load_at(a->player, ch->stream_url, resume, error);
+    return vip_mpv_player_load(a->player, ch->stream_url, error);
+}
+
+static void prepare_player_screen(app_t *a, size_t channel_index) {
     if (a->screen == SCREEN_PLAYER)
         save_current_progress(a, true);
     a->current_channel = channel_index;
@@ -3971,38 +4026,22 @@ static void enter_player(app_t *a, size_t channel_index) {
     a->player_fallback_attempt = 0u;
     a->player_xtream_alt_attempted = false;
     a->timeline_dragging = false;
-    /* O player não pausa mais o pipeline de thumbnails: o cache continua
-       sendo preenchido mesmo durante a reprodução. */
     set_video_visible(a, true);
     focus_player_input(a);
-    /* This child is only a graphics container. mpv creates its own native
-       X11/GL window, which the player backend reparents into this container. */
     XSync(a->dpy, False);
-    if (getenv("VIPTV_MPV_DEBUG")) {
-        XWindowAttributes wa;
-        if (XGetWindowAttributes(a->dpy, a->video_win, &wa))
-            fprintf(stderr, "[mpv-debug] container-window mapped=%s size=%dx%d\n",
-                    wa.map_state == IsViewable ? "yes" : "no", wa.width, wa.height);
-    }
+}
+
+static void enter_player(app_t *a, size_t channel_index) {
+    if (channel_index >= ACTIVE_CHANNELS(a).len || !a->player)
+        return;
+
+    prepare_player_screen(a, channel_index);
+    debug_player_container(a);
+
     vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[channel_index];
-    double resume = 0.0;
-    if (!a->player_item_live && a->db) {
-        vip_watch_progress_t saved = {0};
-        vip_error_t db_error = {0};
-        if (vip_database_get_progress(a->db, ch->provider_id, ch->id, &saved, &db_error) == VIP_OK &&
-            !saved.completed && saved.position_seconds > 5.0 &&
-            (saved.duration_seconds <= 0.0 || saved.position_seconds < saved.duration_seconds - 20.0))
-            resume = saved.position_seconds;
-    }
+    double resume = saved_resume_position(a, ch);
     vip_error_t error = {0};
-    vip_status_t st;
-    if (a->player_item_live && stream_needs_forced_hls(ch->stream_url)) {
-        st = vip_mpv_player_load_hls(a->player, ch->stream_url, &error);
-    } else if (resume > 0.0) {
-        st = vip_mpv_player_load_at(a->player, ch->stream_url, resume, &error);
-    } else {
-        st = vip_mpv_player_load(a->player, ch->stream_url, &error);
-    }
+    vip_status_t st = load_player_stream(a, ch, resume, &error);
     if (st != VIP_OK)
         snprintf(a->player_status, sizeof(a->player_status), "%s", error.message);
     fprintf(stderr, "[player] %s%s\n", ch->name, resume > 0.0 ? " (retomado)" : "");
