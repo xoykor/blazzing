@@ -2293,30 +2293,41 @@ static void resume_cached_m3u(app_t *a) {
 }
 
 /* Start login. force_reload is used only by an explicit Connect action. */
-static void start_login(app_t *a, bool force_reload) {
-    if (atomic_load(&a->login_running) || a->login_thread_started)
+static void free_login_job(login_job_t *job) {
+    if (!job)
         return;
+    if (job->password) {
+        volatile char *wipe = job->password;
+        size_t n = strlen(job->password);
+        while (n-- > 0u)
+            *wipe++ = 0;
+    }
+    free(job->server);
+    free(job->server_alt);
+    free(job->username);
+    free(job->password);
+    free(job->profile_name);
+    free(job);
+}
+
+static bool login_inputs_valid(app_t *a) {
     if (!a->server[0]) {
         snprintf(a->status, sizeof(a->status),
                  a->login_mode == LOGIN_M3U ? "Informe uma URL ou caminho de playlist M3U"
                                             : "Preencha servidor, usuário e senha");
-        return;
+        return false;
     }
     if (a->login_mode == LOGIN_XTREAM && (!a->username[0] || !a->password[0])) {
         snprintf(a->status, sizeof(a->status), "Preencha servidor, usuário e senha");
-        return;
+        return false;
     }
+    return true;
+}
 
-    if (!force_reload && cached_m3u_matches(a)) {
-        resume_cached_m3u(a);
-        return;
-    }
-
+static login_job_t *create_login_job(app_t *a) {
     login_job_t *job = calloc(1, sizeof(*job));
-    if (!job) {
-        snprintf(a->status, sizeof(a->status), "Sem memória");
-        return;
-    }
+    if (!job)
+        return NULL;
     job->app = a;
     job->mode = a->login_mode;
     job->server = vip_strdup(a->server);
@@ -2325,44 +2336,42 @@ static void start_login(app_t *a, bool force_reload) {
     job->password = vip_strdup(a->password);
     job->profile_name = vip_strdup(a->profile_name);
     if (!job->server || !job->server_alt || !job->username || !job->password || !job->profile_name) {
-        if (job->password) {
-            volatile char *wipe = job->password;
-            size_t n = strlen(job->password);
-            while (n-- > 0u)
-                *wipe++ = 0;
-        }
-        free(job->server);
-        free(job->server_alt);
-        free(job->username);
-        free(job->password);
-        free(job->profile_name);
-        free(job);
+        free_login_job(job);
+        return NULL;
+    }
+    return job;
+}
+
+static bool launch_login_worker(app_t *a, login_job_t *job) {
+    atomic_store(&a->login_done, false);
+    atomic_store(&a->login_success, false);
+    atomic_store(&a->login_running, true);
+    if (pthread_create(&a->login_thread, NULL, login_worker, job) == 0) {
+        a->login_thread_started = true;
+        return true;
+    }
+    atomic_store(&a->login_running, false);
+    free_login_job(job);
+    snprintf(a->status, sizeof(a->status), "Falha ao iniciar conexão");
+    return false;
+}
+
+static void start_login(app_t *a, bool force_reload) {
+    if (atomic_load(&a->login_running) || a->login_thread_started || !login_inputs_valid(a))
+        return;
+    if (!force_reload && cached_m3u_matches(a)) {
+        resume_cached_m3u(a);
+        return;
+    }
+
+    login_job_t *job = create_login_job(a);
+    if (!job) {
         snprintf(a->status, sizeof(a->status), "Sem memória");
         return;
     }
     snprintf(a->status, sizeof(a->status),
              a->login_mode == LOGIN_M3U ? "Carregando M3U..." : "Conectando...");
-    atomic_store(&a->login_done, false);
-    atomic_store(&a->login_success, false);
-    atomic_store(&a->login_running, true);
-    if (pthread_create(&a->login_thread, NULL, login_worker, job) != 0) {
-        atomic_store(&a->login_running, false);
-        if (job->password) {
-            volatile char *wipe = job->password;
-            size_t n = strlen(job->password);
-            while (n-- > 0u)
-                *wipe++ = 0;
-        }
-        free(job->server);
-        free(job->server_alt);
-        free(job->username);
-        free(job->password);
-        free(job->profile_name);
-        free(job);
-        snprintf(a->status, sizeof(a->status), "Falha ao iniciar conexão");
-        return;
-    }
-    a->login_thread_started = true;
+    (void)launch_login_worker(a, job);
 }
 
 static void pairing_submission_cb(const char *profile_name,
@@ -2666,19 +2675,28 @@ static void *series_worker(void *userdata) {
 }
 
 /* Start series load. */
-static void start_series_load(app_t *a, size_t channel_index) {
-    if (!a || a->content_kind != CONTENT_SERIES || a->series_episode_mode ||
-        atomic_load(&a->series_running) || a->series_thread_started ||
-        channel_index >= ACTIVE_CHANNELS(a).len)
-        return;
-    vip_channel_t *series = &ACTIVE_CHANNELS(a).items[channel_index];
-    if (!series->id || strncmp(series->id, "series:", 7u) != 0)
-        return;
-    snprintf(a->series_parent_id, sizeof(a->series_parent_id), "%s", series->id);
-    const char *server = a->active_server_alt && a->server_alt[0] ? a->server_alt : a->server;
-    series_job_t *job = calloc(1, sizeof(*job));
+static void free_series_job(series_job_t *job) {
     if (!job)
         return;
+    if (job->password) {
+        volatile char *wipe = job->password;
+        size_t n = strlen(job->password);
+        while (n-- > 0u)
+            *wipe++ = 0;
+    }
+    free(job->server);
+    free(job->username);
+    free(job->password);
+    free(job->series_id);
+    free(job->title);
+    free(job->logo_url);
+    free(job);
+}
+
+static series_job_t *create_series_job(app_t *a, const vip_channel_t *series, const char *server) {
+    series_job_t *job = calloc(1, sizeof(*job));
+    if (!job)
+        return NULL;
     job->app = a;
     job->server = vip_strdup(server);
     job->username = vip_strdup(a->username);
@@ -2688,42 +2706,42 @@ static void start_series_load(app_t *a, size_t channel_index) {
     job->logo_url = vip_strdup(series->logo_url ? series->logo_url : "");
     if (!job->server || !job->username || !job->password || !job->series_id || !job->title ||
         !job->logo_url) {
-        if (job->password) {
-            volatile char *wipe = job->password;
-            size_t n = strlen(job->password);
-            while (n-- > 0u)
-                *wipe++ = 0;
-        }
-        free(job->server);
-        free(job->username);
-        free(job->password);
-        free(job->series_id);
-        free(job->title);
-        free(job->logo_url);
-        free(job);
-        return;
+        free_series_job(job);
+        return NULL;
     }
+    return job;
+}
+
+static bool series_load_allowed(app_t *a, size_t channel_index) {
+    return a && a->content_kind == CONTENT_SERIES && !a->series_episode_mode &&
+           !atomic_load(&a->series_running) && !a->series_thread_started &&
+           channel_index < ACTIVE_CHANNELS(a).len;
+}
+
+static void start_series_load(app_t *a, size_t channel_index) {
+    if (!series_load_allowed(a, channel_index))
+        return;
+
+    vip_channel_t *series = &ACTIVE_CHANNELS(a).items[channel_index];
+    if (!series->id || strncmp(series->id, "series:", 7u) != 0)
+        return;
+
+    snprintf(a->series_parent_id, sizeof(a->series_parent_id), "%s", series->id);
+    const char *server = a->active_server_alt && a->server_alt[0] ? a->server_alt : a->server;
+    series_job_t *job = create_series_job(a, series, server);
+    if (!job)
+        return;
+
     pthread_mutex_lock(&a->data_mutex);
     snprintf(a->status, sizeof(a->status), "Carregando temporadas de %s...", series->name);
     pthread_mutex_unlock(&a->data_mutex);
     atomic_store(&a->series_done, false);
     atomic_store(&a->series_success, false);
     atomic_store(&a->series_running, true);
+
     if (pthread_create(&a->series_thread, NULL, series_worker, job) != 0) {
         atomic_store(&a->series_running, false);
-        if (job->password) {
-            volatile char *wipe = job->password;
-            size_t n = strlen(job->password);
-            while (n-- > 0u)
-                *wipe++ = 0;
-        }
-        free(job->server);
-        free(job->username);
-        free(job->password);
-        free(job->series_id);
-        free(job->title);
-        free(job->logo_url);
-        free(job);
+        free_series_job(job);
         return;
     }
     a->series_thread_started = true;
@@ -5149,202 +5167,243 @@ static void choose_category(app_t *a, int index) {
 }
 
 /* Handle browse click. */
-static void handle_browse_click(app_t *a, int x, int y) {
+static bool handle_browse_top_click(app_t *a, int x, int y) {
     const int tab_x[3] = {8, 88, 174};
     const int tab_w[3] = {74, 80, 88};
     if (y >= 12 && y < 58 && x < SIDEBAR_W) {
-        for (int k = 0; k < 3; ++k)
-            if (point_in(x, y, tab_x[k], 12, tab_w[k], 46)) {
-                switch_content(a, (content_kind_t)k);
-                browse_focus_top(a, k);
-                return;
-            }
+        for (int k = 0; k < 3; ++k) {
+            if (!point_in(x, y, tab_x[k], 12, tab_w[k], 46))
+                continue;
+            switch_content(a, (content_kind_t)k);
+            browse_focus_top(a, k);
+            return true;
+        }
     }
-    int list_w = 94, fav_w = 174, list_x = a->width - list_w - 18, fav_x = list_x - fav_w - 10;
+
+    int list_w = 94, fav_w = 174;
+    int list_x = a->width - list_w - 18;
+    int fav_x = list_x - fav_w - 10;
     int search_w = fav_x - (SIDEBAR_W + 18) - 10;
     if (search_w < 180)
         search_w = 180;
+
     if (point_in(x, y, SIDEBAR_W + 18, 12, search_w, 46)) {
         browse_focus_top(a, BROWSE_TOP_SEARCH);
-        return;
+        return true;
     }
     if (point_in(x, y, fav_x, 12, fav_w, 46)) {
         browse_focus_top(a, BROWSE_TOP_FAVORITES);
         a->favorites_only = !a->favorites_only;
         rebuild_filter(a);
         browse_focus_top(a, BROWSE_TOP_FAVORITES);
-        return;
+        return true;
     }
-    if (point_in(x, y, list_x, 12, list_w, 46)) {
-        browse_focus_top(a, BROWSE_TOP_LISTS);
-        if (a->thumbs)
-            vip_thumbnail_scheduler_cancel_pending(a->thumbs);
-        clear_details_view(a);
-        refresh_profiles(a);
-        a->screen = SCREEN_LOGIN;
-        a->input_focus = INPUT_SERVER;
-        snprintf(a->status, sizeof(a->status), "Escolha uma lista salva ou conecte outra");
-        return;
+    if (!point_in(x, y, list_x, 12, list_w, 46))
+        return false;
+
+    browse_focus_top(a, BROWSE_TOP_LISTS);
+    if (a->thumbs)
+        vip_thumbnail_scheduler_cancel_pending(a->thumbs);
+    clear_details_view(a);
+    refresh_profiles(a);
+    a->screen = SCREEN_LOGIN;
+    a->input_focus = INPUT_SERVER;
+    snprintf(a->status, sizeof(a->status), "Escolha uma lista salva ou conecte outra");
+    return true;
+}
+
+static bool handle_browse_sidebar_click(app_t *a, int x, int y) {
+    if (x >= SIDEBAR_W || y < TOPBAR_H)
+        return false;
+
+    int base = TOPBAR_H + 12;
+    if (a->series_episode_mode && point_in(x, y, 8, base, SIDEBAR_W - 16, 38)) {
+        browse_focus_sidebar(a, -2);
+        return_from_episode_list(a);
+        browse_focus_sidebar(a, -1);
+        return true;
     }
-    if (x < SIDEBAR_W && y >= TOPBAR_H) {
-        int base = TOPBAR_H + 12;
-        if (a->series_episode_mode && point_in(x, y, 8, base, SIDEBAR_W - 16, 38)) {
-            browse_focus_sidebar(a, -2);
-            return_from_episode_list(a);
-            browse_focus_sidebar(a, -1);
-            return;
-        }
-        int category_y = browse_sidebar_category_y(a);
-        int local = y - category_y;
-        if (local >= 0 && local < 36) {
-            browse_focus_sidebar(a, -1);
-            choose_category(a, -1);
-            return;
-        }
-        local -= 42;
-        if (local >= 0) {
-            int row = local / 42;
-            if (local % 42 < 36) {
-                int idx = a->category_scroll + row;
-                if (idx >= 0 && (size_t)idx < ACTIVE_CATEGORIES(a).len) {
-                    browse_focus_sidebar(a, idx);
-                    choose_category(a, idx);
-                }
-            }
-        }
-        return;
+
+    int local = y - browse_sidebar_category_y(a);
+    if (local >= 0 && local < 36) {
+        browse_focus_sidebar(a, -1);
+        choose_category(a, -1);
+        return true;
     }
-    if (details_panel_active(a)) {
-        int px, py, pw, ph;
-        details_panel_geometry(a, &px, &py, &pw, &ph);
-        if (point_in(x, y, px, py, pw, ph)) {
-            if (a->filtered_len > 0u) {
-                if (a->focused_filtered >= a->filtered_len)
-                    a->focused_filtered = a->filtered_len - 1u;
-                size_t chidx = a->filtered[a->focused_filtered];
-                int panel_fav_w = 92, panel_fav_h = 32;
-                int panel_fav_x = px + pw - panel_fav_w - 14, panel_fav_y = py + 10;
-                if (point_in(x, y, panel_fav_x, panel_fav_y, panel_fav_w, panel_fav_h))
-                    toggle_favorite(a, chidx);
-            }
-            return;
+
+    local -= 42;
+    if (local >= 0 && local % 42 < 36) {
+        int idx = a->category_scroll + local / 42;
+        if (idx >= 0 && (size_t)idx < ACTIVE_CATEGORIES(a).len) {
+            browse_focus_sidebar(a, idx);
+            choose_category(a, idx);
         }
     }
+    return true;
+}
+
+static bool handle_details_panel_click(app_t *a, int x, int y) {
+    if (!details_panel_active(a))
+        return false;
+
+    int px, py, pw, ph;
+    details_panel_geometry(a, &px, &py, &pw, &ph);
+    if (!point_in(x, y, px, py, pw, ph))
+        return false;
+
+    if (a->filtered_len > 0u) {
+        if (a->focused_filtered >= a->filtered_len)
+            a->focused_filtered = a->filtered_len - 1u;
+        size_t chidx = a->filtered[a->focused_filtered];
+        int fav_w = 92, fav_h = 32;
+        int fav_x = px + pw - fav_w - 14, fav_y = py + 10;
+        if (point_in(x, y, fav_x, fav_y, fav_w, fav_h))
+            toggle_favorite(a, chidx);
+    }
+    return true;
+}
+
+static void handle_browse_card_click(app_t *a, int x, int y) {
     card_layout_t layout = browse_layout(a);
     int content_x = SIDEBAR_W + 20, content_y = TOPBAR_H + 18;
     if (x < content_x || y < content_y)
         return;
-    int relx = x - content_x, rely = y - content_y + a->grid_scroll;
-    int col = relx / (layout.card_w + GRID_GAP), row = rely / layout.row_step;
+
+    int relx = x - content_x;
+    int rely = y - content_y + a->grid_scroll;
+    int col = relx / (layout.card_w + GRID_GAP);
+    int row = rely / layout.row_step;
     if (col < 0 || col >= layout.cols || relx % (layout.card_w + GRID_GAP) >= layout.card_w ||
         rely % layout.row_step >= layout.card_h)
         return;
+
     size_t fidx = (size_t)row * (size_t)layout.cols + (size_t)col;
-    if (fidx < a->filtered_len) {
-        browse_focus_grid(a);
-        a->focused_filtered = fidx;
-        size_t chidx = a->filtered[fidx];
-        int cx = content_x + col * (layout.card_w + GRID_GAP);
-        int cy = content_y - a->grid_scroll + row * layout.row_step;
-        if (point_in(x, y, cx + layout.card_w - 66, cy + 2, 64, 38))
-            toggle_favorite(a, chidx);
-        else
-            activate_item(a, chidx);
-    }
+    if (fidx >= a->filtered_len)
+        return;
+
+    browse_focus_grid(a);
+    a->focused_filtered = fidx;
+    size_t chidx = a->filtered[fidx];
+    int cx = content_x + col * (layout.card_w + GRID_GAP);
+    int cy = content_y - a->grid_scroll + row * layout.row_step;
+    if (point_in(x, y, cx + layout.card_w - 66, cy + 2, 64, 38))
+        toggle_favorite(a, chidx);
+    else
+        activate_item(a, chidx);
+}
+
+static void handle_browse_click(app_t *a, int x, int y) {
+    if (handle_browse_top_click(a, x, y) ||
+        handle_browse_sidebar_click(a, x, y) ||
+        handle_details_panel_click(a, x, y))
+        return;
+    handle_browse_card_click(a, x, y);
 }
 
 /* Handle click. */
-static void handle_click(app_t *a, int x, int y) {
-    if (a->screen == SCREEN_LOGIN) {
-        int w = a->width > 1120 ? 1080 : a->width - 40;
-        if (w < 720)
-            w = 720;
-        int h = 620, px = (a->width - w) / 2, py = (a->height - h) / 2;
-        if (py < 18)
-            py = 18;
-        int form_x = px + 34, form_w = (w * 58) / 100 - 50, list_x = px + (w * 60) / 100,
-            list_w = w - (list_x - px) - 34;
-        int mode_w = (form_w - 10) / 2;
-        if (point_in(x, y, form_x, py + 88, mode_w, 42)) {
-            login_select_mode(a, LOGIN_XTREAM);
+static void handle_saved_profile_click(app_t *a, int x, int y, int list_x, int list_w, int py) {
+    int row_y = py + 154;
+    for (int r = 0; r < 6; ++r) {
+        int idx = a->profile_scroll + r;
+        if (idx < 0 || (size_t)idx >= a->profiles.len)
+            break;
+        if (point_in(x, y, list_x, row_y, list_w, 52)) {
+            a->profile_focus = idx;
+            load_profile_into_form(a, (size_t)idx);
+            if (cached_m3u_matches(a))
+                start_login(a, false);
             return;
         }
-        if (point_in(x, y, form_x + mode_w + 10, py + 88, mode_w, 42)) {
-            login_select_mode(a, LOGIN_M3U);
-            return;
-        }
-        if (point_in(x, y, form_x, py + 142, form_w, 44))
-            a->input_focus = INPUT_PROFILE_NAME;
-        else if (point_in(x, y, form_x, py + 196, form_w, 44))
-            a->input_focus = INPUT_SERVER;
-        else if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 250, form_w, 44))
-            a->input_focus = INPUT_SERVER_ALT;
-        else if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 304, form_w, 44))
-            a->input_focus = INPUT_USERNAME;
-        else if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 358, form_w, 44))
-            a->input_focus = INPUT_PASSWORD;
-        else if (a->login_mode == LOGIN_M3U && point_in(x, y, form_x, py + 314, form_w, 46)) {
-            a->input_focus = INPUT_PHONE;
-            start_phone_pairing(a);
-        } else if (point_in(x, y, form_x, py + 430, form_w, 50)) {
-            a->input_focus = INPUT_CONNECT;
-            start_login(a, true);
-        }
-        else {
-            int row_y = py + 154;
-            for (int r = 0; r < 6; ++r) {
-                int idx = a->profile_scroll + r;
-                if ((size_t)idx >= a->profiles.len)
-                    break;
-                if (point_in(x, y, list_x, row_y, list_w, 52)) {
-                    a->profile_focus = idx;
-                    load_profile_into_form(a, (size_t)idx);
-
-                    /* If this is the M3U that is already in memory, a click on
-                     * the saved profile means Continue rather than another
-                     * network download. Other profiles keep the existing
-                     * behavior and are only loaded into the form. */
-                    if (cached_m3u_matches(a))
-                        start_login(a, false);
-                    return;
-                }
-                row_y += 60;
-            }
-            a->input_focus = 0;
-        }
-    } else if (a->screen == SCREEN_BROWSE)
-        handle_browse_click(a, x, y);
-    else {
-        show_player_hud(a);
-        if (!a->fullscreen && point_in(x, y, 12, 10, 132, 44)) {
-            leave_player(a);
-            return;
-        }
-        int cy = a->height - PLAYER_CONTROLS_H;
-        if (point_in(x, y, 16, cy + 18, 52, 46) && a->player) {
-            vip_mpv_player_set_paused(a->player, !vip_mpv_player_is_paused(a->player));
-            save_current_progress(a, true);
-            return;
-        }
-        if (point_in(x, y, 76, cy + 18, 82, 46)) {
-            leave_player(a);
-            return;
-        }
-        if (!a->player_item_live && a->player) {
-            int tx, ty, tw, th;
-            timeline_geometry(a, &tx, &ty, &tw, &th);
-            if (point_in(x, y, tx, ty, tw, th + 12)) {
-                vip_mpv_player_snapshot_t snap = {0};
-                vip_mpv_player_snapshot(a->player, &snap);
-                if (snap.duration_seconds > 0.0) {
-                    double pos = ((double)(x - tx) / (double)tw) * snap.duration_seconds;
-                    vip_error_t err = {0};
-                    (void)vip_mpv_player_seek(a->player, pos, &err);
-                    a->timeline_dragging = true;
-                }
-            }
-        }
+        row_y += 60;
     }
+    a->input_focus = 0;
+}
+
+static void handle_login_click(app_t *a, int x, int y) {
+    int w = a->width > 1120 ? 1080 : a->width - 40;
+    if (w < 720)
+        w = 720;
+    int h = 620, px = (a->width - w) / 2, py = (a->height - h) / 2;
+    if (py < 18)
+        py = 18;
+    int form_x = px + 34;
+    int form_w = (w * 58) / 100 - 50;
+    int list_x = px + (w * 60) / 100;
+    int list_w = w - (list_x - px) - 34;
+    int mode_w = (form_w - 10) / 2;
+
+    if (point_in(x, y, form_x, py + 88, mode_w, 42)) {
+        login_select_mode(a, LOGIN_XTREAM);
+        return;
+    }
+    if (point_in(x, y, form_x + mode_w + 10, py + 88, mode_w, 42)) {
+        login_select_mode(a, LOGIN_M3U);
+        return;
+    }
+    if (point_in(x, y, form_x, py + 142, form_w, 44))
+        a->input_focus = INPUT_PROFILE_NAME;
+    else if (point_in(x, y, form_x, py + 196, form_w, 44))
+        a->input_focus = INPUT_SERVER;
+    else if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 250, form_w, 44))
+        a->input_focus = INPUT_SERVER_ALT;
+    else if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 304, form_w, 44))
+        a->input_focus = INPUT_USERNAME;
+    else if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 358, form_w, 44))
+        a->input_focus = INPUT_PASSWORD;
+    else if (a->login_mode == LOGIN_M3U && point_in(x, y, form_x, py + 314, form_w, 46)) {
+        a->input_focus = INPUT_PHONE;
+        start_phone_pairing(a);
+    } else if (point_in(x, y, form_x, py + 430, form_w, 50)) {
+        a->input_focus = INPUT_CONNECT;
+        start_login(a, true);
+    } else {
+        handle_saved_profile_click(a, x, y, list_x, list_w, py);
+    }
+}
+
+static void handle_player_click(app_t *a, int x, int y) {
+    show_player_hud(a);
+    if (!a->fullscreen && point_in(x, y, 12, 10, 132, 44)) {
+        leave_player(a);
+        return;
+    }
+
+    int cy = a->height - PLAYER_CONTROLS_H;
+    if (point_in(x, y, 16, cy + 18, 52, 46) && a->player) {
+        vip_mpv_player_set_paused(a->player, !vip_mpv_player_is_paused(a->player));
+        save_current_progress(a, true);
+        return;
+    }
+    if (point_in(x, y, 76, cy + 18, 82, 46)) {
+        leave_player(a);
+        return;
+    }
+    if (a->player_item_live || !a->player)
+        return;
+
+    int tx, ty, tw, th;
+    timeline_geometry(a, &tx, &ty, &tw, &th);
+    if (!point_in(x, y, tx, ty, tw, th + 12))
+        return;
+
+    vip_mpv_player_snapshot_t snap = {0};
+    vip_mpv_player_snapshot(a->player, &snap);
+    if (snap.duration_seconds <= 0.0)
+        return;
+
+    double pos = ((double)(x - tx) / (double)tw) * snap.duration_seconds;
+    vip_error_t err = {0};
+    (void)vip_mpv_player_seek(a->player, pos, &err);
+    a->timeline_dragging = true;
+}
+
+static void handle_click(app_t *a, int x, int y) {
+    if (a->screen == SCREEN_LOGIN)
+        handle_login_click(a, x, y);
+    else if (a->screen == SCREEN_BROWSE)
+        handle_browse_click(a, x, y);
+    else
+        handle_player_click(a, x, y);
 }
 
 /* Handle wheel. */
