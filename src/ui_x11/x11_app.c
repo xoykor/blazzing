@@ -4779,76 +4779,117 @@ static void enqueue_detail_artwork(app_t *a, const vip_channel_t *ch, const char
 }
 
 /* Draw details panel. */
-static void draw_details_panel(app_t *a) {
-    if (!details_panel_active(a) || a->filtered_len == 0u)
-        return;
-    if (a->focused_filtered >= a->filtered_len)
-        a->focused_filtered = a->filtered_len - 1u;
-    size_t chidx = a->filtered[a->focused_filtered];
-    if (chidx >= ACTIVE_CHANNELS(a).len)
-        return;
-    vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
+typedef struct {
+    char loaded_id[128];
+    char status[256];
+    char plot[3072];
+    char cover[1024];
+    char backdrop[1024];
+    char genre[256];
+    char release_date[128];
+    char rating[64];
+    char duration[128];
+    char cast[768];
+    char director[512];
+} details_panel_data_t;
 
-    int px, py, pw, ph;
-    details_panel_geometry(a, &px, &py, &pw, &ph);
+static const char *details_text_or_empty(const char *value) {
+    return value ? value : "";
+}
+
+static void snapshot_details_panel_data(app_t *a, details_panel_data_t *data) {
+    pthread_mutex_lock(&a->data_mutex);
+    snprintf(data->loaded_id, sizeof(data->loaded_id), "%s", a->details_media_id);
+    snprintf(data->status, sizeof(data->status), "%s", a->details_status);
+    snprintf(data->plot, sizeof(data->plot), "%s", details_text_or_empty(a->details_metadata.plot));
+    snprintf(data->cover, sizeof(data->cover), "%s", details_text_or_empty(a->details_metadata.cover_url));
+    snprintf(data->backdrop, sizeof(data->backdrop), "%s",
+             details_text_or_empty(a->details_metadata.backdrop_url));
+    snprintf(data->genre, sizeof(data->genre), "%s", details_text_or_empty(a->details_metadata.genre));
+    snprintf(data->release_date, sizeof(data->release_date), "%s",
+             details_text_or_empty(a->details_metadata.release_date));
+    snprintf(data->rating, sizeof(data->rating), "%s", details_text_or_empty(a->details_metadata.rating));
+    snprintf(data->duration, sizeof(data->duration), "%s",
+             details_text_or_empty(a->details_metadata.duration));
+    snprintf(data->cast, sizeof(data->cast), "%s", details_text_or_empty(a->details_metadata.cast));
+    snprintf(data->director, sizeof(data->director), "%s",
+             details_text_or_empty(a->details_metadata.director));
+    pthread_mutex_unlock(&a->data_mutex);
+}
+
+static void draw_details_panel_frame(app_t *a, int px, int py, int pw, int ph) {
     if (a->renderer.active) {
         vip_ui_render_round_rect(&a->renderer, px + 5, py + 8, pw, ph, 20, 0x000000u, 0.55);
         vip_ui_render_round_rect(&a->renderer, px, py, pw, ph, 20, 0x111722u, 0.97);
         vip_ui_render_round_stroke(&a->renderer, px, py, pw, ph, 20, 0x343A48u, 1.0, 1.0);
-    } else {
-        fill_round_rect(a, px + 4, py + 6, pw, ph, 18, a->colors.black);
-        fill_round_rect(a, px, py, pw, ph, 18, a->colors.panel);
-        stroke_round_rect(a, px, py, pw, ph, 18, a->colors.border);
+        return;
     }
 
-    char loaded_id[128], status[256], plot[3072], cover[1024], backdrop[1024];
-    char genre[256], release_date[128], rating[64], duration[128], cast[768], director[512];
-    pthread_mutex_lock(&a->data_mutex);
-    snprintf(loaded_id, sizeof(loaded_id), "%s", a->details_media_id);
-    snprintf(status, sizeof(status), "%s", a->details_status);
-    snprintf(plot, sizeof(plot), "%s", a->details_metadata.plot ? a->details_metadata.plot : "");
-    snprintf(cover, sizeof(cover), "%s", a->details_metadata.cover_url ? a->details_metadata.cover_url : "");
-    snprintf(backdrop, sizeof(backdrop), "%s",
-             a->details_metadata.backdrop_url ? a->details_metadata.backdrop_url : "");
-    snprintf(genre, sizeof(genre), "%s", a->details_metadata.genre ? a->details_metadata.genre : "");
-    snprintf(release_date, sizeof(release_date), "%s",
-             a->details_metadata.release_date ? a->details_metadata.release_date : "");
-    snprintf(rating, sizeof(rating), "%s", a->details_metadata.rating ? a->details_metadata.rating : "");
-    snprintf(duration, sizeof(duration), "%s",
-             a->details_metadata.duration ? a->details_metadata.duration : "");
-    snprintf(cast, sizeof(cast), "%s", a->details_metadata.cast ? a->details_metadata.cast : "");
-    snprintf(director, sizeof(director), "%s",
-             a->details_metadata.director ? a->details_metadata.director : "");
-    pthread_mutex_unlock(&a->data_mutex);
+    fill_round_rect(a, px + 4, py + 6, pw, ph, 18, a->colors.black);
+    fill_round_rect(a, px, py, pw, ph, 18, a->colors.panel);
+    stroke_round_rect(a, px, py, pw, ph, 18, a->colors.border);
+}
 
-    char title[256];
-    bounded_text(title, sizeof(title), ch->name, 72);
-    if (a->renderer.active)
-        vip_ui_render_text(&a->renderer, px + 16, py + 13, pw - 132, title, "Sans Bold 12", 0xF6F7FBu, 1.0,
-                           false);
-    else
-        draw_text_font(a, a->font_heading, px + 16, py + 31, title, a->colors.text);
-    bool favorite = a->favorite_flags && a->favorite_flags[chidx];
-    int fav_w = 92, fav_h = 32, fav_x = px + pw - fav_w - 14, fav_y = py + 10;
+static void draw_details_favorite_button(app_t *a,
+                                         bool favorite,
+                                         int fav_x,
+                                         int fav_y,
+                                         int fav_w,
+                                         int fav_h) {
+    const char *label = favorite ? "SALVO" : "FAVORITAR";
     if (a->renderer.active) {
         vip_ui_render_round_rect(&a->renderer, fav_x, fav_y, fav_w, fav_h, 12,
                                  favorite ? 0x572517u : 0x171C28u, 1.0);
         vip_ui_render_round_stroke(&a->renderer, fav_x, fav_y, fav_w, fav_h, 12,
                                    favorite ? 0xFF5F2Eu : 0x343A48u, 1.0, 1.0);
-        vip_ui_render_text(&a->renderer, fav_x, fav_y + 9, fav_w, favorite ? "SALVO" : "FAVORITAR",
-                           favorite ? "Sans Bold 8" : "Sans 8", favorite ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
-    } else {
-        fill_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12, favorite ? a->colors.accent2 : a->colors.panel2);
-        stroke_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12, favorite ? a->colors.accent : a->colors.border);
-        draw_centered(a, fav_x, fav_y + 21, fav_w, favorite ? "SALVO" : "FAVORITAR",
-                      favorite ? a->colors.text : a->colors.muted);
+        vip_ui_render_text(&a->renderer, fav_x, fav_y + 9, fav_w, label,
+                           favorite ? "Sans Bold 8" : "Sans 8",
+                           favorite ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
+        return;
     }
 
-    bool current = ch->id && strcmp(loaded_id, ch->id) == 0;
-    int art_x = px + 16, art_y = py + 50, art_w = pw - 32, art_h = 170;
+    fill_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12,
+                    favorite ? a->colors.accent2 : a->colors.panel2);
+    stroke_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12,
+                      favorite ? a->colors.accent : a->colors.border);
+    draw_centered(a, fav_x, fav_y + 21, fav_w, label,
+                  favorite ? a->colors.text : a->colors.muted);
+}
+
+static void draw_details_panel_header(app_t *a,
+                                      const vip_channel_t *ch,
+                                      size_t chidx,
+                                      int px,
+                                      int py,
+                                      int pw) {
+    char title[256];
+    bounded_text(title, sizeof(title), ch->name, 72);
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, px + 16, py + 13, pw - 132, title, "Sans Bold 12",
+                           0xF6F7FBu, 1.0, false);
+    else
+        draw_text_font(a, a->font_heading, px + 16, py + 31, title, a->colors.text);
+
+    bool favorite = a->favorite_flags && a->favorite_flags[chidx];
+    int fav_w = 92;
+    int fav_h = 32;
+    int fav_x = px + pw - fav_w - 14;
+    int fav_y = py + 10;
+    draw_details_favorite_button(a, favorite, fav_x, fav_y, fav_w, fav_h);
+}
+
+static bool draw_details_artwork(app_t *a,
+                                 const vip_channel_t *ch,
+                                 const details_panel_data_t *data,
+                                 bool current,
+                                 int art_x,
+                                 int art_y,
+                                 int art_w,
+                                 int art_h) {
     fill_rect(a, art_x, art_y, (unsigned)art_w, (unsigned)art_h, a->colors.black);
     bool art_ok = false;
-    const char *art_url = backdrop[0] ? backdrop : cover;
+    const char *art_url = data->backdrop[0] ? data->backdrop : data->cover;
+
     if (current && art_url[0]) {
         char art_id[256];
         detail_art_id(art_id, sizeof(art_id), ch->id);
@@ -4859,55 +4900,128 @@ static void draw_details_panel(app_t *a) {
         if (!art_ok)
             enqueue_detail_artwork(a, ch, art_url, 2000000LL);
     }
+
     if (!art_ok)
         draw_centered(a, art_x, art_y + art_h / 2 + 5, art_w,
                       current ? "carregando banner..." : "carregando detalhes...", a->colors.muted);
     stroke_rect(a, art_x, art_y, (unsigned)art_w, (unsigned)art_h, a->colors.border);
+    return art_ok;
+}
+
+static bool append_details_fact(char *facts,
+                                size_t cap,
+                                size_t *used,
+                                const char *label,
+                                const char *value) {
+    if (!value[0])
+        return true;
+
+    int n = snprintf(facts + *used, cap - *used, "%s%s: %s",
+                     *used ? " | " : "", label, value);
+    if (n < 0 || (size_t)n >= cap - *used)
+        return false;
+    *used += (size_t)n;
+    return true;
+}
+
+static void build_details_facts(const details_panel_data_t *data, char *facts, size_t cap) {
+    size_t used = 0u;
+    facts[0] = '\0';
+    if (!append_details_fact(facts, cap, &used, "Data", data->release_date))
+        return;
+    if (!append_details_fact(facts, cap, &used, "Gênero", data->genre))
+        return;
+    if (!append_details_fact(facts, cap, &used, "Nota", data->rating))
+        return;
+    (void)append_details_fact(facts, cap, &used, "Duração", data->duration);
+}
+
+static int draw_details_synopsis(app_t *a,
+                                 const details_panel_data_t *data,
+                                 int px,
+                                 int y,
+                                 int pw) {
+    draw_text(a, px + 16, y, "Sinopse", a->colors.text);
+    y += 22;
+    if (data->plot[0])
+        return draw_wrapped_text(a, px + 16, y, pw - 32, data->plot, 8, a->colors.muted);
+
+    draw_text(a, px + 16, y, "O provider não enviou sinopse para este item.", a->colors.muted);
+    return y + 20;
+}
+
+static void draw_details_credits(app_t *a,
+                                 const details_panel_data_t *data,
+                                 int px,
+                                 int py,
+                                 int pw,
+                                 int ph,
+                                 int y) {
+    y += 8;
+    if (data->director[0] && y < py + ph - 72) {
+        char line[600];
+        snprintf(line, sizeof(line), "Direção: %s", data->director);
+        y = draw_wrapped_text(a, px + 16, y, pw - 32, line, 2, a->colors.muted);
+    }
+    if (data->cast[0] && y < py + ph - 48) {
+        char line[880];
+        snprintf(line, sizeof(line), "Elenco: %s", data->cast);
+        (void)draw_wrapped_text(a, px + 16, y, pw - 32, line, 2, a->colors.muted);
+    }
+}
+
+static void draw_details_body(app_t *a,
+                              const details_panel_data_t *data,
+                              int px,
+                              int py,
+                              int pw,
+                              int ph,
+                              int y) {
+    char facts[640];
+    build_details_facts(data, facts, sizeof(facts));
+    if (facts[0]) {
+        y = draw_wrapped_text(a, px + 16, y, pw - 32, facts, 2, a->colors.muted);
+        y += 6;
+    }
+
+    y = draw_details_synopsis(a, data, px, y, pw);
+    draw_details_credits(a, data, px, py, pw, ph, y);
+    if (!data->plot[0] && data->status[0])
+        draw_text(a, px + 16, py + ph - 18, data->status, a->colors.muted);
+}
+
+static void draw_details_panel(app_t *a) {
+    if (!details_panel_active(a) || a->filtered_len == 0u)
+        return;
+    if (a->focused_filtered >= a->filtered_len)
+        a->focused_filtered = a->filtered_len - 1u;
+
+    size_t chidx = a->filtered[a->focused_filtered];
+    if (chidx >= ACTIVE_CHANNELS(a).len)
+        return;
+    vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
+
+    int px, py, pw, ph;
+    details_panel_geometry(a, &px, &py, &pw, &ph);
+    draw_details_panel_frame(a, px, py, pw, ph);
+
+    details_panel_data_t data;
+    snapshot_details_panel_data(a, &data);
+    draw_details_panel_header(a, ch, chidx, px, py, pw);
+
+    bool current = ch->id && strcmp(data.loaded_id, ch->id) == 0;
+    int art_x = px + 16;
+    int art_y = py + 50;
+    int art_w = pw - 32;
+    int art_h = 170;
+    (void)draw_details_artwork(a, ch, &data, current, art_x, art_y, art_w, art_h);
 
     int y = art_y + art_h + 24;
     if (!current) {
         draw_text(a, px + 16, y, "Carregando detalhes da obra...", a->colors.muted);
         return;
     }
-
-    char facts[640] = {0};
-    size_t used = 0u;
-    const char *values[4] = {release_date, genre, rating, duration};
-    const char *labels[4] = {"Data", "Gênero", "Nota", "Duração"};
-    for (size_t i = 0; i < 4u; ++i) {
-        if (!values[i][0])
-            continue;
-        int n =
-            snprintf(facts + used, sizeof(facts) - used, "%s%s: %s", used ? " | " : "", labels[i], values[i]);
-        if (n < 0 || (size_t)n >= sizeof(facts) - used)
-            break;
-        used += (size_t)n;
-    }
-    if (facts[0]) {
-        y = draw_wrapped_text(a, px + 16, y, pw - 32, facts, 2, a->colors.muted);
-        y += 6;
-    }
-    draw_text(a, px + 16, y, "Sinopse", a->colors.text);
-    y += 22;
-    if (plot[0])
-        y = draw_wrapped_text(a, px + 16, y, pw - 32, plot, 8, a->colors.muted);
-    else {
-        draw_text(a, px + 16, y, "O provider não enviou sinopse para este item.", a->colors.muted);
-        y += 20;
-    }
-    y += 8;
-    if (director[0] && y < py + ph - 72) {
-        char line[600];
-        snprintf(line, sizeof(line), "Direção: %s", director);
-        y = draw_wrapped_text(a, px + 16, y, pw - 32, line, 2, a->colors.muted);
-    }
-    if (cast[0] && y < py + ph - 48) {
-        char line[880];
-        snprintf(line, sizeof(line), "Elenco: %s", cast);
-        (void)draw_wrapped_text(a, px + 16, y, pw - 32, line, 2, a->colors.muted);
-    }
-    if (!plot[0] && status[0])
-        draw_text(a, px + 16, py + ph - 18, status, a->colors.muted);
+    draw_details_body(a, &data, px, py, pw, ph, y);
 }
 
 /* Draw toast. */
