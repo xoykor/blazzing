@@ -2856,23 +2856,31 @@ static void clear_details_view(app_t *a) {
     pthread_mutex_unlock(&a->data_mutex);
 }
 
-/* Start details load. */
-static void start_details_load(app_t *a, size_t channel_index) {
-    if (!a || atomic_load(&a->details_running) || a->details_thread_started ||
-        a->login_mode != LOGIN_XTREAM || a->series_episode_mode ||
-        (a->content_kind != CONTENT_VOD && a->content_kind != CONTENT_SERIES) ||
-        channel_index >= ACTIVE_CHANNELS(a).len)
-        return;
-    vip_channel_t *media = &ACTIVE_CHANNELS(a).items[channel_index];
-    if (!media->id || !media->provider_id || !media->id[0])
-        return;
-    const char *server = a->active_server_alt && a->server_alt[0] ? a->server_alt : a->server;
-    if (!server[0] || !a->username[0] || !a->password[0])
-        return;
+/* Return whether a details request may start for this catalog item. */
+static bool details_load_allowed(const app_t *a, size_t channel_index) {
+    if (!a || atomic_load(&a->details_running) || a->details_thread_started)
+        return false;
+    if (a->login_mode != LOGIN_XTREAM || a->series_episode_mode)
+        return false;
+    if (a->content_kind != CONTENT_VOD && a->content_kind != CONTENT_SERIES)
+        return false;
+    return channel_index < ACTIVE_CHANNELS(a).len;
+}
 
+/* Return the active Xtream server used by metadata requests. */
+static const char *details_active_server(const app_t *a) {
+    if (a->active_server_alt && a->server_alt[0])
+        return a->server_alt;
+    return a->server;
+}
+
+/* Allocate and copy all data needed by the background details worker. */
+static details_job_t *create_details_job(app_t *a, const vip_channel_t *media,
+                                         const char *server) {
     details_job_t *job = calloc(1, sizeof(*job));
     if (!job)
-        return;
+        return NULL;
+
     job->app = a;
     job->kind = a->content_kind;
     job->server = vip_strdup(server);
@@ -2881,12 +2889,16 @@ static void start_details_load(app_t *a, size_t channel_index) {
     job->provider_id = vip_strdup(media->provider_id);
     job->media_id = vip_strdup(media->id);
     job->title = vip_strdup(media->name);
-    if (!job->server || !job->username || !job->password || !job->provider_id || !job->media_id ||
-        !job->title) {
+    if (!job->server || !job->username || !job->password ||
+        !job->provider_id || !job->media_id || !job->title) {
         details_job_free(job);
-        return;
+        return NULL;
     }
+    return job;
+}
 
+/* Initialize the visible details state before launching the worker. */
+static void prepare_details_load(app_t *a, const vip_channel_t *media) {
     pthread_mutex_lock(&a->data_mutex);
     vip_media_metadata_clear(&a->details_metadata);
     snprintf(a->details_media_id, sizeof(a->details_media_id), "%s", media->id);
@@ -2896,15 +2908,43 @@ static void start_details_load(app_t *a, size_t channel_index) {
     atomic_store(&a->details_done, false);
     atomic_store(&a->details_success, false);
     atomic_store(&a->details_running, true);
-    if (pthread_create(&a->details_thread, NULL, details_worker, job) != 0) {
-        atomic_store(&a->details_running, false);
-        pthread_mutex_lock(&a->data_mutex);
-        snprintf(a->details_status, sizeof(a->details_status), "Falha ao iniciar carregamento de detalhes");
-        pthread_mutex_unlock(&a->data_mutex);
-        details_job_free(job);
-        return;
+}
+
+/* Launch the details worker and restore state if pthread_create fails. */
+static bool launch_details_worker(app_t *a, details_job_t *job) {
+    if (pthread_create(&a->details_thread, NULL, details_worker, job) == 0) {
+        a->details_thread_started = true;
+        return true;
     }
-    a->details_thread_started = true;
+
+    atomic_store(&a->details_running, false);
+    pthread_mutex_lock(&a->data_mutex);
+    snprintf(a->details_status, sizeof(a->details_status),
+             "Falha ao iniciar carregamento de detalhes");
+    pthread_mutex_unlock(&a->data_mutex);
+    details_job_free(job);
+    return false;
+}
+
+/* Start details load. */
+static void start_details_load(app_t *a, size_t channel_index) {
+    if (!details_load_allowed(a, channel_index))
+        return;
+
+    vip_channel_t *media = &ACTIVE_CHANNELS(a).items[channel_index];
+    if (!media->id || !media->provider_id || !media->id[0])
+        return;
+
+    const char *server = details_active_server(a);
+    if (!server[0] || !a->username[0] || !a->password[0])
+        return;
+
+    details_job_t *job = create_details_job(a, media, server);
+    if (!job)
+        return;
+
+    prepare_details_load(a, media);
+    (void)launch_details_worker(a, job);
 }
 
 /* Start details load in the maybe. */
