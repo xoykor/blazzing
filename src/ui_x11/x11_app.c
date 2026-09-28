@@ -998,54 +998,78 @@ static void details_panel_geometry(const app_t *a, int *x, int *y, int *w, int *
 
 /* Choose card geometry from artwork shape instead of forcing posters and
  * channel logos into the same aspect ratio. */
-static card_layout_t browse_layout(app_t *a) {
-    card_layout_t layout = {0};
-    layout.mode = detect_artwork_mode(a);
-    int ideal_w = 196, min_w = 168, max_w = 224;
-    if (layout.mode == ART_SQUARE) {
-        ideal_w = 224;
-        min_w = 184;
-        max_w = 260;
-    } else if (layout.mode == ART_LANDSCAPE) {
-        ideal_w = 320;
-        min_w = 260;
-        max_w = 380;
+static void artwork_width_limits(artwork_mode_t mode, int *ideal_w, int *min_w, int *max_w) {
+    *ideal_w = 196;
+    *min_w = 168;
+    *max_w = 224;
+    if (mode == ART_SQUARE) {
+        *ideal_w = 224;
+        *min_w = 184;
+        *max_w = 260;
+    } else if (mode == ART_LANDSCAPE) {
+        *ideal_w = 320;
+        *min_w = 260;
+        *max_w = 380;
     }
+}
 
-    int content_x = SIDEBAR_W + 20;
+static int browse_available_width(app_t *a, int content_x, int min_w) {
     int avail_w = a->width - content_x - 18;
     if (details_panel_active(a)) {
         int px, py, pw, ph;
         details_panel_geometry(a, &px, &py, &pw, &ph);
         (void)py;
+        (void)pw;
         (void)ph;
         avail_w = px - content_x - 12;
     }
-    if (avail_w < min_w)
-        avail_w = min_w;
-    layout.cols = (avail_w + GRID_GAP) / (ideal_w + GRID_GAP);
-    if (layout.cols < 1)
-        layout.cols = 1;
-    int fitted = (avail_w - (layout.cols - 1) * GRID_GAP) / layout.cols;
-    while (fitted > max_w && layout.cols < 16) {
-        ++layout.cols;
-        fitted = (avail_w - (layout.cols - 1) * GRID_GAP) / layout.cols;
+    return avail_w < min_w ? min_w : avail_w;
+}
+
+static int fit_browse_card_width(int avail_w, int ideal_w, int min_w, int max_w, int *cols_out) {
+    int cols = (avail_w + GRID_GAP) / (ideal_w + GRID_GAP);
+    if (cols < 1)
+        cols = 1;
+
+    int fitted = (avail_w - (cols - 1) * GRID_GAP) / cols;
+    while (fitted > max_w && cols < 16) {
+        ++cols;
+        fitted = (avail_w - (cols - 1) * GRID_GAP) / cols;
     }
-    while (fitted < min_w && layout.cols > 1) {
-        --layout.cols;
-        fitted = (avail_w - (layout.cols - 1) * GRID_GAP) / layout.cols;
+    while (fitted < min_w && cols > 1) {
+        --cols;
+        fitted = (avail_w - (cols - 1) * GRID_GAP) / cols;
     }
+
     if (fitted < min_w)
         fitted = min_w;
     if (fitted > max_w)
         fitted = max_w;
-    layout.card_w = fitted;
-    if (layout.mode == ART_PORTRAIT)
-        layout.art_h = (layout.card_w * 3) / 2;
-    else if (layout.mode == ART_SQUARE)
-        layout.art_h = layout.card_w;
-    else
-        layout.art_h = (layout.card_w * 9) / 16;
+    *cols_out = cols;
+    return fitted;
+}
+
+static int artwork_height(artwork_mode_t mode, int card_w) {
+    if (mode == ART_PORTRAIT)
+        return (card_w * 3) / 2;
+    if (mode == ART_SQUARE)
+        return card_w;
+    return (card_w * 9) / 16;
+}
+
+static card_layout_t browse_layout(app_t *a) {
+    card_layout_t layout = {0};
+    layout.mode = detect_artwork_mode(a);
+
+    int ideal_w = 0;
+    int min_w = 0;
+    int max_w = 0;
+    artwork_width_limits(layout.mode, &ideal_w, &min_w, &max_w);
+
+    int content_x = SIDEBAR_W + 20;
+    int avail_w = browse_available_width(a, content_x, min_w);
+    layout.card_w = fit_browse_card_width(avail_w, ideal_w, min_w, max_w, &layout.cols);
+    layout.art_h = artwork_height(layout.mode, layout.card_w);
     layout.card_h = layout.art_h + 66;
     layout.row_step = layout.card_h + GRID_GAP;
     return layout;
@@ -4321,47 +4345,79 @@ static void maybe_failover_player(app_t *a) {
 }
 
 /* Draw input. */
+static void draw_input_frame(app_t *a, int x, int y, int w, int h, bool focused, bool search_focused) {
+    fill_round_rect(a, x + 2, y + 3, w, h, 12, a->colors.black);
+    fill_round_rect(a, x, y, w, h, 12, search_focused ? a->colors.accent2 : a->colors.panel2);
+    stroke_round_rect(a, x, y, w, h, 12, focused ? a->colors.accent : a->colors.border);
+    if (!focused)
+        return;
+
+    stroke_round_rect(a, x + 2, y + 2, w - 4, h - 4, 10,
+                      search_focused ? a->colors.accent : a->colors.accent2);
+    if (search_focused)
+        fill_round_rect(a, x + 5, y + 8, 4, h - 16, 2, a->colors.accent);
+}
+
+static const char *input_display_text(const char *value,
+                                      const char *placeholder,
+                                      bool search_focused,
+                                      bool password,
+                                      char *masked,
+                                      size_t masked_cap) {
+    const char *text = value && value[0] ? value : (search_focused ? "Digite para buscar..." : placeholder);
+    if (!password || !value || !value[0])
+        return text;
+
+    size_t n = strlen(value);
+    if (n >= masked_cap)
+        n = masked_cap - 1u;
+    memset(masked, '*', n);
+    masked[n] = '\0';
+    return masked;
+}
+
+static void draw_input_label(app_t *a,
+                             int x,
+                             int y,
+                             int w,
+                             int h,
+                             const char *text,
+                             bool bright) {
+    if (a->renderer.active) {
+        vip_ui_render_text(&a->renderer, x + 16, y + (h - 16) / 2, w - 32, text, "Sans 10",
+                           bright ? 0xF6F7FBu : 0xAAB2C4u, 1.0, false);
+        return;
+    }
+    draw_text(a, x + 16, y + h / 2 + 6, text, bright ? a->colors.text : a->colors.muted);
+}
+
+static void draw_search_input_caret(app_t *a, int x, int y, int w, int h, const char *value) {
+    const char *caret_text = value && value[0] ? value : "";
+    int measured = a->renderer.active ? vip_ui_render_text_width(&a->renderer, caret_text, "Sans 10")
+                                      : text_width(a, caret_text);
+    int caret_x = x + 16 + measured;
+    if (caret_x < x + 16)
+        caret_x = x + 16;
+    if (caret_x > x + w - 18)
+        caret_x = x + w - 18;
+
+    set_fg(a, a->colors.accent);
+    XDrawLine(a->dpy, draw_target(a), a->gc, caret_x, y + 11, caret_x, y + h - 11);
+}
+
 static void draw_input(app_t *a, int x, int y, int w, int h, const char *value, const char *placeholder,
                        int focus_id, bool password) {
     bool focused = a->input_focus == focus_id;
     bool search_focused = focused && focus_id == INPUT_SEARCH;
-    fill_round_rect(a, x + 2, y + 3, w, h, 12, a->colors.black);
-    fill_round_rect(a, x, y, w, h, 12, search_focused ? a->colors.accent2 : a->colors.panel2);
-    stroke_round_rect(a, x, y, w, h, 12, focused ? a->colors.accent : a->colors.border);
-    if (focused) {
-        stroke_round_rect(a, x + 2, y + 2, w - 4, h - 4, 10,
-                          search_focused ? a->colors.accent : a->colors.accent2);
-        if (search_focused)
-            fill_round_rect(a, x + 5, y + 8, 4, h - 16, 2, a->colors.accent);
-    }
-    const char *text = value && value[0] ? value : (search_focused ? "Digite para buscar..." : placeholder);
+    draw_input_frame(a, x, y, w, h, focused, search_focused);
+
     char masked[256];
-    if (password && value && value[0]) {
-        size_t n = strlen(value);
-        if (n > sizeof(masked) - 1)
-            n = sizeof(masked) - 1;
-        memset(masked, '*', n);
-        masked[n] = '\0';
-        text = masked;
-    }
+    const char *text = input_display_text(value, placeholder, search_focused, password,
+                                          masked, sizeof(masked));
     bool bright = search_focused || (value && value[0]);
-    if (a->renderer.active)
-        vip_ui_render_text(&a->renderer, x + 16, y + (h - 16) / 2, w - 32, text, "Sans 10",
-                           bright ? 0xF6F7FBu : 0xAAB2C4u, 1.0, false);
-    else
-        draw_text(a, x + 16, y + h / 2 + 6, text, bright ? a->colors.text : a->colors.muted);
-    if (search_focused) {
-        const char *caret_text = value && value[0] ? value : "";
-        int measured = a->renderer.active ? vip_ui_render_text_width(&a->renderer, caret_text, "Sans 10")
-                                          : text_width(a, caret_text);
-        int caret_x = x + 16 + measured;
-        if (caret_x < x + 16)
-            caret_x = x + 16;
-        if (caret_x > x + w - 18)
-            caret_x = x + w - 18;
-        set_fg(a, a->colors.accent);
-        XDrawLine(a->dpy, draw_target(a), a->gc, caret_x, y + 11, caret_x, y + h - 11);
-    }
+    draw_input_label(a, x, y, w, h, text, bright);
+    if (search_focused)
+        draw_search_input_caret(a, x, y, w, h, value);
 }
 
 /* Draw login. */
@@ -4638,35 +4694,49 @@ static void draw_login(app_t *a) {
 }
 
 /* Draw wrapped text. */
+static void normalize_wrapped_text(char *text) {
+    for (char *p = text; *p; ++p) {
+        if (*p == '\n' || *p == '\r' || *p == '\t')
+            *p = ' ';
+    }
+}
+
+static void build_wrapped_candidate(char *candidate,
+                                    size_t candidate_cap,
+                                    const char *line,
+                                    const char *word) {
+    size_t candidate_len = strlen(line);
+    if (candidate_len >= candidate_cap)
+        candidate_len = candidate_cap - 1u;
+    memcpy(candidate, line, candidate_len);
+
+    if (candidate_len > 0u && candidate_len + 1u < candidate_cap)
+        candidate[candidate_len++] = ' ';
+
+    size_t room = candidate_cap - candidate_len - 1u;
+    size_t word_len = strlen(word);
+    if (word_len > room)
+        word_len = room;
+    memcpy(candidate + candidate_len, word, word_len);
+    candidate[candidate_len + word_len] = '\0';
+}
+
 static int draw_wrapped_text(app_t *a, int x, int y, int width, const char *text, int max_lines,
                              unsigned long color) {
     if (!text || !text[0] || max_lines <= 0)
         return y;
+
     char copy[3072];
     snprintf(copy, sizeof(copy), "%s", text);
-    for (char *p = copy; *p; ++p)
-        if (*p == '\n' || *p == '\r' || *p == '\t')
-            *p = ' ';
+    normalize_wrapped_text(copy);
+
     char line[768] = {0};
     char *save = NULL;
     int lines = 0;
     for (char *word = strtok_r(copy, " ", &save); word && lines < max_lines;
          word = strtok_r(NULL, " ", &save)) {
         char candidate[768];
-        /* Build the candidate explicitly so very long provider text is safely
-         * truncated without triggering format-truncation warnings. */
-        size_t candidate_len = strlen(line);
-        if (candidate_len >= sizeof(candidate))
-            candidate_len = sizeof(candidate) - 1u;
-        memcpy(candidate, line, candidate_len);
-        if (candidate_len > 0u && candidate_len + 1u < sizeof(candidate))
-            candidate[candidate_len++] = ' ';
-        size_t room = sizeof(candidate) - candidate_len - 1u;
-        size_t word_len = strlen(word);
-        if (word_len > room)
-            word_len = room;
-        memcpy(candidate + candidate_len, word, word_len);
-        candidate[candidate_len + word_len] = '\0';
+        build_wrapped_candidate(candidate, sizeof(candidate), line, word);
         if (line[0] && text_width(a, candidate) > width) {
             draw_text(a, x, y, line, color);
             y += 20;
@@ -4674,10 +4744,11 @@ static int draw_wrapped_text(app_t *a, int x, int y, int width, const char *text
             if (lines >= max_lines)
                 break;
             snprintf(line, sizeof(line), "%s", word);
-        } else {
-            snprintf(line, sizeof(line), "%s", candidate);
+            continue;
         }
+        snprintf(line, sizeof(line), "%s", candidate);
     }
+
     if (line[0] && lines < max_lines) {
         draw_text(a, x, y, line, color);
         y += 20;
@@ -5290,121 +5361,148 @@ static void sync_video_window(app_t *a) {
 }
 
 /* Draw player. */
-static void draw_player(app_t *a) {
-    fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.black);
-    vip_mpv_player_snapshot_t snap = {0};
-    if (a->player)
-        vip_mpv_player_snapshot(a->player, &snap);
-    vip_player_state_t player_state = a->player ? snap.state : VIP_PLAYER_ERROR;
-    const char *state_text = a->player ? vip_mpv_player_state_name(player_state) : a->player_status;
-    bool hud = player_hud_visible(a);
+static void draw_player_header(app_t *a) {
+    if (a->fullscreen)
+        return;
 
-    if (!a->fullscreen) {
-        if (a->renderer.active) {
-            vip_ui_render_round_rect(&a->renderer, 0, 0, a->width, PLAYER_HEADER_H, 0, 0x111722u, 0.97);
-            vip_ui_render_round_rect(&a->renderer, 12, 10, 132, 44, 13, 0x171C28u, 1.0);
-            vip_ui_render_round_stroke(&a->renderer, 12, 10, 132, 44, 13, 0x343A48u, 1.0, 1.0);
-            vip_ui_render_text(&a->renderer, 28, 24, 104, "<  Voltar", "Sans SemiBold 10", 0xF6F7FBu, 1.0,
-                               false);
-            if (a->current_channel < ACTIVE_CHANNELS(a).len)
-                vip_ui_render_text(&a->renderer, 168, 22, a->width - 190,
-                                   ACTIVE_CHANNELS(a).items[a->current_channel].name, "Sans Bold 12",
-                                   0xF6F7FBu, 1.0, false);
-        } else {
-            fill_rect(a, 0, 0, (unsigned)a->width, PLAYER_HEADER_H, a->colors.panel);
-            fill_round_rect(a, 12, 10, 132, 44, 13, a->colors.panel2);
-            stroke_round_rect(a, 12, 10, 132, 44, 13, a->colors.border);
-            draw_text(a, 28, 39, "< Voltar", a->colors.text);
-            if (a->current_channel < ACTIVE_CHANNELS(a).len)
-                draw_text_font(a, a->font_heading, 168, 39, ACTIVE_CHANNELS(a).items[a->current_channel].name,
-                               a->colors.text);
-        }
+    bool has_channel = a->current_channel < ACTIVE_CHANNELS(a).len;
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, 0, 0, a->width, PLAYER_HEADER_H, 0, 0x111722u, 0.97);
+        vip_ui_render_round_rect(&a->renderer, 12, 10, 132, 44, 13, 0x171C28u, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, 12, 10, 132, 44, 13, 0x343A48u, 1.0, 1.0);
+        vip_ui_render_text(&a->renderer, 28, 24, 104, "<  Voltar", "Sans SemiBold 10", 0xF6F7FBu, 1.0,
+                           false);
+        if (has_channel)
+            vip_ui_render_text(&a->renderer, 168, 22, a->width - 190,
+                               ACTIVE_CHANNELS(a).items[a->current_channel].name, "Sans Bold 12",
+                               0xF6F7FBu, 1.0, false);
+        return;
     }
 
-    if (hud) {
-        int y = a->height - PLAYER_CONTROLS_H;
-        if (a->renderer.active) {
-            vip_ui_render_round_rect(&a->renderer, 10, y + 7, a->width - 20, PLAYER_CONTROLS_H - 12, 18,
-                                     0x111722u, 0.96);
-            vip_ui_render_round_stroke(&a->renderer, 10, y + 7, a->width - 20, PLAYER_CONTROLS_H - 12, 18,
-                                       0x343A48u, 0.95, 1.0);
-            vip_ui_render_round_rect(&a->renderer, 16, y + 18, 52, 46, 14, 0x171C28u, 1.0);
-            vip_ui_render_round_stroke(&a->renderer, 16, y + 18, 52, 46, 14, 0x343A48u, 1.0, 1.0);
-            vip_ui_render_text(&a->renderer, 16, y + 31, 52, snap.paused ? ">" : "||", "Sans Bold 12",
-                               0xF6F7FBu, 1.0, true);
-            vip_ui_render_round_rect(&a->renderer, 76, y + 18, 82, 46, 14, 0x171C28u, 1.0);
-            vip_ui_render_round_stroke(&a->renderer, 76, y + 18, 82, 46, 14, 0x343A48u, 1.0, 1.0);
-            vip_ui_render_text(&a->renderer, 76, y + 32, 82, "Voltar", "Sans SemiBold 9", 0xF6F7FBu, 1.0,
-                               true);
-        } else {
-            fill_rect(a, 0, y, (unsigned)a->width, PLAYER_CONTROLS_H, a->colors.panel);
-            fill_rect(a, 0, y, (unsigned)a->width, 1, a->colors.border);
-            fill_round_rect(a, 16, y + 18, 52, 46, 14, a->colors.panel2);
-            stroke_round_rect(a, 16, y + 18, 52, 46, 14, a->colors.border);
-            draw_centered_font(a, a->font_heading, 16, y + 48, 52, snap.paused ? ">" : "||", a->colors.text);
-            fill_round_rect(a, 76, y + 18, 82, 46, 14, a->colors.panel2);
-            stroke_round_rect(a, 76, y + 18, 82, 46, 14, a->colors.border);
-            draw_centered(a, 76, y + 47, 82, "Voltar", a->colors.text);
-        }
-        if (a->player_item_live) {
-            if (a->renderer.active) {
-                vip_ui_render_round_rect(&a->renderer, 176, y + 22, 76, 30, 12, 0xFF7185u, 0.96);
-                vip_ui_render_text(&a->renderer, 176, y + 30, 76, "AO VIVO", "Sans Bold 8", 0xF6F7FBu, 1.0,
-                                   true);
-                vip_ui_render_text(&a->renderer, 270, y + 31, 220, "<-  ->  troca canal", "Sans 9", 0xAAB2C4u,
-                                   1.0, false);
-            } else {
-                fill_round_rect(a, 176, y + 22, 76, 30, 12, a->colors.danger);
-                draw_centered(a, 176, y + 43, 76, "AO VIVO", a->colors.text);
-                draw_text(a, 270, y + 44, "<- -> troca canal", a->colors.muted);
-            }
-        } else {
-            int tx, ty, tw, th;
-            timeline_geometry(a, &tx, &ty, &tw, &th);
-            if (a->renderer.active)
-                vip_ui_render_round_rect(&a->renderer, tx, ty, tw, th, th / 2, 0x343A48u, 1.0);
-            else
-                fill_round_rect(a, tx, ty, tw, th, th / 2, a->colors.panel2);
-            double ratio = snap.duration_seconds > 0.0 ? snap.position_seconds / snap.duration_seconds : 0.0;
-            if (ratio < 0.0)
-                ratio = 0.0;
-            if (ratio > 1.0)
-                ratio = 1.0;
-            int fill = (int)((double)tw * ratio);
-            if (fill > 0) {
-                if (a->renderer.active)
-                    vip_ui_render_round_rect(&a->renderer, tx, ty, fill, th, th / 2, 0xFF5F2Eu, 1.0);
-                else
-                    fill_round_rect(a, tx, ty, fill, th, th / 2, a->colors.accent);
-            }
-            char pos[32], dur[32];
-            format_clock(snap.position_seconds, pos);
-            format_clock(snap.duration_seconds, dur);
-            if (a->renderer.active) {
-                vip_ui_render_text(&a->renderer, 166, y + 31, 60, pos, "Sans SemiBold 9", 0xF6F7FBu, 1.0,
-                                   false);
-                vip_ui_render_text(&a->renderer, a->width - 150, y + 31, 132, dur, "Sans SemiBold 9",
-                                   0xF6F7FBu, 1.0, false);
-                vip_ui_render_text(&a->renderer, tx, y + 57, tw, "Clique/arraste para buscar  ·  <- -> 10s",
-                                   "Sans 8", 0xAAB2C4u, 1.0, false);
-            } else {
-                draw_text(a, 166, y + 45, pos, a->colors.text);
-                draw_text(a, a->width - 150, y + 45, dur, a->colors.text);
-                draw_text_font(a, a->font_small, tx, y + 70, "Clique/arraste para buscar  ·  <- -> 10s",
-                               a->colors.muted);
-            }
-        }
-        if (a->renderer.active) {
-            int sw = vip_ui_render_text_width(&a->renderer, state_text, "Sans 8");
-            vip_ui_render_text(&a->renderer, a->width - sw - 18, y + 58, sw + 2, state_text, "Sans 8",
-                               player_state == VIP_PLAYER_ERROR ? 0xFF7185u : 0xAAB2C4u, 1.0, false);
-        } else {
-            int sw = text_width(a, state_text);
-            draw_text_font(a, a->font_small, a->width - sw - 18, y + 72, state_text,
-                           player_state == VIP_PLAYER_ERROR ? a->colors.danger : a->colors.muted);
-        }
+    fill_rect(a, 0, 0, (unsigned)a->width, PLAYER_HEADER_H, a->colors.panel);
+    fill_round_rect(a, 12, 10, 132, 44, 13, a->colors.panel2);
+    stroke_round_rect(a, 12, 10, 132, 44, 13, a->colors.border);
+    draw_text(a, 28, 39, "< Voltar", a->colors.text);
+    if (has_channel)
+        draw_text_font(a, a->font_heading, 168, 39, ACTIVE_CHANNELS(a).items[a->current_channel].name,
+                       a->colors.text);
+}
+
+static void draw_player_hud_buttons(app_t *a, int y, bool paused) {
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, 10, y + 7, a->width - 20, PLAYER_CONTROLS_H - 12, 18,
+                                 0x111722u, 0.96);
+        vip_ui_render_round_stroke(&a->renderer, 10, y + 7, a->width - 20, PLAYER_CONTROLS_H - 12, 18,
+                                   0x343A48u, 0.95, 1.0);
+        vip_ui_render_round_rect(&a->renderer, 16, y + 18, 52, 46, 14, 0x171C28u, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, 16, y + 18, 52, 46, 14, 0x343A48u, 1.0, 1.0);
+        vip_ui_render_text(&a->renderer, 16, y + 31, 52, paused ? ">" : "||", "Sans Bold 12",
+                           0xF6F7FBu, 1.0, true);
+        vip_ui_render_round_rect(&a->renderer, 76, y + 18, 82, 46, 14, 0x171C28u, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, 76, y + 18, 82, 46, 14, 0x343A48u, 1.0, 1.0);
+        vip_ui_render_text(&a->renderer, 76, y + 32, 82, "Voltar", "Sans SemiBold 9", 0xF6F7FBu, 1.0,
+                           true);
+        return;
     }
 
+    fill_rect(a, 0, y, (unsigned)a->width, PLAYER_CONTROLS_H, a->colors.panel);
+    fill_rect(a, 0, y, (unsigned)a->width, 1, a->colors.border);
+    fill_round_rect(a, 16, y + 18, 52, 46, 14, a->colors.panel2);
+    stroke_round_rect(a, 16, y + 18, 52, 46, 14, a->colors.border);
+    draw_centered_font(a, a->font_heading, 16, y + 48, 52, paused ? ">" : "||", a->colors.text);
+    fill_round_rect(a, 76, y + 18, 82, 46, 14, a->colors.panel2);
+    stroke_round_rect(a, 76, y + 18, 82, 46, 14, a->colors.border);
+    draw_centered(a, 76, y + 47, 82, "Voltar", a->colors.text);
+}
+
+static void draw_live_player_hud(app_t *a, int y) {
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, 176, y + 22, 76, 30, 12, 0xFF7185u, 0.96);
+        vip_ui_render_text(&a->renderer, 176, y + 30, 76, "AO VIVO", "Sans Bold 8", 0xF6F7FBu, 1.0,
+                           true);
+        vip_ui_render_text(&a->renderer, 270, y + 31, 220, "<-  ->  troca canal", "Sans 9", 0xAAB2C4u,
+                           1.0, false);
+        return;
+    }
+
+    fill_round_rect(a, 176, y + 22, 76, 30, 12, a->colors.danger);
+    draw_centered(a, 176, y + 43, 76, "AO VIVO", a->colors.text);
+    draw_text(a, 270, y + 44, "<- -> troca canal", a->colors.muted);
+}
+
+static double player_progress_ratio(const vip_mpv_player_snapshot_t *snap) {
+    if (snap->duration_seconds <= 0.0)
+        return 0.0;
+    double ratio = snap->position_seconds / snap->duration_seconds;
+    if (ratio < 0.0)
+        return 0.0;
+    if (ratio > 1.0)
+        return 1.0;
+    return ratio;
+}
+
+static void draw_vod_player_hud(app_t *a, int y, const vip_mpv_player_snapshot_t *snap) {
+    int tx, ty, tw, th;
+    timeline_geometry(a, &tx, &ty, &tw, &th);
+    if (a->renderer.active)
+        vip_ui_render_round_rect(&a->renderer, tx, ty, tw, th, th / 2, 0x343A48u, 1.0);
+    else
+        fill_round_rect(a, tx, ty, tw, th, th / 2, a->colors.panel2);
+
+    int fill = (int)((double)tw * player_progress_ratio(snap));
+    if (fill > 0) {
+        if (a->renderer.active)
+            vip_ui_render_round_rect(&a->renderer, tx, ty, fill, th, th / 2, 0xFF5F2Eu, 1.0);
+        else
+            fill_round_rect(a, tx, ty, fill, th, th / 2, a->colors.accent);
+    }
+
+    char pos[32];
+    char dur[32];
+    format_clock(snap->position_seconds, pos);
+    format_clock(snap->duration_seconds, dur);
+    if (a->renderer.active) {
+        vip_ui_render_text(&a->renderer, 166, y + 31, 60, pos, "Sans SemiBold 9", 0xF6F7FBu, 1.0, false);
+        vip_ui_render_text(&a->renderer, a->width - 150, y + 31, 132, dur, "Sans SemiBold 9",
+                           0xF6F7FBu, 1.0, false);
+        vip_ui_render_text(&a->renderer, tx, y + 57, tw, "Clique/arraste para buscar  ·  <- -> 10s",
+                           "Sans 8", 0xAAB2C4u, 1.0, false);
+        return;
+    }
+
+    draw_text(a, 166, y + 45, pos, a->colors.text);
+    draw_text(a, a->width - 150, y + 45, dur, a->colors.text);
+    draw_text_font(a, a->font_small, tx, y + 70, "Clique/arraste para buscar  ·  <- -> 10s",
+                   a->colors.muted);
+}
+
+static void draw_player_state_text(app_t *a, int y, const char *state_text, vip_player_state_t player_state) {
+    if (a->renderer.active) {
+        int sw = vip_ui_render_text_width(&a->renderer, state_text, "Sans 8");
+        vip_ui_render_text(&a->renderer, a->width - sw - 18, y + 58, sw + 2, state_text, "Sans 8",
+                           player_state == VIP_PLAYER_ERROR ? 0xFF7185u : 0xAAB2C4u, 1.0, false);
+        return;
+    }
+
+    int sw = text_width(a, state_text);
+    draw_text_font(a, a->font_small, a->width - sw - 18, y + 72, state_text,
+                   player_state == VIP_PLAYER_ERROR ? a->colors.danger : a->colors.muted);
+}
+
+static void draw_player_hud(app_t *a,
+                            const vip_mpv_player_snapshot_t *snap,
+                            const char *state_text,
+                            vip_player_state_t player_state) {
+    int y = a->height - PLAYER_CONTROLS_H;
+    draw_player_hud_buttons(a, y, snap->paused);
+    if (a->player_item_live)
+        draw_live_player_hud(a, y);
+    else
+        draw_vod_player_hud(a, y, snap);
+    draw_player_state_text(a, y, state_text, player_state);
+}
+
+static void draw_player_overlay(app_t *a, const char *state_text, vip_player_state_t player_state) {
     if (player_state == VIP_PLAYER_ERROR) {
         const char *err = a->player ? vip_mpv_player_last_error(a->player) : a->player_status;
         char bounded[220];
@@ -5413,9 +5511,25 @@ static void draw_player(app_t *a) {
                            a->colors.danger);
         draw_centered(a, 20, a->height / 2 + 22, a->width - 40, bounded, a->colors.muted);
         draw_centered(a, 0, a->height / 2 + 56, a->width, "Pressione Esc para voltar", a->colors.muted);
-    } else if (!a->video_mapped) {
-        draw_centered_font(a, a->font_heading, 0, a->height / 2, a->width, state_text, a->colors.muted);
+        return;
     }
+    if (!a->video_mapped)
+        draw_centered_font(a, a->font_heading, 0, a->height / 2, a->width, state_text, a->colors.muted);
+}
+
+static void draw_player(app_t *a) {
+    fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.black);
+
+    vip_mpv_player_snapshot_t snap = {0};
+    if (a->player)
+        vip_mpv_player_snapshot(a->player, &snap);
+    vip_player_state_t player_state = a->player ? snap.state : VIP_PLAYER_ERROR;
+    const char *state_text = a->player ? vip_mpv_player_state_name(player_state) : a->player_status;
+
+    draw_player_header(a);
+    if (player_hud_visible(a))
+        draw_player_hud(a, &snap, state_text, player_state);
+    draw_player_overlay(a, state_text, player_state);
 }
 
 /* Ensure backbuffer. */
