@@ -1406,10 +1406,46 @@
         task.resolve(url || "");
     }
 
+    function artworkPayload(batch) {
+        return {
+            items: batch.map(function (task) {
+                return {
+                    id: task.requestId,
+                    title: task.item.name || "",
+                    kind: artworkKind(task.item)
+                };
+            })
+        };
+    }
+
+    function finishArtworkBatch(batch, result) {
+        var byRequest = {};
+        var rows = result && Array.isArray(result.items) ? result.items : [];
+        rows.forEach(function (row) {
+            byRequest[String(row.id || "")] = row.url || "";
+        });
+        batch.forEach(function (task) {
+            finishArtworkTask(task, byRequest[task.requestId] || "", true);
+        });
+    }
+
+    function failArtworkBatch(batch) {
+        batch.forEach(function (task) {
+            /* Network failures are intentionally not remembered so a later
+               viewport visit can retry the central resolver. */
+            finishArtworkTask(task, "", false);
+        });
+    }
+
+    function scheduleNextArtworkBatch() {
+        if (artworkQueue.length) {
+            scheduleArtworkFlush();
+        }
+    }
+
     function flushArtworkQueue() {
-        var batch;
         var base;
-        var payload;
+        var batch;
 
         if (!artworkQueue.length) { return; }
         base = artworkServiceBase();
@@ -1421,48 +1457,15 @@
         }
 
         batch = artworkQueue.splice(0, MAX_ARTWORK_BATCH);
-        payload = {
-            items: batch.map(function (task) {
-                return {
-                    id: task.requestId,
-                    title: task.item.name || "",
-                    kind: artworkKind(task.item)
-                };
-            })
-        };
-
         window.BlazzingNet.postJson(
             base + "/api/v1/artwork/resolve",
-            payload,
+            artworkPayload(batch),
             { timeout: 18000, maxBytes: 256 * 1024 }
         ).then(function (result) {
-            var byRequest = {};
-            var rows = result && Array.isArray(result.items) ? result.items : [];
-            rows.forEach(function (row) {
-                byRequest[String(row.id || "")] = row.url || "";
-            });
-            batch.forEach(function (task) {
-                finishArtworkTask(
-                    task,
-                    byRequest[task.requestId] || "",
-                    true
-                );
-            });
+            finishArtworkBatch(batch, result);
         }).catch(function () {
-            batch.forEach(function (task) {
-                /* Network failures are intentionally not remembered so a
-                   later viewport visit can retry the central resolver. */
-                finishArtworkTask(task, "", false);
-            });
-        }).then(function () {
-            if (artworkQueue.length) {
-                scheduleArtworkFlush();
-            }
-        }, function () {
-            if (artworkQueue.length) {
-                scheduleArtworkFlush();
-            }
-        });
+            failArtworkBatch(batch);
+        }).then(scheduleNextArtworkBatch, scheduleNextArtworkBatch);
     }
 
     function resolveOnDemandArtwork(item) {
@@ -1498,49 +1501,38 @@
         return artworkInFlight[cacheKey];
     }
 
-    function resolveCardLogo(item) {
+    function cardShardDescriptor(item) {
         var base = String(item.cardIndexBase || "").replace(/\/$/, "");
         var key = String(item.cardKey || "");
         var version = String(item.cardIndexVersion || "");
-        var prefix;
-        var prefixLength;
-        var cacheKey;
-        var url;
-        var failedAt;
-
-        if (item.logo) {
-            return Promise.resolve(item.logo);
-        }
-        if (!base || !key) {
-            return resolveOnDemandArtwork(item);
-        }
-
-        prefixLength = parseInt(item.cardIndexShardLength || 1, 10);
+        var prefixLength = parseInt(item.cardIndexShardLength || 1, 10);
         if (!(prefixLength >= 1 && prefixLength <= 4)) {
             prefixLength = 1;
         }
-        prefix = key.slice(0, prefixLength);
-        cacheKey = base + "|" + version + "|" + prefix;
+        var prefix = key.slice(0, prefixLength);
+        return {
+            base: base,
+            key: key,
+            version: version,
+            prefix: prefix,
+            cacheKey: base + "|" + version + "|" + prefix
+        };
+    }
 
-        if (cardShardCache[cacheKey]) {
-            item.logo = cardShardCache[cacheKey][key] || "";
-            return item.logo ? Promise.resolve(item.logo) :
-                resolveOnDemandArtwork(item);
+    function cardShardRequestUrl(descriptor) {
+        var url = descriptor.base + "/" + descriptor.prefix + ".json";
+        if (descriptor.version) {
+            url += "?v=" + encodeURIComponent(descriptor.version);
         }
+        return url;
+    }
 
-        failedAt = cardShardFailureAt[cacheKey] || 0;
-        if (failedAt && Date.now() - failedAt < 30000) {
-            return resolveOnDemandArtwork(item);
-        }
-
+    function cardShardPromise(descriptor) {
+        var cacheKey = descriptor.cacheKey;
         if (!cardShardPromises[cacheKey]) {
-            url = base + "/" + prefix + ".json";
-            if (version) {
-                url += "?v=" + encodeURIComponent(version);
-            }
-
-            cardShardPromises[cacheKey] = queueCardShard(url)
-            .then(function (rows) {
+            cardShardPromises[cacheKey] = queueCardShard(
+                cardShardRequestUrl(descriptor)
+            ).then(function (rows) {
                 cardShardCache[cacheKey] =
                     rows && typeof rows === "object" ? rows : {};
                 delete cardShardFailureAt[cacheKey];
@@ -1551,9 +1543,37 @@
                 return {};
             });
         }
+        return cardShardPromises[cacheKey];
+    }
 
-        return cardShardPromises[cacheKey].then(function (rows) {
-            item.logo = rows[key] || "";
+    function resolveCardLogo(item) {
+        var descriptor;
+        var rows;
+        var failedAt;
+
+        if (item.logo) {
+            return Promise.resolve(item.logo);
+        }
+
+        descriptor = cardShardDescriptor(item);
+        if (!descriptor.base || !descriptor.key) {
+            return resolveOnDemandArtwork(item);
+        }
+
+        rows = cardShardCache[descriptor.cacheKey];
+        if (rows) {
+            item.logo = rows[descriptor.key] || "";
+            return item.logo ? Promise.resolve(item.logo) :
+                resolveOnDemandArtwork(item);
+        }
+
+        failedAt = cardShardFailureAt[descriptor.cacheKey] || 0;
+        if (failedAt && Date.now() - failedAt < 30000) {
+            return resolveOnDemandArtwork(item);
+        }
+
+        return cardShardPromise(descriptor).then(function (resolvedRows) {
+            item.logo = resolvedRows[descriptor.key] || "";
             return item.logo || resolveOnDemandArtwork(item);
         });
     }
