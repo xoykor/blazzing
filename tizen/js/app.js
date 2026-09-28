@@ -4,30 +4,54 @@
     "use strict";
 
     var byId = function (id) { return document.getElementById(id); };
-    var state = {
-        mode: "m3u",
-        view: "home",
-        kind: "live",
-        profile: null,
-        xtream: null,
-        m3uCatalogs: null,
-        catalog: { items: [], categories: [] },
-        filtered: [],
-        category: "all",
-        favoritesOnly: false,
-        visibleCount: 0,
-        batchSize: 30,
-        renderGeneration: 0,
-        series: null,
-        currentSeason: "all",
-        playerReturnView: "catalog",
-        currentPlaylistIndex: -1,
-        lastProgressWrite: 0,
-        pairingActive: false,
-        returnFocusUid: "",
-        catalogScrollTop: 0,
-        lastZapAt: 0
-    };
+
+    function initialCatalogState() {
+        return {
+            kind: "live",
+            catalog: { items: [], categories: [] },
+            filtered: [],
+            category: "all",
+            favoritesOnly: false,
+            visibleCount: 0,
+            batchSize: 30,
+            renderGeneration: 0
+        };
+    }
+
+    function initialPlaybackState() {
+        return {
+            series: null,
+            currentSeason: "all",
+            playerReturnView: "catalog",
+            currentPlaylistIndex: -1,
+            lastProgressWrite: 0,
+            returnFocusUid: "",
+            catalogScrollTop: 0,
+            lastZapAt: 0
+        };
+    }
+
+    function initialAppState() {
+        var value = initialCatalogState();
+        var playback = initialPlaybackState();
+        var key;
+
+        value.mode = "m3u";
+        value.view = "home";
+        value.profile = null;
+        value.xtream = null;
+        value.m3uCatalogs = null;
+        value.pairingActive = false;
+
+        for (key in playback) {
+            if (Object.prototype.hasOwnProperty.call(playback, key)) {
+                value[key] = playback[key];
+            }
+        }
+        return value;
+    }
+
+    var state = initialAppState();
 
     var toastTimer = 0;
     var hudTimer = 0;
@@ -52,28 +76,42 @@
     var MAX_ARTWORK_BATCH = 24;
 
 
-    function showToast(message) {
-        clearTimeout(toastTimer);
-        byId("toast").textContent = message;
-        byId("toast").classList.remove("hidden");
-        toastTimer = setTimeout(function () {
-            byId("toast").classList.add("hidden");
-        }, 3200);
+
+    function setHidden(element, hidden) {
+        element.classList.toggle("hidden", !!hidden);
     }
+
+    function hideToast() {
+        setHidden(byId("toast"), true);
+    }
+
+    function viewNames() {
+        return ["home", "catalog", "series", "player"];
+    }
+
+
+    function showToast(message) {
+        var toast = byId("toast");
+        clearTimeout(toastTimer);
+        toast.textContent = message;
+        setHidden(toast, false);
+        toastTimer = setTimeout(hideToast, 3200);
+    }
+
 
     function setBusy(active, message) {
         byId("busy-text").textContent = message || "Carregando…";
-        byId("busy").classList.toggle("hidden", !active);
+        setHidden(byId("busy"), !active);
     }
 
+
     function setView(name) {
-        ["home", "catalog", "series", "player"].forEach(function (view) {
-            byId(view + "-view").classList.toggle("hidden", view !== name);
+        viewNames().forEach(function (view) {
+            setHidden(byId(view + "-view"), view !== name);
         });
         state.view = name;
         setTimeout(focusFirst, 0);
     }
-
 
     function focusRoot() {
         return state.pairingActive ?
@@ -203,8 +241,9 @@
         focusNavigationTarget(best);
     }
 
-    function registerRemoteKeys() {
-        var names = [
+
+    function remoteKeyNames() {
+        return [
             "MediaPlay",
             "MediaPause",
             "MediaStop",
@@ -213,40 +252,59 @@
             "MediaRewind",
             "ColorF2Yellow"
         ];
-
-        if (!window.tizen || !window.tizen.tvinputdevice) {
-            return;
-        }
-
-        try {
-            window.tizen.tvinputdevice.getSupportedKeys().forEach(function (key) {
-                supportedKeys[key.code] = key.name;
-            });
-        } catch (ignoreSupported) {}
-
-        try {
-            if (window.tizen.tvinputdevice.registerKeyBatch) {
-                window.tizen.tvinputdevice.registerKeyBatch(names);
-            } else {
-                names.forEach(function (name) {
-                    try { window.tizen.tvinputdevice.registerKey(name); }
-                    catch (ignoreKey) {}
-                });
-            }
-        } catch (ignoreBatch) {}
     }
 
-    function exitApplication() {
-        if (window.BlazzingWindowsNative && window.BlazzingWindowsNative.close) {
-            window.BlazzingWindowsNative.close();
+    function rememberSupportedRemoteKeys() {
+        window.tizen.tvinputdevice.getSupportedKeys().forEach(function (key) {
+            supportedKeys[key.code] = key.name;
+        });
+    }
+
+    function registerRemoteKeyNames(names) {
+        if (window.tizen.tvinputdevice.registerKeyBatch) {
+            window.tizen.tvinputdevice.registerKeyBatch(names);
             return;
         }
-        if (window.tizen && window.tizen.application) {
-            try {
-                window.tizen.application.getCurrentApplication().exit();
-                return;
-            } catch (ignoreExit) {}
+        names.forEach(function (name) {
+            try { window.tizen.tvinputdevice.registerKey(name); }
+            catch (ignoreKey) {}
+        });
+    }
+
+
+    function registerRemoteKeys() {
+        if (!window.tizen || !window.tizen.tvinputdevice) { return; }
+
+        try { rememberSupportedRemoteKeys(); }
+        catch (ignoreSupported) {}
+
+        try { registerRemoteKeyNames(remoteKeyNames()); }
+        catch (ignoreBatch) {}
+    }
+
+
+    function closeNativeWindow() {
+        if (!window.BlazzingWindowsNative ||
+                !window.BlazzingWindowsNative.close) {
+            return false;
         }
+        window.BlazzingWindowsNative.close();
+        return true;
+    }
+
+    function closeTizenApplication() {
+        if (!window.tizen || !window.tizen.application) { return false; }
+        try {
+            window.tizen.application.getCurrentApplication().exit();
+            return true;
+        } catch (ignoreExit) {
+            return false;
+        }
+    }
+
+
+    function exitApplication() {
+        if (closeNativeWindow() || closeTizenApplication()) { return; }
         showToast("Use o botão Home para sair.");
     }
 
@@ -497,6 +555,11 @@
         handleNavigationKey(event, code, name, active, isInput);
     });
 
+
+    function bindModeButton(id, mode) {
+        byId(id).addEventListener("click", function () { setMode(mode); });
+    }
+
     function setMode(mode) {
         state.mode = mode;
         byId("mode-m3u").classList.toggle("active", mode === "m3u");
@@ -506,13 +569,8 @@
         byId("save-secret-row").classList.toggle("hidden", mode !== "xtream");
     }
 
-    byId("mode-m3u").addEventListener("click", function () {
-        setMode("m3u");
-    });
-
-    byId("mode-xtream").addEventListener("click", function () {
-        setMode("xtream");
-    });
+    bindModeButton("mode-m3u", "m3u");
+    bindModeButton("mode-xtream", "xtream");
 
     function clearPairingDisplay() {
         byId("pairing-qr").innerHTML = "";
@@ -600,26 +658,35 @@
     byId("pairing-retry").addEventListener("click", startPairing);
     byId("pairing-cancel").addEventListener("click", cancelPairing);
 
-    function profileFromForm() {
-        var name = byId("profile-name").value.replace(/^\s+|\s+$/g, "") ||
-            "Minha lista";
 
-        if (state.mode === "m3u") {
-            return {
-                type: "m3u",
-                name: name,
-                url: byId("m3u-url").value.replace(/^\s+|\s+$/g, "")
-            };
-        }
+    function trimmedField(id) {
+        return byId(id).value.replace(/^\s+|\s+$/g, "");
+    }
 
+    function m3uProfileFromForm(name) {
+        return {
+            type: "m3u",
+            name: name,
+            url: trimmedField("m3u-url")
+        };
+    }
+
+    function xtreamProfileFromForm(name) {
         return {
             type: "xtream",
             name: name,
-            server: byId("xtream-server").value.replace(/^\s+|\s+$/g, ""),
-            alternate: byId("xtream-alternate").value.replace(/^\s+|\s+$/g, ""),
+            server: trimmedField("xtream-server"),
+            alternate: trimmedField("xtream-alternate"),
             username: byId("xtream-user").value,
             password: byId("xtream-password").value
         };
+    }
+
+
+    function profileFromForm() {
+        var name = trimmedField("profile-name") || "Minha lista";
+        return state.mode === "m3u" ?
+            m3uProfileFromForm(name) : xtreamProfileFromForm(name);
     }
 
     function saveProfileIfRequested(profile) {
@@ -950,17 +1017,18 @@
     }
 
     byId("connect-form").addEventListener("submit", function (event) {
-        var profile;
-
         event.preventDefault();
-        profile = profileFromForm();
+        connectProfile(profileFromForm());
+    });
 
+
+    function connectProfile(profile) {
         if (profile.type === "m3u") {
             connectM3u(profile, false, "live");
         } else {
             connectXtream(profile);
         }
-    });
+    }
 
     function loadProfile(profile) {
         setMode(profile.type);
@@ -1131,41 +1199,11 @@
         });
     }
 
-    Array.prototype.forEach.call(
-        document.querySelectorAll("[data-section]"),
-        function (button) {
-            button.addEventListener("click", function () {
-                openCatalog(button.getAttribute("data-section"));
-            });
-        }
-    );
-
-    byId("favorites-button").addEventListener("click", function () {
-        state.favoritesOnly = !state.favoritesOnly;
-        byId("favorites-button").classList.toggle(
-            "active",
-            state.favoritesOnly
-        );
-        applyFilters();
-    });
-
-    byId("refresh-playlist-button").addEventListener("click", function () {
-        if (!state.profile || state.profile.type !== "m3u") {
-            showToast("Nenhuma playlist M3U aberta.");
-            return;
-        }
-        connectM3u(state.profile, true, state.kind || "live");
-    });
-
-    byId("lists-button").addEventListener("click", function () {
-        setView("home");
-        renderSavedProfiles();
-    });
-
-    byId("catalog-search").addEventListener("input", function () {
-        clearTimeout(searchTimer);
-        searchTimer = setTimeout(applyFilters, 180);
-    });
+    bindCatalogSections();
+    byId("favorites-button").addEventListener("click", toggleFavoritesFilter);
+    byId("refresh-playlist-button").addEventListener("click", refreshCurrentPlaylist);
+    byId("lists-button").addEventListener("click", showProfileList);
+    byId("catalog-search").addEventListener("input", scheduleCatalogSearch);
 
     function focusCategoryButton(id) {
         var buttons = byId("categories").querySelectorAll("[data-category-id]");
