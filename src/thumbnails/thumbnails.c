@@ -1129,59 +1129,105 @@ void vip_thumbnail_capture_context_clear(vip_thumbnail_capture_context_t *contex
 }
 
 /* Capture with decoder in the thumbnail subsystem. */
-vip_status_t vip_thumbnail_capture_with_decoder(const vip_thumbnail_request_t *request, char **path_out,
-                                                vip_error_t *error, void *userdata) {
+static vip_status_t cached_thumbnail_result(const char *path,
+                                            char **path_out,
+                                            vip_error_t *error) {
+    struct stat stbuf;
+    if (stat(path, &stbuf) != 0)
+        return VIP_ERR_IO;
+
+    if (stbuf.st_size > 0 && cached_jpeg_valid(path)) {
+        failure_marker_clear(path);
+        *path_out = vip_strdup(path);
+        if (!*path_out)
+            return VIP_ERR_NOMEM;
+        vip_error_clear(error);
+        return VIP_OK;
+    }
+
+    (void)remove(path);
+    return VIP_ERR_IO;
+}
+
+static vip_status_t capture_thumbnail_source(const vip_thumbnail_request_t *request,
+                                             vip_thumbnail_capture_context_t *context,
+                                             const char *path,
+                                             vip_error_t *error) {
+    if (request->logo_url && request->logo_url[0])
+        return capture_logo_direct(
+            request->logo_url, path, context->jpeg_quality, error
+        );
+
+    vip_rgb_frame_t frame = {0};
+    vip_status_t st = vip_thumbnail_decoder_capture(
+        context->decoder, request->stream_url, &frame, error
+    );
+    if (st == VIP_OK) {
+        st = vip_thumbnail_save_rgb_jpeg(
+            frame.data,
+            frame.width,
+            frame.height,
+            frame.stride,
+            path,
+            context->jpeg_quality,
+            error
+        );
+    }
+    vip_rgb_frame_clear(&frame);
+    return st;
+}
+
+static vip_status_t finish_thumbnail_capture(const char *path,
+                                             vip_status_t status,
+                                             char **path_out) {
+    if (status != VIP_OK) {
+        failure_marker_set(path);
+        free((char *)path);
+        return status;
+    }
+
+    failure_marker_clear(path);
+    *path_out = (char *)path;
+    return VIP_OK;
+}
+
+vip_status_t vip_thumbnail_capture_with_decoder(const vip_thumbnail_request_t *request,
+                                                char **path_out,
+                                                vip_error_t *error,
+                                                void *userdata) {
     vip_thumbnail_capture_context_t *context = userdata;
-    if (!request || !path_out || !context || !context->decoder || !context->cache_dir) {
-        vip_error_set(error, VIP_ERR_INVALID_ARGUMENT, "pedido/contexto de thumbnail inválido");
+    if (!request || !path_out || !context ||
+        !context->decoder || !context->cache_dir) {
+        vip_error_set(error, VIP_ERR_INVALID_ARGUMENT,
+                      "pedido/contexto de thumbnail inválido");
         return VIP_ERR_INVALID_ARGUMENT;
     }
     *path_out = NULL;
-    char *path =
-        vip_thumbnail_cache_path(context->cache_dir, request->provider_id, request->channel_id, error);
+
+    char *path = vip_thumbnail_cache_path(
+        context->cache_dir,
+        request->provider_id,
+        request->channel_id,
+        error
+    );
     if (!path)
         return error ? error->code : VIP_ERR_IO;
 
-    struct stat stbuf;
-    if (stat(path, &stbuf) == 0) {
-        if (stbuf.st_size > 0 && cached_jpeg_valid(path)) {
-            failure_marker_clear(path);
-            *path_out = path;
-            vip_error_clear(error);
-            return VIP_OK;
-        }
-        /* A crash/disk error may leave a partial cache file. Never let a
-           non-empty but invalid file permanently suppress future downloads. */
-        (void)remove(path);
+    vip_status_t cached = cached_thumbnail_result(path, path_out, error);
+    if (cached == VIP_OK) {
+        free(path);
+        return VIP_OK;
     }
+
     if (failure_backoff_active(path)) {
-        vip_error_set(error, VIP_ERR_CANCELLED, "thumbnail em espera após falha recente");
+        vip_error_set(error, VIP_ERR_CANCELLED,
+                      "thumbnail em espera após falha recente");
         free(path);
         return VIP_ERR_CANCELLED;
     }
 
-    vip_rgb_frame_t frame = {0};
-    vip_status_t st = VIP_ERR_INVALID_FRAME;
-    bool has_artwork = request->logo_url && request->logo_url[0];
-    if (has_artwork) {
-        /* Provider artwork is the canonical thumbnail. A transient HTTP/CDN
-           failure must not fan out into many expensive FFmpeg stream opens.
-           Continuous prefetch/viewport redraws will retry the artwork later. */
-        st = capture_logo_direct(request->logo_url, path, context->jpeg_quality, error);
-    } else {
-        st = vip_thumbnail_decoder_capture(context->decoder, request->stream_url, &frame, error);
-        if (st == VIP_OK) {
-            st = vip_thumbnail_save_rgb_jpeg(frame.data, frame.width, frame.height, frame.stride, path,
-                                             context->jpeg_quality, error);
-        }
-    }
-    vip_rgb_frame_clear(&frame);
-    if (st != VIP_OK) {
-        failure_marker_set(path);
-        free(path);
-        return st;
-    }
-    failure_marker_clear(path);
-    *path_out = path;
-    return VIP_OK;
+    vip_status_t st = capture_thumbnail_source(
+        request, context, path, error
+    );
+    return finish_thumbnail_capture(path, st, path_out);
 }
