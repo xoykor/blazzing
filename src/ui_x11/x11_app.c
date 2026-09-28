@@ -2124,6 +2124,8 @@ static void remap_catalog_provider_id(vip_category_list_t *cats, vip_channel_lis
 
 /* Network authentication/catalog fetch runs off-thread; Xlib must not be
  * called from this worker.  Results are transferred back through app state. */
+static void free_login_job(login_job_t *job);
+
 typedef struct {
     vip_credentials_t credentials;
     vip_category_list_t categories;
