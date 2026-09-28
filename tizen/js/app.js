@@ -255,19 +255,28 @@
         return name === "Back" || keyCode === 10009 || keyCode === 27;
     }
 
-    function isPlaybackToggleKey(name, keyCode) {
-        return name === "MediaPlayPause" || name === "MediaPlay" ||
-            name === "MediaPause" || keyCode === 13 || keyCode === 32 ||
-            keyCode === 415 || keyCode === 19;
-    }
-
-    function playerItemIsLive() {
-        var item = window.BlazzingPlayer.item();
-        return !!item && item.kind === "live";
+    function playerKeyAction(name, keyCode) {
+        if (isBackKey(name, keyCode)) { return "back"; }
+        if (name === "MediaPlayPause" || name === "MediaPlay" ||
+                name === "MediaPause" || keyCode === 13 || keyCode === 32 ||
+                keyCode === 415 || keyCode === 19) {
+            return "toggle";
+        }
+        if (name === "MediaStop" || keyCode === 413) { return "stop"; }
+        if (keyCode === 37 || name === "MediaRewind" || keyCode === 412) {
+            return "rewind";
+        }
+        if (keyCode === 39 || name === "MediaFastForward" || keyCode === 417) {
+            return "forward";
+        }
+        if (keyCode === 38) { return "volume-up"; }
+        if (keyCode === 40) { return "volume-down"; }
+        return "";
     }
 
     function seekOrZap(seconds, liveDelta) {
-        if (playerItemIsLive()) {
+        var item = window.BlazzingPlayer.item();
+        if (item && item.kind === "live") {
             switchLive(liveDelta);
         } else {
             window.BlazzingPlayer.seek(seconds);
@@ -275,36 +284,32 @@
         showHud();
     }
 
-    function handlePlayerKey(name, keyCode) {
-        if (isBackKey(name, keyCode)) {
+    function runPlayerAction(action) {
+        if (action === "back") {
             goBack();
-            return true;
-        }
-        if (isPlaybackToggleKey(name, keyCode)) {
+        } else if (action === "toggle") {
             window.BlazzingPlayer.togglePause();
             showHud();
-            return true;
-        }
-        if (name === "MediaStop" || keyCode === 413) {
+        } else if (action === "stop") {
             closePlayer();
-            return true;
-        }
-        if (keyCode === 37 || name === "MediaRewind" || keyCode === 412) {
+        } else if (action === "rewind") {
             seekOrZap(-10, -1);
-            return true;
-        }
-        if (keyCode === 39 || name === "MediaFastForward" || keyCode === 417) {
+        } else if (action === "forward") {
             seekOrZap(10, 1);
-            return true;
-        }
-        if ((keyCode === 38 || keyCode === 40) &&
+        } else if ((action === "volume-up" || action === "volume-down") &&
                 window.BlazzingPlayer.adjustVolume) {
-            window.BlazzingPlayer.adjustVolume(keyCode === 38 ? 5 : -5);
+            window.BlazzingPlayer.adjustVolume(action === "volume-up" ? 5 : -5);
             showHud();
-            return true;
+        } else {
+            return false;
         }
-        showHud();
-        return false;
+        return true;
+    }
+
+    function handlePlayerKey(name, keyCode) {
+        var handled = runPlayerAction(playerKeyAction(name, keyCode));
+        if (!handled) { showHud(); }
+        return handled;
     }
 
     function focusedCatalogItem() {
@@ -411,38 +416,52 @@
         return true;
     }
 
+    function handleCatalogCommand(event, code, name) {
+        if (state.view !== "catalog" ||
+                (name !== "ColorF2Yellow" && code !== 405)) {
+            return false;
+        }
+        event.preventDefault();
+        toggleFocusedFavorite();
+        return true;
+    }
+
+    function handleActivationKey(event, code, active, isInput) {
+        if (code !== 13 || isInput) { return false; }
+        if (active && active.click) {
+            event.preventDefault();
+            active.click();
+        }
+        return true;
+    }
+
+    function directionForKey(code) {
+        if (code === 37) { return "left"; }
+        if (code === 38) { return "up"; }
+        if (code === 39) { return "right"; }
+        if (code === 40) { return "down"; }
+        return "";
+    }
+
+    function handleDirectionalKey(event, code, isInput) {
+        var direction;
+        if (isInput && (code === 37 || code === 39)) { return true; }
+        direction = directionForKey(code);
+        if (!direction) { return false; }
+        event.preventDefault();
+        geometricMove(direction);
+        return true;
+    }
+
     function handleNavigationKey(event, code, name, active, isInput) {
         if (isBackKey(name, code)) {
             event.preventDefault();
             goBack();
             return true;
         }
-        if (state.view === "catalog" &&
-                (name === "ColorF2Yellow" || code === 405)) {
-            event.preventDefault();
-            toggleFocusedFavorite();
-            return true;
-        }
-        if (code === 13 && !isInput) {
-            if (active && active.click) {
-                event.preventDefault();
-                active.click();
-            }
-            return true;
-        }
-        if (isInput && (code === 37 || code === 39)) {
-            return true;
-        }
-        if (code !== 37 && code !== 38 && code !== 39 && code !== 40) {
-            return false;
-        }
-        event.preventDefault();
-        geometricMove(
-            code === 37 ? "left" :
-            code === 38 ? "up" :
-            code === 39 ? "right" : "down"
-        );
-        return true;
+        return handleCatalogCommand(event, code, name) ||
+            handleActivationKey(event, code, active, isInput) ||
+            handleDirectionalKey(event, code, isInput);
     }
 
     document.addEventListener("keydown", function (event) {
@@ -477,19 +496,27 @@
         setMode("xtream");
     });
 
+    function clearPairingDisplay() {
+        byId("pairing-qr").innerHTML = "";
+        byId("pairing-url").textContent = "";
+    }
+
+    function setPairingVisible(visible) {
+        state.pairingActive = !!visible;
+        byId("pairing-modal").classList.toggle("hidden", !visible);
+    }
+
     function setPairingStatus(message, kind) {
         var target = byId("pairing-status");
         var retry = byId("pairing-retry");
         if (!target) { return; }
+
         target.textContent = message || "";
         target.setAttribute("data-state", kind || "");
+        if (retry) { retry.classList.toggle("hidden", kind !== "expired"); }
 
-        if (retry) {
-            retry.classList.toggle("hidden", kind !== "expired");
-        }
         if (kind === "expired") {
-            byId("pairing-qr").innerHTML = "";
-            byId("pairing-url").textContent = "";
+            clearPairingDisplay();
             setTimeout(function () {
                 if (state.pairingActive && retry) { retry.focus(); }
             }, 0);
@@ -497,28 +524,41 @@
     }
 
     function cancelPairing() {
-        if (window.BlazzingPairing) {
-            window.BlazzingPairing.stop();
-        }
-        state.pairingActive = false;
-        byId("pairing-modal").classList.add("hidden");
+        if (window.BlazzingPairing) { window.BlazzingPairing.stop(); }
+        setPairingVisible(false);
         setTimeout(focusFirst, 0);
     }
 
-    function acceptPairedPlaylist(profile) {
-        var normalized = {
+    function pairedProfile(profile) {
+        return {
             type: "m3u",
             name: profile.name || "Lista do celular",
             url: profile.url
         };
+    }
 
-        state.pairingActive = false;
-        byId("pairing-modal").classList.add("hidden");
+    function acceptPairedPlaylist(profile) {
+        var normalized = pairedProfile(profile);
+        setPairingVisible(false);
         setMode("m3u");
         byId("profile-name").value = normalized.name;
         byId("m3u-url").value = normalized.url;
         byId("save-profile").checked = true;
         connectM3u(normalized, false);
+    }
+
+    function showPairingSession(session) {
+        if (!state.pairingActive) { return; }
+        byId("pairing-qr").innerHTML = session.qrSvg;
+        byId("pairing-url").textContent = session.url;
+    }
+
+    function showPairingError(error) {
+        if (!state.pairingActive) { return; }
+        setPairingStatus(
+            error.message || "Não foi possível iniciar o pareamento.",
+            "error"
+        );
     }
 
     function startPairing() {
@@ -527,31 +567,15 @@
             return;
         }
 
-        state.pairingActive = true;
-        byId("pairing-modal").classList.remove("hidden");
-        byId("pairing-qr").innerHTML = "";
-        byId("pairing-url").textContent = "";
+        setPairingVisible(true);
+        clearPairingDisplay();
         setPairingStatus("Preparando sessão segura…", "creating");
         setTimeout(focusFirst, 0);
 
         window.BlazzingPairing.start(
             acceptPairedPlaylist,
             setPairingStatus
-        ).then(function (session) {
-            if (!state.pairingActive) {
-                return;
-            }
-            byId("pairing-qr").innerHTML = session.qrSvg;
-            byId("pairing-url").textContent = session.url;
-        }).catch(function (error) {
-            if (!state.pairingActive) {
-                return;
-            }
-            setPairingStatus(
-                error.message || "Não foi possível iniciar o pareamento.",
-                "error"
-            );
-        });
+        ).then(showPairingSession).catch(showPairingError);
     }
 
     byId("pair-button").addEventListener("click", startPairing);
