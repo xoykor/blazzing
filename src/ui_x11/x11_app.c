@@ -2283,6 +2283,8 @@ static void remap_catalog_provider_id(vip_category_list_t *cats, vip_channel_lis
 
 /* Network authentication/catalog fetch runs off-thread; Xlib must not be
  * called from this worker.  Results are transferred back through app state. */
+static void login_job_free(login_job_t *job);
+
 typedef struct {
     vip_error_t error;
     vip_credentials_t credentials;
@@ -3623,7 +3625,7 @@ static void clear_details_view(app_t *a) {
 }
 
 /* Return whether a details request may start for this catalog item. */
-static bool details_load_allowed(const app_t *a, size_t channel_index) {
+static bool details_load_allowed(app_t *a, size_t channel_index) {
     if (!a || atomic_load(&a->details_running) || a->details_thread_started)
         return false;
     if (a->login_mode != LOGIN_XTREAM || a->series_episode_mode)
