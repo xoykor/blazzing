@@ -477,46 +477,63 @@ static void draw_surface(app_t *a, int x, int y, int w, int h, int r, bool focus
 }
 
 /* Handle the utf8 to latin1 operation. */
+static bool utf8_is_continuation(unsigned char value) {
+    return (value & 0xc0u) == 0x80u;
+}
+
+static uint32_t decode_utf8_codepoint(const unsigned char *p, size_t remaining, size_t *advance) {
+    *advance = 1u;
+    if (*p < 0x80u)
+        return *p;
+
+    if (remaining >= 2u && (*p & 0xe0u) == 0xc0u && utf8_is_continuation(p[1])) {
+        *advance = 2u;
+        return ((uint32_t)(p[0] & 0x1fu) << 6) | (uint32_t)(p[1] & 0x3fu);
+    }
+    if (remaining >= 3u && (*p & 0xf0u) == 0xe0u &&
+        utf8_is_continuation(p[1]) && utf8_is_continuation(p[2])) {
+        *advance = 3u;
+        return ((uint32_t)(p[0] & 0x0fu) << 12) |
+               ((uint32_t)(p[1] & 0x3fu) << 6) |
+               (uint32_t)(p[2] & 0x3fu);
+    }
+    if (remaining >= 4u && (*p & 0xf8u) == 0xf0u &&
+        utf8_is_continuation(p[1]) && utf8_is_continuation(p[2]) &&
+        utf8_is_continuation(p[3])) {
+        *advance = 4u;
+        return ((uint32_t)(p[0] & 0x07u) << 18) |
+               ((uint32_t)(p[1] & 0x3fu) << 12) |
+               ((uint32_t)(p[2] & 0x3fu) << 6) |
+               (uint32_t)(p[3] & 0x3fu);
+    }
+    return (uint32_t)'?';
+}
+
+static char latin1_char_for_codepoint(uint32_t cp) {
+    if (cp <= 0xffu)
+        return (char)cp;
+    if (cp == 0x2018u || cp == 0x2019u)
+        return '\'';
+    if (cp == 0x201cu || cp == 0x201du)
+        return '"';
+    if (cp == 0x2013u || cp == 0x2014u)
+        return '-';
+    return '?';
+}
+
 static size_t utf8_to_latin1(char *dst, size_t cap, const char *src) {
     if (!dst || cap == 0u)
         return 0u;
     if (!src)
         src = "";
+
     size_t out = 0u;
     const unsigned char *p = (const unsigned char *)src;
     const unsigned char *end = p + strlen(src);
     while (p < end && out + 1u < cap) {
-        size_t remaining = (size_t)(end - p);
-        uint32_t cp = 0u;
         size_t advance = 1u;
-        if (*p < 0x80u) {
-            cp = *p;
-        } else if (remaining >= 2u && (*p & 0xe0u) == 0xc0u && (p[1] & 0xc0u) == 0x80u) {
-            cp = ((uint32_t)(p[0] & 0x1fu) << 6) | (uint32_t)(p[1] & 0x3fu);
-            advance = 2u;
-        } else if (remaining >= 3u && (*p & 0xf0u) == 0xe0u && (p[1] & 0xc0u) == 0x80u &&
-                   (p[2] & 0xc0u) == 0x80u) {
-            cp =
-                ((uint32_t)(p[0] & 0x0fu) << 12) | ((uint32_t)(p[1] & 0x3fu) << 6) | (uint32_t)(p[2] & 0x3fu);
-            advance = 3u;
-        } else if (remaining >= 4u && (*p & 0xf8u) == 0xf0u && (p[1] & 0xc0u) == 0x80u &&
-                   (p[2] & 0xc0u) == 0x80u && (p[3] & 0xc0u) == 0x80u) {
-            cp = ((uint32_t)(p[0] & 0x07u) << 18) | ((uint32_t)(p[1] & 0x3fu) << 12) |
-                 ((uint32_t)(p[2] & 0x3fu) << 6) | (uint32_t)(p[3] & 0x3fu);
-            advance = 4u;
-        } else {
-            cp = (uint32_t)'?';
-        }
-        if (cp <= 0xffu)
-            dst[out++] = (char)cp;
-        else if (cp == 0x2018u || cp == 0x2019u)
-            dst[out++] = '\'';
-        else if (cp == 0x201cu || cp == 0x201du)
-            dst[out++] = '"';
-        else if (cp == 0x2013u || cp == 0x2014u)
-            dst[out++] = '-';
-        else
-            dst[out++] = '?';
+        uint32_t cp = decode_utf8_codepoint(p, (size_t)(end - p), &advance);
+        dst[out++] = latin1_char_for_codepoint(cp);
         p += advance;
     }
     dst[out] = '\0';
@@ -832,39 +849,59 @@ static XImage *scale_ximage(app_t *a, const XImage *src, int width, int height) 
 }
 
 /* Draw cached image contain. */
+static void contained_image_size(const XImage *image, int box_w, int box_h, int *dw, int *dh) {
+    double sx = (double)box_w / (double)image->width;
+    double sy = (double)box_h / (double)image->height;
+    double scale = sx < sy ? sx : sy;
+
+    *dw = (int)((double)image->width * scale + 0.5);
+    *dh = (int)((double)image->height * scale + 0.5);
+    if (*dw < 1)
+        *dw = 1;
+    if (*dh < 1)
+        *dh = 1;
+    if (*dw > box_w)
+        *dw = box_w;
+    if (*dh > box_h)
+        *dh = box_h;
+}
+
+static bool scaled_slot_matches(const image_slot_t *slot, int box_w, int box_h, int dw, int dh) {
+    return slot->scaled && slot->scaled_box_w == box_w && slot->scaled_box_h == box_h &&
+           slot->scaled_w == dw && slot->scaled_h == dh;
+}
+
+static void rebuild_scaled_slot(app_t *a, image_slot_t *slot, int box_w, int box_h, int dw, int dh) {
+    if (slot->scaled) {
+        XDestroyImage(slot->scaled);
+        slot->scaled = NULL;
+    }
+
+    slot->scaled = scale_ximage(a, slot->image, dw, dh);
+    slot->scaled_box_w = box_w;
+    slot->scaled_box_h = box_h;
+    slot->scaled_w = dw;
+    slot->scaled_h = dh;
+}
+
 static bool draw_cached_image_contain(app_t *a, const char *path, int x, int y, int box_w, int box_h) {
     image_slot_t *slot = image_cache_slot_get(a, path);
     if (!slot || !slot->image || box_w < 1 || box_h < 1)
         return false;
+
     double sx = (double)box_w / (double)slot->image->width;
     double sy = (double)box_h / (double)slot->image->height;
-    double scale = sx < sy ? sx : sy;
-    if (scale <= 0.0)
+    if ((sx < sy ? sx : sy) <= 0.0)
         return false;
-    int dw = (int)((double)slot->image->width * scale + 0.5);
-    int dh = (int)((double)slot->image->height * scale + 0.5);
-    if (dw < 1)
-        dw = 1;
-    if (dh < 1)
-        dh = 1;
-    if (dw > box_w)
-        dw = box_w;
-    if (dh > box_h)
-        dh = box_h;
-    if (!slot->scaled || slot->scaled_box_w != box_w || slot->scaled_box_h != box_h || slot->scaled_w != dw ||
-        slot->scaled_h != dh) {
-        if (slot->scaled) {
-            XDestroyImage(slot->scaled);
-            slot->scaled = NULL;
-        }
-        slot->scaled = scale_ximage(a, slot->image, dw, dh);
-        slot->scaled_box_w = box_w;
-        slot->scaled_box_h = box_h;
-        slot->scaled_w = dw;
-        slot->scaled_h = dh;
-    }
+
+    int dw = 0;
+    int dh = 0;
+    contained_image_size(slot->image, box_w, box_h, &dw, &dh);
+    if (!scaled_slot_matches(slot, box_w, box_h, dw, dh))
+        rebuild_scaled_slot(a, slot, box_w, box_h, dw, dh);
     if (!slot->scaled)
         return false;
+
     int dx = x + (box_w - dw) / 2;
     int dy = y + (box_h - dh) / 2;
     XPutImage(a->dpy, draw_target(a), a->gc, slot->scaled, 0, 0, dx, dy, (unsigned)dw, (unsigned)dh);
@@ -1173,49 +1210,71 @@ static void update_browse_hover(app_t *a, int x, int y) {
 }
 
 /* Handle the step browse animations operation. */
+static bool step_grid_scroll_animation(app_t *a, int64_t now, bool *changed) {
+    *changed = false;
+    if (!a->grid_scroll_animating)
+        return false;
+
+    if (a->grid_scroll_last_ms <= 0)
+        a->grid_scroll_last_ms = now;
+
+    int64_t elapsed = now - a->grid_scroll_last_ms;
+    if (elapsed < 1)
+        elapsed = 1;
+    if (elapsed > 32)
+        elapsed = 32;
+    a->grid_scroll_last_ms = now;
+
+    int diff = a->grid_scroll_target - a->grid_scroll;
+    if (diff == 0) {
+        a->grid_scroll_animating = false;
+        return false;
+    }
+
+    int step = (int)((int64_t)diff * elapsed / 85LL);
+    if (step == 0)
+        step = diff > 0 ? 1 : -1;
+    if ((diff > 0 && step > diff) || (diff < 0 && step < diff))
+        step = diff;
+
+    a->grid_scroll += step;
+    *changed = true;
+    if (a->grid_scroll == a->grid_scroll_target) {
+        a->grid_scroll_animating = false;
+        return false;
+    }
+    return true;
+}
+
+static bool step_card_hover_animation(app_t *a, int64_t now) {
+    if (!a->hovered_card_valid)
+        return false;
+
+    bool active = vip_ui_motion_step(&a->hover_motion, now, 140);
+    if (a->hover_motion.value <= 0.0f && a->hover_motion.target <= 0.0f)
+        a->hovered_card_valid = false;
+    return active;
+}
+
+static bool step_control_hover_animation(app_t *a, int64_t now) {
+    if (a->hovered_control == HOVER_NONE)
+        return false;
+    return vip_ui_motion_step(&a->control_motion, now, 120);
+}
+
 static bool step_browse_animations(app_t *a, int64_t now) {
     if (!a || a->screen != SCREEN_BROWSE)
         return false;
-    bool active = false;
+
     bool scroll_changed = false;
-    if (a->grid_scroll_animating) {
-        if (a->grid_scroll_last_ms <= 0)
-            a->grid_scroll_last_ms = now;
-        int64_t elapsed = now - a->grid_scroll_last_ms;
-        if (elapsed < 1)
-            elapsed = 1;
-        if (elapsed > 32)
-            elapsed = 32;
-        a->grid_scroll_last_ms = now;
-        int diff = a->grid_scroll_target - a->grid_scroll;
-        if (diff == 0) {
-            a->grid_scroll_animating = false;
-        } else {
-            int step = (int)((int64_t)diff * elapsed / 85LL);
-            if (step == 0)
-                step = diff > 0 ? 1 : -1;
-            if ((diff > 0 && step > diff) || (diff < 0 && step < diff))
-                step = diff;
-            a->grid_scroll += step;
-            scroll_changed = true;
-            if (a->grid_scroll == a->grid_scroll_target)
-                a->grid_scroll_animating = false;
-            else
-                active = true;
-        }
-    }
+    bool active = step_grid_scroll_animation(a, now, &scroll_changed);
     if (scroll_changed && a->mouse_inside)
         update_browse_hover(a, a->mouse_x, a->mouse_y);
-    if (a->hovered_card_valid) {
-        if (vip_ui_motion_step(&a->hover_motion, now, 140))
-            active = true;
-        if (a->hover_motion.value <= 0.0f && a->hover_motion.target <= 0.0f)
-            a->hovered_card_valid = false;
-    }
-    if (a->hovered_control != HOVER_NONE) {
-        if (vip_ui_motion_step(&a->control_motion, now, 120))
-            active = true;
-    }
+    if (step_card_hover_animation(a, now))
+        active = true;
+    if (step_control_hover_animation(a, now))
+        active = true;
+
     a->ui_motion_active = active;
     return active;
 }
@@ -1650,7 +1709,7 @@ static size_t favorite_count(app_t *a) {
 }
 
 /* Load media state. */
-static void load_media_state(app_t *a) {
+static void clear_media_state_buffers(app_t *a) {
     free(a->favorite_flags);
     free(a->progress_flags);
     free(a->series_watched);
@@ -1659,33 +1718,64 @@ static void load_media_state(app_t *a) {
     a->progress_flags = NULL;
     a->series_watched = NULL;
     a->series_total = NULL;
-    size_t count = ACTIVE_CHANNELS(a).len;
-    if (count == 0u)
-        return;
+}
+
+static void allocate_media_state_buffers(app_t *a, size_t count) {
     a->favorite_flags = calloc(count, sizeof(*a->favorite_flags));
     a->progress_flags = calloc(count, sizeof(*a->progress_flags));
     if (a->content_kind == CONTENT_SERIES && !a->series_episode_mode) {
         a->series_watched = calloc(count, sizeof(*a->series_watched));
         a->series_total = calloc(count, sizeof(*a->series_total));
     }
-    if (!a->db || !ACTIVE_CHANNELS(a).items[0].provider_id)
+}
+
+static bool media_state_database_ready(app_t *a) {
+    return a->db && ACTIVE_CHANNELS(a).items[0].provider_id;
+}
+
+static void load_favorite_state(app_t *a, size_t count, vip_error_t *error) {
+    if (!a->favorite_flags)
         return;
+    (void)vip_database_load_favorite_flags(a->db, ACTIVE_CHANNELS(a).items[0].provider_id,
+                                           &ACTIVE_CHANNELS(a), a->favorite_flags, count, error);
+}
+
+static void load_watch_progress_state(app_t *a, size_t count, vip_error_t *error) {
+    if (!a->progress_flags)
+        return;
+    if (a->content_kind != CONTENT_VOD &&
+        (!a->series_episode_mode || a->series_season_select))
+        return;
+
+    vip_error_clear(error);
+    (void)vip_database_load_progress(a->db, ACTIVE_CHANNELS(a).items[0].provider_id,
+                                     &ACTIVE_CHANNELS(a), a->progress_flags, count, error);
+}
+
+static void load_series_progress_state(app_t *a, size_t count, vip_error_t *error) {
+    if (!a->series_watched || !a->series_total)
+        return;
+
+    vip_error_clear(error);
+    (void)vip_database_load_series_progress(a->db, ACTIVE_CHANNELS(a).items[0].provider_id,
+                                            &ACTIVE_CHANNELS(a), a->series_watched, a->series_total,
+                                            count, error);
+}
+
+static void load_media_state(app_t *a) {
+    clear_media_state_buffers(a);
+    size_t count = ACTIVE_CHANNELS(a).len;
+    if (count == 0u)
+        return;
+
+    allocate_media_state_buffers(a, count);
+    if (!media_state_database_ready(a))
+        return;
+
     vip_error_t error = {0};
-    if (a->favorite_flags)
-        (void)vip_database_load_favorite_flags(a->db, ACTIVE_CHANNELS(a).items[0].provider_id,
-                                               &ACTIVE_CHANNELS(a), a->favorite_flags, count, &error);
-    if (a->progress_flags &&
-        (a->content_kind == CONTENT_VOD || (a->series_episode_mode && !a->series_season_select))) {
-        vip_error_clear(&error);
-        (void)vip_database_load_progress(a->db, ACTIVE_CHANNELS(a).items[0].provider_id, &ACTIVE_CHANNELS(a),
-                                         a->progress_flags, count, &error);
-    }
-    if (a->series_watched && a->series_total) {
-        vip_error_clear(&error);
-        (void)vip_database_load_series_progress(a->db, ACTIVE_CHANNELS(a).items[0].provider_id,
-                                                &ACTIVE_CHANNELS(a), a->series_watched, a->series_total,
-                                                count, &error);
-    }
+    load_favorite_state(a, count, &error);
+    load_watch_progress_state(a, count, &error);
+    load_series_progress_state(a, count, &error);
 }
 
 /* Toggle favorite. */
@@ -2086,6 +2176,48 @@ static void prefetch_thumbnail_batch(app_t *a) {
 }
 
 /* Handle the login one server operation. */
+static void load_optional_vod_catalog(vip_xtream_client_t *client, catalog_t *vod) {
+    if (!vod)
+        return;
+
+    vip_error_t optional_error = {0};
+    vip_category_list_init(&vod->categories);
+    vip_channel_list_init(&vod->channels);
+    vip_status_t st = vip_xtream_vod_categories(client, &vod->categories, &optional_error);
+    if (st == VIP_OK)
+        st = vip_xtream_vod_streams(client, &vod->channels, &optional_error);
+    if (st == VIP_OK) {
+        vod->loaded = true;
+        return;
+    }
+
+    fprintf(stderr, "[catalog] filmes indisponíveis: %s\n", optional_error.message);
+    vip_category_list_clear(&vod->categories);
+    vip_channel_list_clear(&vod->channels);
+    vod->loaded = false;
+}
+
+static void load_optional_series_catalog(vip_xtream_client_t *client, catalog_t *series) {
+    if (!series)
+        return;
+
+    vip_error_t optional_error = {0};
+    vip_category_list_init(&series->categories);
+    vip_channel_list_init(&series->channels);
+    vip_status_t st = vip_xtream_series_categories(client, &series->categories, &optional_error);
+    if (st == VIP_OK)
+        st = vip_xtream_series(client, &series->channels, &optional_error);
+    if (st == VIP_OK) {
+        series->loaded = true;
+        return;
+    }
+
+    fprintf(stderr, "[catalog] séries indisponíveis: %s\n", optional_error.message);
+    vip_category_list_clear(&series->categories);
+    vip_channel_list_clear(&series->channels);
+    series->loaded = false;
+}
+
 static vip_status_t login_one_server(const char *server, const char *username, const char *password,
                                      vip_credentials_t *credentials, vip_category_list_t *cats,
                                      vip_channel_list_t *channels, catalog_t *vod, catalog_t *series,
@@ -2101,37 +2233,9 @@ static vip_status_t login_one_server(const char *server, const char *username, c
     if (st == VIP_OK)
         st = vip_xtream_live_streams(client, channels, error);
 
-    if (st == VIP_OK && vod) {
-        vip_error_t optional_error = {0};
-        vip_category_list_init(&vod->categories);
-        vip_channel_list_init(&vod->channels);
-        vip_status_t vst = vip_xtream_vod_categories(client, &vod->categories, &optional_error);
-        if (vst == VIP_OK)
-            vst = vip_xtream_vod_streams(client, &vod->channels, &optional_error);
-        if (vst == VIP_OK) {
-            vod->loaded = true;
-        } else {
-            fprintf(stderr, "[catalog] filmes indisponíveis: %s\n", optional_error.message);
-            vip_category_list_clear(&vod->categories);
-            vip_channel_list_clear(&vod->channels);
-            vod->loaded = false;
-        }
-    }
-    if (st == VIP_OK && series) {
-        vip_error_t optional_error = {0};
-        vip_category_list_init(&series->categories);
-        vip_channel_list_init(&series->channels);
-        vip_status_t sst = vip_xtream_series_categories(client, &series->categories, &optional_error);
-        if (sst == VIP_OK)
-            sst = vip_xtream_series(client, &series->channels, &optional_error);
-        if (sst == VIP_OK) {
-            series->loaded = true;
-        } else {
-            fprintf(stderr, "[catalog] séries indisponíveis: %s\n", optional_error.message);
-            vip_category_list_clear(&series->categories);
-            vip_channel_list_clear(&series->channels);
-            series->loaded = false;
-        }
+    if (st == VIP_OK) {
+        load_optional_vod_catalog(client, vod);
+        load_optional_series_catalog(client, series);
     }
     if (client)
         vip_xtream_client_destroy(client);
@@ -6562,13 +6666,16 @@ static void init_runtime(app_t *a) {
 }
 
 /* Destroy app. */
-static void destroy_app(app_t *a) {
+static void join_app_threads(app_t *a) {
     if (a->login_thread_started)
         pthread_join(a->login_thread, NULL);
     if (a->series_thread_started)
         pthread_join(a->series_thread, NULL);
     if (a->details_thread_started)
         pthread_join(a->details_thread, NULL);
+}
+
+static void destroy_app_services(app_t *a) {
     if (a->player)
         vip_mpv_player_destroy(a->player);
     if (a->thumbs)
@@ -6578,8 +6685,12 @@ static void destroy_app(app_t *a) {
         vip_thumbnail_decoder_destroy(a->decoder);
     if (a->db)
         vip_database_close(a->db);
+}
+
+static void clear_app_catalog_data(app_t *a) {
     for (size_t i = 0; i < CACHE_SLOTS; ++i)
         image_slot_clear(&a->image_cache[i]);
+
     free(a->filtered);
     free(a->category_counts);
     free(a->favorite_flags);
@@ -6588,6 +6699,7 @@ static void destroy_app(app_t *a) {
     free(a->series_total);
     vip_media_metadata_clear(&a->details_metadata);
     vip_profile_list_clear(&a->profiles);
+
     for (int i = 0; i < 3; ++i) {
         vip_category_list_clear(&a->catalogs[i].categories);
         vip_channel_list_clear(&a->catalogs[i].channels);
@@ -6595,29 +6707,40 @@ static void destroy_app(app_t *a) {
     vip_category_list_clear(&a->episode_categories);
     vip_channel_list_clear(&a->episode_channels);
     vip_channel_list_clear(&a->season_channels);
+}
+
+static void destroy_x11_resources(app_t *a) {
+    if (!a->dpy)
+        return;
+
+    if (a->font_title)
+        XFreeFont(a->dpy, a->font_title);
+    if (a->font_heading)
+        XFreeFont(a->dpy, a->font_heading);
+    if (a->font_small)
+        XFreeFont(a->dpy, a->font_small);
+    if (a->font)
+        XFreeFont(a->dpy, a->font);
+    if (a->backbuffer)
+        XFreePixmap(a->dpy, a->backbuffer);
+    if (a->gc)
+        XFreeGC(a->dpy, a->gc);
+    if (a->player_input_win)
+        XDestroyWindow(a->dpy, a->player_input_win);
+    if (a->video_win)
+        XDestroyWindow(a->dpy, a->video_win);
+    if (a->win)
+        XDestroyWindow(a->dpy, a->win);
+    XCloseDisplay(a->dpy);
+}
+
+static void destroy_app(app_t *a) {
+    join_app_threads(a);
+    destroy_app_services(a);
+    clear_app_catalog_data(a);
     stop_phone_pairing(a);
     pthread_mutex_destroy(&a->data_mutex);
-    if (a->dpy) {
-        if (a->font_title)
-            XFreeFont(a->dpy, a->font_title);
-        if (a->font_heading)
-            XFreeFont(a->dpy, a->font_heading);
-        if (a->font_small)
-            XFreeFont(a->dpy, a->font_small);
-        if (a->font)
-            XFreeFont(a->dpy, a->font);
-        if (a->backbuffer)
-            XFreePixmap(a->dpy, a->backbuffer);
-        if (a->gc)
-            XFreeGC(a->dpy, a->gc);
-        if (a->player_input_win)
-            XDestroyWindow(a->dpy, a->player_input_win);
-        if (a->video_win)
-            XDestroyWindow(a->dpy, a->video_win);
-        if (a->win)
-            XDestroyWindow(a->dpy, a->win);
-        XCloseDisplay(a->dpy);
-    }
+    destroy_x11_resources(a);
     curl_global_cleanup();
 }
 
