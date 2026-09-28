@@ -477,46 +477,54 @@ static void draw_surface(app_t *a, int x, int y, int w, int h, int r, bool focus
 }
 
 /* Handle the utf8 to latin1 operation. */
+static uint32_t decode_utf8_codepoint(const unsigned char *p, size_t remaining, size_t *advance) {
+    *advance = 1u;
+    if (*p < 0x80u)
+        return *p;
+    if (remaining >= 2u && (*p & 0xe0u) == 0xc0u && (p[1] & 0xc0u) == 0x80u) {
+        *advance = 2u;
+        return ((uint32_t)(p[0] & 0x1fu) << 6) | (uint32_t)(p[1] & 0x3fu);
+    }
+    if (remaining >= 3u && (*p & 0xf0u) == 0xe0u && (p[1] & 0xc0u) == 0x80u &&
+        (p[2] & 0xc0u) == 0x80u) {
+        *advance = 3u;
+        return ((uint32_t)(p[0] & 0x0fu) << 12) | ((uint32_t)(p[1] & 0x3fu) << 6) |
+               (uint32_t)(p[2] & 0x3fu);
+    }
+    if (remaining >= 4u && (*p & 0xf8u) == 0xf0u && (p[1] & 0xc0u) == 0x80u &&
+        (p[2] & 0xc0u) == 0x80u && (p[3] & 0xc0u) == 0x80u) {
+        *advance = 4u;
+        return ((uint32_t)(p[0] & 0x07u) << 18) | ((uint32_t)(p[1] & 0x3fu) << 12) |
+               ((uint32_t)(p[2] & 0x3fu) << 6) | (uint32_t)(p[3] & 0x3fu);
+    }
+    return (uint32_t)'?';
+}
+
+static char latin1_char_for_codepoint(uint32_t cp) {
+    if (cp <= 0xffu)
+        return (char)cp;
+    if (cp == 0x2018u || cp == 0x2019u)
+        return '\'';
+    if (cp == 0x201cu || cp == 0x201du)
+        return '"';
+    if (cp == 0x2013u || cp == 0x2014u)
+        return '-';
+    return '?';
+}
+
 static size_t utf8_to_latin1(char *dst, size_t cap, const char *src) {
     if (!dst || cap == 0u)
         return 0u;
     if (!src)
         src = "";
+
     size_t out = 0u;
     const unsigned char *p = (const unsigned char *)src;
     const unsigned char *end = p + strlen(src);
     while (p < end && out + 1u < cap) {
-        size_t remaining = (size_t)(end - p);
-        uint32_t cp = 0u;
         size_t advance = 1u;
-        if (*p < 0x80u) {
-            cp = *p;
-        } else if (remaining >= 2u && (*p & 0xe0u) == 0xc0u && (p[1] & 0xc0u) == 0x80u) {
-            cp = ((uint32_t)(p[0] & 0x1fu) << 6) | (uint32_t)(p[1] & 0x3fu);
-            advance = 2u;
-        } else if (remaining >= 3u && (*p & 0xf0u) == 0xe0u && (p[1] & 0xc0u) == 0x80u &&
-                   (p[2] & 0xc0u) == 0x80u) {
-            cp =
-                ((uint32_t)(p[0] & 0x0fu) << 12) | ((uint32_t)(p[1] & 0x3fu) << 6) | (uint32_t)(p[2] & 0x3fu);
-            advance = 3u;
-        } else if (remaining >= 4u && (*p & 0xf8u) == 0xf0u && (p[1] & 0xc0u) == 0x80u &&
-                   (p[2] & 0xc0u) == 0x80u && (p[3] & 0xc0u) == 0x80u) {
-            cp = ((uint32_t)(p[0] & 0x07u) << 18) | ((uint32_t)(p[1] & 0x3fu) << 12) |
-                 ((uint32_t)(p[2] & 0x3fu) << 6) | (uint32_t)(p[3] & 0x3fu);
-            advance = 4u;
-        } else {
-            cp = (uint32_t)'?';
-        }
-        if (cp <= 0xffu)
-            dst[out++] = (char)cp;
-        else if (cp == 0x2018u || cp == 0x2019u)
-            dst[out++] = '\'';
-        else if (cp == 0x201cu || cp == 0x201du)
-            dst[out++] = '"';
-        else if (cp == 0x2013u || cp == 0x2014u)
-            dst[out++] = '-';
-        else
-            dst[out++] = '?';
+        uint32_t cp = decode_utf8_codepoint(p, (size_t)(end - p), &advance);
+        dst[out++] = latin1_char_for_codepoint(cp);
         p += advance;
     }
     dst[out] = '\0';
@@ -832,38 +840,50 @@ static XImage *scale_ximage(app_t *a, const XImage *src, int width, int height) 
 }
 
 /* Draw cached image contain. */
-static bool draw_cached_image_contain(app_t *a, const char *path, int x, int y, int box_w, int box_h) {
-    image_slot_t *slot = image_cache_slot_get(a, path);
-    if (!slot || !slot->image || box_w < 1 || box_h < 1)
+static bool contained_image_size(const XImage *image, int box_w, int box_h, int *dw, int *dh) {
+    if (!image || box_w < 1 || box_h < 1 || image->width < 1 || image->height < 1)
         return false;
-    double sx = (double)box_w / (double)slot->image->width;
-    double sy = (double)box_h / (double)slot->image->height;
+    double sx = (double)box_w / (double)image->width;
+    double sy = (double)box_h / (double)image->height;
     double scale = sx < sy ? sx : sy;
     if (scale <= 0.0)
         return false;
-    int dw = (int)((double)slot->image->width * scale + 0.5);
-    int dh = (int)((double)slot->image->height * scale + 0.5);
-    if (dw < 1)
-        dw = 1;
-    if (dh < 1)
-        dh = 1;
-    if (dw > box_w)
-        dw = box_w;
-    if (dh > box_h)
-        dh = box_h;
-    if (!slot->scaled || slot->scaled_box_w != box_w || slot->scaled_box_h != box_h || slot->scaled_w != dw ||
-        slot->scaled_h != dh) {
-        if (slot->scaled) {
-            XDestroyImage(slot->scaled);
-            slot->scaled = NULL;
-        }
-        slot->scaled = scale_ximage(a, slot->image, dw, dh);
-        slot->scaled_box_w = box_w;
-        slot->scaled_box_h = box_h;
-        slot->scaled_w = dw;
-        slot->scaled_h = dh;
+    *dw = (int)((double)image->width * scale + 0.5);
+    *dh = (int)((double)image->height * scale + 0.5);
+    if (*dw < 1)
+        *dw = 1;
+    if (*dh < 1)
+        *dh = 1;
+    if (*dw > box_w)
+        *dw = box_w;
+    if (*dh > box_h)
+        *dh = box_h;
+    return true;
+}
+
+static bool ensure_contained_scaled_image(app_t *a, image_slot_t *slot, int box_w, int box_h, int dw, int dh) {
+    bool unchanged = slot->scaled && slot->scaled_box_w == box_w && slot->scaled_box_h == box_h &&
+                     slot->scaled_w == dw && slot->scaled_h == dh;
+    if (unchanged)
+        return true;
+    if (slot->scaled) {
+        XDestroyImage(slot->scaled);
+        slot->scaled = NULL;
     }
-    if (!slot->scaled)
+    slot->scaled = scale_ximage(a, slot->image, dw, dh);
+    slot->scaled_box_w = box_w;
+    slot->scaled_box_h = box_h;
+    slot->scaled_w = dw;
+    slot->scaled_h = dh;
+    return slot->scaled != NULL;
+}
+
+static bool draw_cached_image_contain(app_t *a, const char *path, int x, int y, int box_w, int box_h) {
+    image_slot_t *slot = image_cache_slot_get(a, path);
+    int dw = 0, dh = 0;
+    if (!slot || !contained_image_size(slot->image, box_w, box_h, &dw, &dh))
+        return false;
+    if (!ensure_contained_scaled_image(a, slot, box_w, box_h, dw, dh))
         return false;
     int dx = x + (box_w - dw) / 2;
     int dy = y + (box_h - dh) / 2;
@@ -883,30 +903,31 @@ static artwork_mode_t default_artwork_mode(const app_t *a) {
 }
 
 /* Handle the detect artwork mode operation. */
-static artwork_mode_t detect_artwork_mode(app_t *a) {
-    int portrait = 0, landscape = 0, square = 0, sampled = 0;
-    size_t limit = a->filtered_len < 24u ? a->filtered_len : 24u;
-    for (size_t i = 0; i < limit; ++i) {
-        size_t chidx = a->filtered[i];
-        if (chidx >= ACTIVE_CHANNELS(a).len)
-            continue;
-        vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
-        vip_error_t error = {0};
-        char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
-        image_slot_t *slot = path ? image_cache_slot_get(a, path) : NULL;
-        free(path);
-        if (!slot || !slot->image || slot->image->height <= 0)
-            continue;
-        double ratio = (double)slot->image->width / (double)slot->image->height;
-        if (ratio < 0.88)
-            ++portrait;
-        else if (ratio > 1.18)
-            ++landscape;
-        else
-            ++square;
-        ++sampled;
-    }
-    artwork_mode_t fallback = default_artwork_mode(a);
+static void count_artwork_ratio(double ratio, int *portrait, int *landscape, int *square) {
+    if (ratio < 0.88)
+        ++*portrait;
+    else if (ratio > 1.18)
+        ++*landscape;
+    else
+        ++*square;
+}
+
+static bool sample_artwork_ratio(app_t *a, size_t chidx, double *ratio) {
+    if (chidx >= ACTIVE_CHANNELS(a).len)
+        return false;
+    vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
+    vip_error_t error = {0};
+    char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
+    image_slot_t *slot = path ? image_cache_slot_get(a, path) : NULL;
+    free(path);
+    if (!slot || !slot->image || slot->image->height <= 0)
+        return false;
+    *ratio = (double)slot->image->width / (double)slot->image->height;
+    return true;
+}
+
+static artwork_mode_t dominant_artwork_mode(int portrait, int landscape, int square,
+                                           artwork_mode_t fallback, int sampled) {
     if (sampled < 3)
         return fallback;
     if (portrait >= landscape && portrait >= square)
@@ -914,6 +935,19 @@ static artwork_mode_t detect_artwork_mode(app_t *a) {
     if (landscape >= portrait && landscape >= square)
         return ART_LANDSCAPE;
     return ART_SQUARE;
+}
+
+static artwork_mode_t detect_artwork_mode(app_t *a) {
+    int portrait = 0, landscape = 0, square = 0, sampled = 0;
+    size_t limit = a->filtered_len < 24u ? a->filtered_len : 24u;
+    for (size_t i = 0; i < limit; ++i) {
+        double ratio = 0.0;
+        if (!sample_artwork_ratio(a, a->filtered[i], &ratio))
+            continue;
+        count_artwork_ratio(ratio, &portrait, &landscape, &square);
+        ++sampled;
+    }
+    return dominant_artwork_mode(portrait, landscape, square, default_artwork_mode(a), sampled);
 }
 
 /* Handle the details panel active operation. */
@@ -991,29 +1025,39 @@ static card_layout_t browse_layout(app_t *a) {
 }
 
 /* Handle the browse card at operation. */
-static bool browse_card_at(app_t *a, int x, int y, size_t *fidx_out) {
-    if (!a || a->screen != SCREEN_BROWSE || a->filtered_len == 0u)
+static bool browse_point_over_details(app_t *a, int x, int y) {
+    if (!details_panel_active(a))
         return false;
-    card_layout_t layout = browse_layout(a);
+    int px, py, pw, ph;
+    details_panel_geometry(a, &px, &py, &pw, &ph);
+    return point_in(x, y, px, py, pw, ph) || x >= px - 12;
+}
+
+static bool browse_grid_position(app_t *a, int x, int y, card_layout_t layout, int *row, int *col) {
     int content_x = SIDEBAR_W + 20;
     int content_y = TOPBAR_H + 18;
     if (x < content_x || y < content_y || x >= a->width || y >= a->height)
         return false;
-    if (details_panel_active(a)) {
-        int px, py, pw, ph;
-        details_panel_geometry(a, &px, &py, &pw, &ph);
-        if (point_in(x, y, px, py, pw, ph) || x >= px - 12)
-            return false;
-    }
     int relx = x - content_x;
     int rely = y - content_y + a->grid_scroll;
     if (relx < 0 || rely < 0)
         return false;
-    int col = relx / (layout.card_w + GRID_GAP);
-    int row = rely / layout.row_step;
-    if (col < 0 || col >= layout.cols || relx % (layout.card_w + GRID_GAP) >= layout.card_w ||
-        rely % layout.row_step >= layout.card_h)
+    *col = relx / (layout.card_w + GRID_GAP);
+    *row = rely / layout.row_step;
+    return *col >= 0 && *col < layout.cols &&
+           relx % (layout.card_w + GRID_GAP) < layout.card_w &&
+           rely % layout.row_step < layout.card_h;
+}
+
+static bool browse_card_at(app_t *a, int x, int y, size_t *fidx_out) {
+    if (!a || a->screen != SCREEN_BROWSE || a->filtered_len == 0u || browse_point_over_details(a, x, y))
         return false;
+
+    card_layout_t layout = browse_layout(a);
+    int row = 0, col = 0;
+    if (!browse_grid_position(a, x, y, layout, &row, &col))
+        return false;
+
     size_t fidx = (size_t)row * (size_t)layout.cols + (size_t)col;
     if (fidx >= a->filtered_len)
         return false;
@@ -1023,9 +1067,7 @@ static bool browse_card_at(app_t *a, int x, int y, size_t *fidx_out) {
 }
 
 /* Handle the browse control at operation. */
-static int browse_control_at(app_t *a, int x, int y) {
-    if (!a || a->screen != SCREEN_BROWSE)
-        return HOVER_NONE;
+static int browse_top_control_at(app_t *a, int x, int y) {
     const int tab_x[3] = {8, 88, 174};
     const int tab_w[3] = {74, 80, 88};
     if (y >= 12 && y < 58 && x < SIDEBAR_W) {
@@ -1033,6 +1075,7 @@ static int browse_control_at(app_t *a, int x, int y) {
             if (point_in(x, y, tab_x[k], 12, tab_w[k], 46))
                 return HOVER_TAB_BASE + k;
     }
+
     int list_w = 94, fav_w = 174;
     int list_x = a->width - list_w - 18;
     int fav_x = list_x - fav_w - 10;
@@ -1045,26 +1088,34 @@ static int browse_control_at(app_t *a, int x, int y) {
         return HOVER_FAVORITES;
     if (point_in(x, y, list_x, 12, list_w, 46))
         return HOVER_LISTS;
-    if (x < SIDEBAR_W && y >= TOPBAR_H) {
-        int base = TOPBAR_H + 12;
-        if (a->series_episode_mode) {
-            if (point_in(x, y, 8, base, SIDEBAR_W - 16, 38))
-                return HOVER_BACK;
-            base += 48;
-        }
-        if (point_in(x, y, 8, base, SIDEBAR_W - 16, 36))
-            return HOVER_CATEGORY_ALL;
-        int local = y - (base + 42);
-        if (local >= 0) {
-            int row = local / 42;
-            if (local % 42 < 36) {
-                int idx = a->category_scroll + row;
-                if (idx >= 0 && (size_t)idx < ACTIVE_CATEGORIES(a).len)
-                    return HOVER_CATEGORY_BASE + idx;
-            }
-        }
-    }
     return HOVER_NONE;
+}
+
+static int browse_sidebar_control_at(app_t *a, int x, int y) {
+    if (x >= SIDEBAR_W || y < TOPBAR_H)
+        return HOVER_NONE;
+    int base = TOPBAR_H + 12;
+    if (a->series_episode_mode && point_in(x, y, 8, base, SIDEBAR_W - 16, 38))
+        return HOVER_BACK;
+    if (a->series_episode_mode)
+        base += 48;
+    if (point_in(x, y, 8, base, SIDEBAR_W - 16, 36))
+        return HOVER_CATEGORY_ALL;
+
+    int local = y - (base + 42);
+    if (local < 0 || local % 42 >= 36)
+        return HOVER_NONE;
+    int idx = a->category_scroll + local / 42;
+    if (idx < 0 || (size_t)idx >= ACTIVE_CATEGORIES(a).len)
+        return HOVER_NONE;
+    return HOVER_CATEGORY_BASE + idx;
+}
+
+static int browse_control_at(app_t *a, int x, int y) {
+    if (!a || a->screen != SCREEN_BROWSE)
+        return HOVER_NONE;
+    int control = browse_top_control_at(a, x, y);
+    return control != HOVER_NONE ? control : browse_sidebar_control_at(a, x, y);
 }
 
 /* Update browse hover. */
@@ -1103,49 +1154,59 @@ static void update_browse_hover(app_t *a, int x, int y) {
 }
 
 /* Handle the step browse animations operation. */
+static bool step_grid_scroll_animation(app_t *a, int64_t now, bool *scroll_changed) {
+    if (!a->grid_scroll_animating)
+        return false;
+    if (a->grid_scroll_last_ms <= 0)
+        a->grid_scroll_last_ms = now;
+    int64_t elapsed = now - a->grid_scroll_last_ms;
+    if (elapsed < 1)
+        elapsed = 1;
+    if (elapsed > 32)
+        elapsed = 32;
+    a->grid_scroll_last_ms = now;
+
+    int diff = a->grid_scroll_target - a->grid_scroll;
+    if (diff == 0) {
+        a->grid_scroll_animating = false;
+        return false;
+    }
+    int step = (int)((int64_t)diff * elapsed / 85LL);
+    if (step == 0)
+        step = diff > 0 ? 1 : -1;
+    if ((diff > 0 && step > diff) || (diff < 0 && step < diff))
+        step = diff;
+    a->grid_scroll += step;
+    *scroll_changed = true;
+    a->grid_scroll_animating = a->grid_scroll != a->grid_scroll_target;
+    return a->grid_scroll_animating;
+}
+
+static bool step_card_hover_animation(app_t *a, int64_t now) {
+    if (!a->hovered_card_valid)
+        return false;
+    bool active = vip_ui_motion_step(&a->hover_motion, now, 140);
+    if (a->hover_motion.value <= 0.0f && a->hover_motion.target <= 0.0f)
+        a->hovered_card_valid = false;
+    return active;
+}
+
+static bool step_control_hover_animation(app_t *a, int64_t now) {
+    return a->hovered_control != HOVER_NONE && vip_ui_motion_step(&a->control_motion, now, 120);
+}
+
 static bool step_browse_animations(app_t *a, int64_t now) {
     if (!a || a->screen != SCREEN_BROWSE)
         return false;
-    bool active = false;
+
     bool scroll_changed = false;
-    if (a->grid_scroll_animating) {
-        if (a->grid_scroll_last_ms <= 0)
-            a->grid_scroll_last_ms = now;
-        int64_t elapsed = now - a->grid_scroll_last_ms;
-        if (elapsed < 1)
-            elapsed = 1;
-        if (elapsed > 32)
-            elapsed = 32;
-        a->grid_scroll_last_ms = now;
-        int diff = a->grid_scroll_target - a->grid_scroll;
-        if (diff == 0) {
-            a->grid_scroll_animating = false;
-        } else {
-            int step = (int)((int64_t)diff * elapsed / 85LL);
-            if (step == 0)
-                step = diff > 0 ? 1 : -1;
-            if ((diff > 0 && step > diff) || (diff < 0 && step < diff))
-                step = diff;
-            a->grid_scroll += step;
-            scroll_changed = true;
-            if (a->grid_scroll == a->grid_scroll_target)
-                a->grid_scroll_animating = false;
-            else
-                active = true;
-        }
-    }
+    bool active = step_grid_scroll_animation(a, now, &scroll_changed);
     if (scroll_changed && a->mouse_inside)
         update_browse_hover(a, a->mouse_x, a->mouse_y);
-    if (a->hovered_card_valid) {
-        if (vip_ui_motion_step(&a->hover_motion, now, 140))
-            active = true;
-        if (a->hover_motion.value <= 0.0f && a->hover_motion.target <= 0.0f)
-            a->hovered_card_valid = false;
-    }
-    if (a->hovered_control != HOVER_NONE) {
-        if (vip_ui_motion_step(&a->control_motion, now, 120))
-            active = true;
-    }
+    if (step_card_hover_animation(a, now))
+        active = true;
+    if (step_control_hover_animation(a, now))
+        active = true;
     a->ui_motion_active = active;
     return active;
 }
@@ -1275,29 +1336,35 @@ static int compare_episode_channels(const void *lhs, const void *rhs) {
 }
 
 /* Sort season cards numerically while preserving their original category index in position. */
+static long season_category_number(const vip_channel_t *channel) {
+    if (!channel || !channel->category_id || !channel->category_id[0])
+        return LONG_MAX;
+    char *end = NULL;
+    long parsed = strtol(channel->category_id, &end, 10);
+    return end != channel->category_id && end && *end == '\0' ? parsed : LONG_MAX;
+}
+
+static int compare_long_values(long a, long b) {
+    if (a == b)
+        return 0;
+    return a < b ? -1 : 1;
+}
+
+static int compare_int_values(int a, int b) {
+    if (a == b)
+        return 0;
+    return a < b ? -1 : 1;
+}
+
 static int compare_season_channels(const void *lhs, const void *rhs) {
     const vip_channel_t *a = lhs;
     const vip_channel_t *b = rhs;
-    long av = LONG_MAX;
-    long bv = LONG_MAX;
-    if (a && a->category_id && a->category_id[0]) {
-        char *end = NULL;
-        long parsed = strtol(a->category_id, &end, 10);
-        if (end != a->category_id && end && *end == '\0')
-            av = parsed;
-    }
-    if (b && b->category_id && b->category_id[0]) {
-        char *end = NULL;
-        long parsed = strtol(b->category_id, &end, 10);
-        if (end != b->category_id && end && *end == '\0')
-            bv = parsed;
-    }
-    if (av != bv)
-        return av < bv ? -1 : 1;
-    int ap = a ? a->position : INT_MAX;
-    int bp = b ? b->position : INT_MAX;
-    if (ap != bp)
-        return ap < bp ? -1 : 1;
+    int by_category = compare_long_values(season_category_number(a), season_category_number(b));
+    if (by_category)
+        return by_category;
+    int by_position = compare_int_values(a ? a->position : INT_MAX, b ? b->position : INT_MAX);
+    if (by_position)
+        return by_position;
     return strcasecmp(a && a->name ? a->name : "", b && b->name ? b->name : "");
 }
 
@@ -1312,6 +1379,46 @@ static void sort_season_channels(vip_channel_list_t *channels) {
 }
 
 /* Draw up to two title lines so long work names stay identifiable. */
+static size_t card_title_breakpoint(app_t *a, const char *text, const char *font, int width) {
+    size_t len = strlen(text);
+    size_t best = 0u;
+    char first[256];
+    for (size_t i = 0u; i < len && i < sizeof(first) - 1u; ++i) {
+        if (text[i] != ' ')
+            continue;
+        size_t n = i;
+        while (n > 0u && text[n - 1u] == ' ')
+            --n;
+        if (n == 0u || n >= sizeof(first))
+            continue;
+        memcpy(first, text, n);
+        first[n] = '\0';
+        if (vip_ui_render_text_width(&a->renderer, first, font) > width)
+            break;
+        best = i + 1u;
+    }
+    return best;
+}
+
+static void draw_split_card_title(app_t *a, int x, int y, int width, const char *text,
+                                  const char *font, size_t split) {
+    char first[256];
+    size_t first_len = split;
+    while (first_len > 0u && text[first_len - 1u] == ' ')
+        --first_len;
+    if (first_len >= sizeof(first))
+        first_len = sizeof(first) - 1u;
+    memcpy(first, text, first_len);
+    first[first_len] = '\0';
+
+    const char *second = text + split;
+    while (*second == ' ')
+        ++second;
+    vip_ui_render_text(&a->renderer, x, y, width, first, font, 0xF6F7FBu, 1.0, false);
+    if (*second)
+        vip_ui_render_text(&a->renderer, x, y + 16, width, second, font, 0xF6F7FBu, 1.0, false);
+}
+
 static void draw_card_title(app_t *a, int x, int y, int width, const char *text, bool active) {
     if (!a || !text || !text[0] || width <= 0)
         return;
@@ -1328,69 +1435,43 @@ static void draw_card_title(app_t *a, int x, int y, int width, const char *text,
         return;
     }
 
-    size_t len = strlen(text);
-    size_t best = 0u;
-    char first[256];
-    for (size_t i = 0u; i < len && i < sizeof(first) - 1u; ++i) {
-        if (text[i] != ' ')
-            continue;
-        size_t n = i;
-        while (n > 0u && text[n - 1u] == ' ')
-            --n;
-        if (n == 0u || n >= sizeof(first))
-            continue;
-        memcpy(first, text, n);
-        first[n] = '\0';
-        if (vip_ui_render_text_width(&a->renderer, first, font) <= width)
-            best = i + 1u;
-        else
-            break;
-    }
-
-    if (best == 0u) {
+    size_t split = card_title_breakpoint(a, text, font, width);
+    if (split == 0u) {
         vip_ui_render_text(&a->renderer, x, y, width, text, font, 0xF6F7FBu, 1.0, false);
         return;
     }
-
-    size_t first_len = best;
-    while (first_len > 0u && text[first_len - 1u] == ' ')
-        --first_len;
-    if (first_len >= sizeof(first))
-        first_len = sizeof(first) - 1u;
-    memcpy(first, text, first_len);
-    first[first_len] = '\0';
-
-    const char *second = text + best;
-    while (*second == ' ')
-        ++second;
-    vip_ui_render_text(&a->renderer, x, y, width, first, font, 0xF6F7FBu, 1.0, false);
-    if (*second)
-        vip_ui_render_text(&a->renderer, x, y + 16, width, second, font, 0xF6F7FBu, 1.0, false);
+    draw_split_card_title(a, x, y, width, text, font, split);
 }
 
 /* Format the compact season/episode label shown under episode cards. */
+static int xtream_episode_season(const vip_channel_t *ch) {
+    if (!ch->category_id || !ch->category_id[0])
+        return 0;
+    char *end = NULL;
+    long parsed = strtol(ch->category_id, &end, 10);
+    if (end == ch->category_id || !end || *end != '\0' || parsed < 0 || parsed > INT_MAX)
+        return 0;
+    return (int)parsed;
+}
+
+static bool episode_numbers(const app_t *a, const vip_channel_t *ch, int *season, int *episode) {
+    *season = 0;
+    *episode = 0;
+    if (a->login_mode == LOGIN_M3U) {
+        char series_name[256];
+        return vip_m3u_parse_episode_label(ch->name, series_name, sizeof(series_name), season, episode);
+    }
+    *season = xtream_episode_season(ch);
+    *episode = ch->position;
+    return true;
+}
+
 static bool episode_card_meta(const app_t *a, const vip_channel_t *ch, char *buffer, size_t cap) {
     if (!a || !ch || !buffer || cap == 0u || !a->series_episode_mode || a->series_season_select)
         return false;
 
-    int season = 0;
-    int episode = 0;
-
-    if (a->login_mode == LOGIN_M3U) {
-        char series_name[256];
-        if (!vip_m3u_parse_episode_label(ch->name, series_name, sizeof(series_name), &season, &episode))
-            return false;
-    } else {
-        if (ch->category_id && ch->category_id[0]) {
-            char *end = NULL;
-            long parsed = strtol(ch->category_id, &end, 10);
-            if (end != ch->category_id && end && *end == '\0' && parsed >= 0 && parsed <= INT_MAX)
-                season = (int)parsed;
-        }
-        episode = ch->position;
-    }
-
-    if (episode <= 0)
+    int season = 0, episode = 0;
+    if (!episode_numbers(a, ch, &season, &episode) || episode <= 0)
         return false;
     if (season > 0)
         snprintf(buffer, cap, "T%d · E%d", season, episode);
@@ -1905,6 +1986,45 @@ static size_t prefetch_thumbnail_list(app_t *a, vip_channel_list_t *channels, si
  * Quando uma imagem falha, a próxima volta pelo catálogo a coloca na fila
  * novamente; portanto o carregamento não morre silenciosamente.
  */
+static size_t prefetch_primary_thumbnails(app_t *a, bool episode_source, int active_kind, size_t budget) {
+    vip_channel_list_t *series_source = a->series_season_select ? &a->season_channels : &a->episode_channels;
+    if (episode_source)
+        return prefetch_thumbnail_list(a, series_source, &a->episode_prefetch_cursor, budget,
+                                       THUMB_BACKGROUND_PRIORITY + 1000LL);
+    if (active_kind >= 0 && active_kind < 3 && a->catalogs[active_kind].loaded)
+        return prefetch_thumbnail_list(a, &a->catalogs[active_kind].channels,
+                                       &a->thumb_prefetch_cursor[active_kind], budget,
+                                       THUMB_BACKGROUND_PRIORITY + 1000LL);
+    return 0u;
+}
+
+static size_t count_secondary_thumbnail_sources(app_t *a, bool episode_source, int active_kind) {
+    size_t count = 0u;
+    for (int k = 0; k < 3; ++k) {
+        if (!episode_source && k == active_kind)
+            continue;
+        if (a->catalogs[k].loaded && a->catalogs[k].channels.len > 0u)
+            ++count;
+    }
+    return count;
+}
+
+static void prefetch_secondary_thumbnails(app_t *a, bool episode_source, int active_kind, size_t budget) {
+    size_t remaining_sources = count_secondary_thumbnail_sources(a, episode_source, active_kind);
+    for (int k = 0; k < 3 && budget > 0u && remaining_sources > 0u; ++k) {
+        if (!episode_source && k == active_kind)
+            continue;
+        catalog_t *catalog = &a->catalogs[k];
+        if (!catalog->loaded || catalog->channels.len == 0u)
+            continue;
+        size_t quota = (budget + remaining_sources - 1u) / remaining_sources;
+        size_t used = prefetch_thumbnail_list(a, &catalog->channels, &a->thumb_prefetch_cursor[k], quota,
+                                              THUMB_BACKGROUND_PRIORITY);
+        budget -= used > budget ? budget : used;
+        --remaining_sources;
+    }
+}
+
 static void prefetch_thumbnail_batch(app_t *a) {
     if (!a || !a->thumbs || a->screen == SCREEN_LOGIN || !a->active_profile_id[0])
         return;
@@ -1914,48 +2034,55 @@ static void prefetch_thumbnail_batch(app_t *a) {
         return;
     a->thumb_prefetch_next_ms = now + THUMB_PREFETCH_INTERVAL_MS;
 
-    size_t budget = THUMB_PREFETCH_BATCH;
-    const size_t primary_budget = (THUMB_PREFETCH_BATCH * 3u) / 4u;
     vip_channel_list_t *series_source = a->series_season_select ? &a->season_channels : &a->episode_channels;
     bool episode_source = a->series_episode_mode && series_source->len > 0u;
     int active_kind = (int)a->content_kind;
-
-    /* Spend most of every batch on what the user can actually see. Older
-       versions split bandwidth evenly across TV/VOD/series, making the active
-       catalog look slow even while invisible catalogs were downloading. */
-    if (episode_source) {
-        size_t used = prefetch_thumbnail_list(a, series_source, &a->episode_prefetch_cursor, primary_budget,
-                                              THUMB_BACKGROUND_PRIORITY + 1000LL);
-        budget -= used > budget ? budget : used;
-    } else if (active_kind >= 0 && active_kind < 3 && a->catalogs[active_kind].loaded) {
-        size_t used = prefetch_thumbnail_list(a, &a->catalogs[active_kind].channels,
-                                              &a->thumb_prefetch_cursor[active_kind], primary_budget,
-                                              THUMB_BACKGROUND_PRIORITY + 1000LL);
-        budget -= used > budget ? budget : used;
-    }
-
-    size_t secondary_sources = 0u;
-    for (int k = 0; k < 3; ++k) {
-        if (!episode_source && k == active_kind)
-            continue;
-        if (a->catalogs[k].loaded && a->catalogs[k].channels.len > 0u)
-            ++secondary_sources;
-    }
-    for (int k = 0; k < 3 && budget > 0u && secondary_sources > 0u; ++k) {
-        if (!episode_source && k == active_kind)
-            continue;
-        catalog_t *catalog = &a->catalogs[k];
-        if (!catalog->loaded || catalog->channels.len == 0u)
-            continue;
-        size_t quota = (budget + secondary_sources - 1u) / secondary_sources;
-        size_t used = prefetch_thumbnail_list(a, &catalog->channels, &a->thumb_prefetch_cursor[k], quota,
-                                              THUMB_BACKGROUND_PRIORITY);
-        budget -= used > budget ? budget : used;
-        --secondary_sources;
-    }
+    size_t budget = THUMB_PREFETCH_BATCH;
+    const size_t primary_budget = (THUMB_PREFETCH_BATCH * 3u) / 4u;
+    size_t used = prefetch_primary_thumbnails(a, episode_source, active_kind, primary_budget);
+    budget -= used > budget ? budget : used;
+    prefetch_secondary_thumbnails(a, episode_source, active_kind, budget);
 }
 
 /* Handle the login one server operation. */
+static void load_optional_vod_catalog(vip_xtream_client_t *client, catalog_t *vod) {
+    if (!vod)
+        return;
+    vip_error_t error = {0};
+    vip_category_list_init(&vod->categories);
+    vip_channel_list_init(&vod->channels);
+    vip_status_t st = vip_xtream_vod_categories(client, &vod->categories, &error);
+    if (st == VIP_OK)
+        st = vip_xtream_vod_streams(client, &vod->channels, &error);
+    if (st == VIP_OK) {
+        vod->loaded = true;
+        return;
+    }
+    fprintf(stderr, "[catalog] filmes indisponíveis: %s\n", error.message);
+    vip_category_list_clear(&vod->categories);
+    vip_channel_list_clear(&vod->channels);
+    vod->loaded = false;
+}
+
+static void load_optional_series_catalog(vip_xtream_client_t *client, catalog_t *series) {
+    if (!series)
+        return;
+    vip_error_t error = {0};
+    vip_category_list_init(&series->categories);
+    vip_channel_list_init(&series->channels);
+    vip_status_t st = vip_xtream_series_categories(client, &series->categories, &error);
+    if (st == VIP_OK)
+        st = vip_xtream_series(client, &series->channels, &error);
+    if (st == VIP_OK) {
+        series->loaded = true;
+        return;
+    }
+    fprintf(stderr, "[catalog] séries indisponíveis: %s\n", error.message);
+    vip_category_list_clear(&series->categories);
+    vip_channel_list_clear(&series->channels);
+    series->loaded = false;
+}
+
 static vip_status_t login_one_server(const char *server, const char *username, const char *password,
                                      vip_credentials_t *credentials, vip_category_list_t *cats,
                                      vip_channel_list_t *channels, catalog_t *vod, catalog_t *series,
@@ -1971,37 +2098,9 @@ static vip_status_t login_one_server(const char *server, const char *username, c
     if (st == VIP_OK)
         st = vip_xtream_live_streams(client, channels, error);
 
-    if (st == VIP_OK && vod) {
-        vip_error_t optional_error = {0};
-        vip_category_list_init(&vod->categories);
-        vip_channel_list_init(&vod->channels);
-        vip_status_t vst = vip_xtream_vod_categories(client, &vod->categories, &optional_error);
-        if (vst == VIP_OK)
-            vst = vip_xtream_vod_streams(client, &vod->channels, &optional_error);
-        if (vst == VIP_OK) {
-            vod->loaded = true;
-        } else {
-            fprintf(stderr, "[catalog] filmes indisponíveis: %s\n", optional_error.message);
-            vip_category_list_clear(&vod->categories);
-            vip_channel_list_clear(&vod->channels);
-            vod->loaded = false;
-        }
-    }
-    if (st == VIP_OK && series) {
-        vip_error_t optional_error = {0};
-        vip_category_list_init(&series->categories);
-        vip_channel_list_init(&series->channels);
-        vip_status_t sst = vip_xtream_series_categories(client, &series->categories, &optional_error);
-        if (sst == VIP_OK)
-            sst = vip_xtream_series(client, &series->channels, &optional_error);
-        if (sst == VIP_OK) {
-            series->loaded = true;
-        } else {
-            fprintf(stderr, "[catalog] séries indisponíveis: %s\n", optional_error.message);
-            vip_category_list_clear(&series->categories);
-            vip_channel_list_clear(&series->channels);
-            series->loaded = false;
-        }
+    if (st == VIP_OK) {
+        load_optional_vod_catalog(client, vod);
+        load_optional_series_catalog(client, series);
     }
     if (client)
         vip_xtream_client_destroy(client);
@@ -2293,30 +2392,41 @@ static void resume_cached_m3u(app_t *a) {
 }
 
 /* Start login. force_reload is used only by an explicit Connect action. */
-static void start_login(app_t *a, bool force_reload) {
-    if (atomic_load(&a->login_running) || a->login_thread_started)
+static void free_login_job(login_job_t *job) {
+    if (!job)
         return;
+    if (job->password) {
+        volatile char *wipe = job->password;
+        size_t n = strlen(job->password);
+        while (n-- > 0u)
+            *wipe++ = 0;
+    }
+    free(job->server);
+    free(job->server_alt);
+    free(job->username);
+    free(job->password);
+    free(job->profile_name);
+    free(job);
+}
+
+static bool login_inputs_valid(app_t *a) {
     if (!a->server[0]) {
         snprintf(a->status, sizeof(a->status),
                  a->login_mode == LOGIN_M3U ? "Informe uma URL ou caminho de playlist M3U"
                                             : "Preencha servidor, usuário e senha");
-        return;
+        return false;
     }
     if (a->login_mode == LOGIN_XTREAM && (!a->username[0] || !a->password[0])) {
         snprintf(a->status, sizeof(a->status), "Preencha servidor, usuário e senha");
-        return;
+        return false;
     }
+    return true;
+}
 
-    if (!force_reload && cached_m3u_matches(a)) {
-        resume_cached_m3u(a);
-        return;
-    }
-
+static login_job_t *create_login_job(app_t *a) {
     login_job_t *job = calloc(1, sizeof(*job));
-    if (!job) {
-        snprintf(a->status, sizeof(a->status), "Sem memória");
-        return;
-    }
+    if (!job)
+        return NULL;
     job->app = a;
     job->mode = a->login_mode;
     job->server = vip_strdup(a->server);
@@ -2325,44 +2435,42 @@ static void start_login(app_t *a, bool force_reload) {
     job->password = vip_strdup(a->password);
     job->profile_name = vip_strdup(a->profile_name);
     if (!job->server || !job->server_alt || !job->username || !job->password || !job->profile_name) {
-        if (job->password) {
-            volatile char *wipe = job->password;
-            size_t n = strlen(job->password);
-            while (n-- > 0u)
-                *wipe++ = 0;
-        }
-        free(job->server);
-        free(job->server_alt);
-        free(job->username);
-        free(job->password);
-        free(job->profile_name);
-        free(job);
+        free_login_job(job);
+        return NULL;
+    }
+    return job;
+}
+
+static bool launch_login_worker(app_t *a, login_job_t *job) {
+    atomic_store(&a->login_done, false);
+    atomic_store(&a->login_success, false);
+    atomic_store(&a->login_running, true);
+    if (pthread_create(&a->login_thread, NULL, login_worker, job) == 0) {
+        a->login_thread_started = true;
+        return true;
+    }
+    atomic_store(&a->login_running, false);
+    free_login_job(job);
+    snprintf(a->status, sizeof(a->status), "Falha ao iniciar conexão");
+    return false;
+}
+
+static void start_login(app_t *a, bool force_reload) {
+    if (atomic_load(&a->login_running) || a->login_thread_started || !login_inputs_valid(a))
+        return;
+    if (!force_reload && cached_m3u_matches(a)) {
+        resume_cached_m3u(a);
+        return;
+    }
+
+    login_job_t *job = create_login_job(a);
+    if (!job) {
         snprintf(a->status, sizeof(a->status), "Sem memória");
         return;
     }
     snprintf(a->status, sizeof(a->status),
              a->login_mode == LOGIN_M3U ? "Carregando M3U..." : "Conectando...");
-    atomic_store(&a->login_done, false);
-    atomic_store(&a->login_success, false);
-    atomic_store(&a->login_running, true);
-    if (pthread_create(&a->login_thread, NULL, login_worker, job) != 0) {
-        atomic_store(&a->login_running, false);
-        if (job->password) {
-            volatile char *wipe = job->password;
-            size_t n = strlen(job->password);
-            while (n-- > 0u)
-                *wipe++ = 0;
-        }
-        free(job->server);
-        free(job->server_alt);
-        free(job->username);
-        free(job->password);
-        free(job->profile_name);
-        free(job);
-        snprintf(a->status, sizeof(a->status), "Falha ao iniciar conexão");
-        return;
-    }
-    a->login_thread_started = true;
+    (void)launch_login_worker(a, job);
 }
 
 static void pairing_submission_cb(const char *profile_name,
@@ -2666,19 +2774,28 @@ static void *series_worker(void *userdata) {
 }
 
 /* Start series load. */
-static void start_series_load(app_t *a, size_t channel_index) {
-    if (!a || a->content_kind != CONTENT_SERIES || a->series_episode_mode ||
-        atomic_load(&a->series_running) || a->series_thread_started ||
-        channel_index >= ACTIVE_CHANNELS(a).len)
-        return;
-    vip_channel_t *series = &ACTIVE_CHANNELS(a).items[channel_index];
-    if (!series->id || strncmp(series->id, "series:", 7u) != 0)
-        return;
-    snprintf(a->series_parent_id, sizeof(a->series_parent_id), "%s", series->id);
-    const char *server = a->active_server_alt && a->server_alt[0] ? a->server_alt : a->server;
-    series_job_t *job = calloc(1, sizeof(*job));
+static void free_series_job(series_job_t *job) {
     if (!job)
         return;
+    if (job->password) {
+        volatile char *wipe = job->password;
+        size_t n = strlen(job->password);
+        while (n-- > 0u)
+            *wipe++ = 0;
+    }
+    free(job->server);
+    free(job->username);
+    free(job->password);
+    free(job->series_id);
+    free(job->title);
+    free(job->logo_url);
+    free(job);
+}
+
+static series_job_t *create_series_job(app_t *a, const vip_channel_t *series, const char *server) {
+    series_job_t *job = calloc(1, sizeof(*job));
+    if (!job)
+        return NULL;
     job->app = a;
     job->server = vip_strdup(server);
     job->username = vip_strdup(a->username);
@@ -2688,42 +2805,42 @@ static void start_series_load(app_t *a, size_t channel_index) {
     job->logo_url = vip_strdup(series->logo_url ? series->logo_url : "");
     if (!job->server || !job->username || !job->password || !job->series_id || !job->title ||
         !job->logo_url) {
-        if (job->password) {
-            volatile char *wipe = job->password;
-            size_t n = strlen(job->password);
-            while (n-- > 0u)
-                *wipe++ = 0;
-        }
-        free(job->server);
-        free(job->username);
-        free(job->password);
-        free(job->series_id);
-        free(job->title);
-        free(job->logo_url);
-        free(job);
-        return;
+        free_series_job(job);
+        return NULL;
     }
+    return job;
+}
+
+static bool series_load_allowed(app_t *a, size_t channel_index) {
+    return a && a->content_kind == CONTENT_SERIES && !a->series_episode_mode &&
+           !atomic_load(&a->series_running) && !a->series_thread_started &&
+           channel_index < ACTIVE_CHANNELS(a).len;
+}
+
+static void start_series_load(app_t *a, size_t channel_index) {
+    if (!series_load_allowed(a, channel_index))
+        return;
+
+    vip_channel_t *series = &ACTIVE_CHANNELS(a).items[channel_index];
+    if (!series->id || strncmp(series->id, "series:", 7u) != 0)
+        return;
+
+    snprintf(a->series_parent_id, sizeof(a->series_parent_id), "%s", series->id);
+    const char *server = a->active_server_alt && a->server_alt[0] ? a->server_alt : a->server;
+    series_job_t *job = create_series_job(a, series, server);
+    if (!job)
+        return;
+
     pthread_mutex_lock(&a->data_mutex);
     snprintf(a->status, sizeof(a->status), "Carregando temporadas de %s...", series->name);
     pthread_mutex_unlock(&a->data_mutex);
     atomic_store(&a->series_done, false);
     atomic_store(&a->series_success, false);
     atomic_store(&a->series_running, true);
+
     if (pthread_create(&a->series_thread, NULL, series_worker, job) != 0) {
         atomic_store(&a->series_running, false);
-        if (job->password) {
-            volatile char *wipe = job->password;
-            size_t n = strlen(job->password);
-            while (n-- > 0u)
-                *wipe++ = 0;
-        }
-        free(job->server);
-        free(job->username);
-        free(job->password);
-        free(job->series_id);
-        free(job->title);
-        free(job->logo_url);
-        free(job);
+        free_series_job(job);
         return;
     }
     a->series_thread_started = true;
@@ -2760,6 +2877,89 @@ static void details_job_free(details_job_t *job) {
 }
 
 /* Run the details background worker. */
+static bool details_cache_is_fresh(int64_t updated_at) {
+    if (updated_at <= 0)
+        return false;
+    int64_t age = (int64_t)time(NULL) - updated_at;
+    return age >= 0 && age < 7LL * 24LL * 60LL * 60LL;
+}
+
+static vip_status_t load_details_from_cache(app_t *a, const details_job_t *job, vip_media_metadata_t *metadata,
+                                            vip_media_metadata_t *cached, bool *cache_found, bool *used_cache) {
+    if (!a->db)
+        return VIP_ERR_NETWORK;
+
+    int64_t updated_at = 0;
+    vip_error_t cache_error = {0};
+    vip_status_t st = vip_database_get_media_metadata(a->db, job->provider_id, job->media_id, cached,
+                                                      &updated_at, cache_found, &cache_error);
+    if (st != VIP_OK || !*cache_found || !metadata_has_content(cached) || !details_cache_is_fresh(updated_at))
+        return VIP_ERR_NETWORK;
+
+    *metadata = *cached;
+    memset(cached, 0, sizeof(*cached));
+    *used_cache = true;
+    return VIP_OK;
+}
+
+static vip_status_t fetch_details_remote(app_t *a, const details_job_t *job, vip_media_metadata_t *metadata,
+                                         vip_error_t *error) {
+    vip_credentials_t credentials = {0};
+    vip_xtream_client_t *client = NULL;
+    vip_status_t st = vip_credentials_init(&credentials, job->server, job->username, job->password, error);
+    if (st == VIP_OK)
+        st = vip_xtream_client_create(&client, &credentials, error);
+    if (st == VIP_OK) {
+        if (job->kind == CONTENT_VOD)
+            st = vip_xtream_vod_info(client, job->media_id, metadata, error);
+        else
+            st = vip_xtream_series_metadata(client, job->media_id, metadata, error);
+    }
+    if (client)
+        vip_xtream_client_destroy(client);
+    vip_credentials_clear(&credentials);
+
+    if (st == VIP_OK && metadata_has_content(metadata) && a->db) {
+        vip_error_t db_error = {0};
+        (void)vip_database_set_media_metadata(a->db, job->provider_id, job->media_id, metadata, &db_error);
+    }
+    return st;
+}
+
+static vip_status_t fallback_to_cached_details(vip_status_t st, bool cache_found,
+                                               vip_media_metadata_t *metadata, vip_media_metadata_t *cached,
+                                               bool *used_cache) {
+    if (st == VIP_OK || !cache_found || !metadata_has_content(cached))
+        return st;
+    vip_media_metadata_clear(metadata);
+    *metadata = *cached;
+    memset(cached, 0, sizeof(*cached));
+    *used_cache = true;
+    return VIP_OK;
+}
+
+static bool publish_details_result(app_t *a, const details_job_t *job, vip_media_metadata_t *metadata,
+                                   vip_status_t st, const vip_error_t *error, bool used_cache) {
+    pthread_mutex_lock(&a->data_mutex);
+    bool current = strcmp(a->details_media_id, job->media_id) == 0;
+    if (current) {
+        vip_media_metadata_clear(&a->details_metadata);
+        if (st == VIP_OK) {
+            a->details_metadata = *metadata;
+            memset(metadata, 0, sizeof(*metadata));
+            snprintf(a->details_status, sizeof(a->details_status), "%s",
+                     used_cache ? "Detalhes carregados do cache" : "Detalhes carregados");
+        } else {
+            char bounded_error[220];
+            bounded_text(bounded_error, sizeof(bounded_error),
+                         error->message[0] ? error->message : "provider não retornou metadados", 90);
+            snprintf(a->details_status, sizeof(a->details_status), "Sem detalhes: %.220s", bounded_error);
+        }
+    }
+    pthread_mutex_unlock(&a->data_mutex);
+    return current;
+}
+
 static void *details_worker(void *userdata) {
     details_job_t *job = userdata;
     app_t *a = job->app;
@@ -2769,75 +2969,18 @@ static void *details_worker(void *userdata) {
     vip_media_metadata_init(&cached);
     vip_error_t error = {0};
     bool cache_found = false;
-    int64_t cache_updated = 0;
     bool used_cache = false;
-    vip_status_t st = VIP_ERR_NETWORK;
 
-    if (a->db) {
-        vip_error_t cache_error = {0};
-        if (vip_database_get_media_metadata(a->db, job->provider_id, job->media_id, &cached, &cache_updated,
-                                            &cache_found, &cache_error) == VIP_OK &&
-            cache_found && metadata_has_content(&cached)) {
-            int64_t age = (int64_t)time(NULL) - cache_updated;
-            if (cache_updated > 0 && age >= 0 && age < 7LL * 24LL * 60LL * 60LL) {
-                metadata = cached;
-                memset(&cached, 0, sizeof(cached));
-                st = VIP_OK;
-                used_cache = true;
-            }
-        }
-    }
-
+    vip_status_t st = load_details_from_cache(a, job, &metadata, &cached, &cache_found, &used_cache);
     if (st != VIP_OK) {
-        vip_credentials_t credentials = {0};
-        vip_xtream_client_t *client = NULL;
-        st = vip_credentials_init(&credentials, job->server, job->username, job->password, &error);
-        if (st == VIP_OK)
-            st = vip_xtream_client_create(&client, &credentials, &error);
-        if (st == VIP_OK) {
-            if (job->kind == CONTENT_VOD)
-                st = vip_xtream_vod_info(client, job->media_id, &metadata, &error);
-            else
-                st = vip_xtream_series_metadata(client, job->media_id, &metadata, &error);
-        }
-        if (client)
-            vip_xtream_client_destroy(client);
-        vip_credentials_clear(&credentials);
-
-        if (st == VIP_OK && metadata_has_content(&metadata) && a->db) {
-            vip_error_t db_error = {0};
-            (void)vip_database_set_media_metadata(a->db, job->provider_id, job->media_id, &metadata,
-                                                  &db_error);
-        } else if (st != VIP_OK && cache_found && metadata_has_content(&cached)) {
-            vip_media_metadata_clear(&metadata);
-            metadata = cached;
-            memset(&cached, 0, sizeof(cached));
-            st = VIP_OK;
-            used_cache = true;
-        }
+        st = fetch_details_remote(a, job, &metadata, &error);
+        st = fallback_to_cached_details(st, cache_found, &metadata, &cached, &used_cache);
     }
 
-    pthread_mutex_lock(&a->data_mutex);
-    bool still_current = strcmp(a->details_media_id, job->media_id) == 0;
-    if (still_current) {
-        vip_media_metadata_clear(&a->details_metadata);
-        if (st == VIP_OK) {
-            a->details_metadata = metadata;
-            memset(&metadata, 0, sizeof(metadata));
-            snprintf(a->details_status, sizeof(a->details_status), "%s",
-                     used_cache ? "Detalhes carregados do cache" : "Detalhes carregados");
-        } else {
-            char bounded_error[220];
-            bounded_text(bounded_error, sizeof(bounded_error),
-                         error.message[0] ? error.message : "provider não retornou metadados", 90);
-            snprintf(a->details_status, sizeof(a->details_status), "Sem detalhes: %.220s", bounded_error);
-        }
-    }
-    pthread_mutex_unlock(&a->data_mutex);
-
+    bool current = publish_details_result(a, job, &metadata, st, &error, used_cache);
     vip_media_metadata_clear(&metadata);
     vip_media_metadata_clear(&cached);
-    atomic_store(&a->details_success, still_current && st == VIP_OK);
+    atomic_store(&a->details_success, current && st == VIP_OK);
     atomic_store(&a->details_running, false);
     atomic_store(&a->details_done, true);
     details_job_free(job);
@@ -3399,14 +3542,31 @@ static bool keyring_store_password(const char *profile_id, const char *password)
 }
 
 /* Handle the keyring lookup password operation. */
+static bool wait_secret_tool(pid_t pid) {
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR)
+            return false;
+    }
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+static ssize_t trim_secret_output(char *out, ssize_t n) {
+    if (n <= 0)
+        return 0;
+    out[n] = '\0';
+    while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r'))
+        out[--n] = '\0';
+    return n;
+}
+
 static bool keyring_lookup_password(const char *profile_id, char *out, size_t cap) {
     if (!out || cap == 0u)
         return false;
     out[0] = '\0';
 
     char secret_tool[256];
-    if (!keyring_profile_id_is_safe(profile_id) ||
-        !find_secret_tool(secret_tool, sizeof(secret_tool)))
+    if (!keyring_profile_id_is_safe(profile_id) || !find_secret_tool(secret_tool, sizeof(secret_tool)))
         return false;
 
     int outpipe[2];
@@ -3427,19 +3587,11 @@ static bool keyring_lookup_password(const char *profile_id, char *out, size_t ca
 
     ssize_t n = read(outpipe[0], out, cap - 1u);
     close(outpipe[0]);
-
-    int status = 0;
-    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
-    }
-    if (n <= 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    if (!wait_secret_tool(pid) || n <= 0) {
         out[0] = '\0';
         return false;
     }
-
-    out[n] = '\0';
-    while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r'))
-        out[--n] = '\0';
-    return n > 0;
+    return trim_secret_output(out, n) > 0;
 }
 
 /* Handle the refresh profiles operation. */
@@ -3531,38 +3683,57 @@ static void update_series_progress(app_t *a, const char *last_episode_id) {
 
 /* Throttle routine writes during playback, but force persistence on pause,
  * seek/exit and other lifecycle boundaries. */
+static bool progress_snapshot_valid(app_t *a, const vip_mpv_player_snapshot_t *snap, bool force, int64_t now) {
+    if (snap->natural_end && a->progress_flags && a->current_channel < ACTIVE_CHANNELS(a).len &&
+        a->progress_flags[a->current_channel].completed)
+        return false;
+    if (!force && !snap->natural_end && now - a->player_last_progress_save_ms < 5000)
+        return false;
+    return snap->position_seconds >= 0.0 && (snap->duration_seconds > 1.0 || snap->natural_end);
+}
+
+static bool progress_snapshot_completed(const vip_mpv_player_snapshot_t *snap) {
+    if (snap->natural_end)
+        return true;
+    if (snap->duration_seconds <= 0.0)
+        return false;
+    double ratio = snap->position_seconds / snap->duration_seconds;
+    bool near_end = snap->duration_seconds > 300.0 &&
+                    snap->duration_seconds - snap->position_seconds <= 60.0;
+    return ratio >= 0.95 || near_end;
+}
+
+static void update_progress_cache(app_t *a, const vip_mpv_player_snapshot_t *snap, bool completed) {
+    if (!a->progress_flags || a->current_channel >= ACTIVE_CHANNELS(a).len)
+        return;
+    vip_watch_progress_t *progress = &a->progress_flags[a->current_channel];
+    progress->position_seconds = snap->position_seconds;
+    progress->duration_seconds = snap->duration_seconds;
+    progress->completed = completed;
+    progress->updated_at = (int64_t)time(NULL);
+}
+
 static void save_current_progress(app_t *a, bool force) {
     if (!current_item_has_progress(a) || !a->player)
         return;
+
     int64_t now = monotonic_ms();
     vip_mpv_player_snapshot_t snap = {0};
     vip_mpv_player_snapshot(a->player, &snap);
-    if (snap.natural_end && a->progress_flags && a->current_channel < ACTIVE_CHANNELS(a).len &&
-        a->progress_flags[a->current_channel].completed)
+    if (!progress_snapshot_valid(a, &snap, force, now))
         return;
-    if (!force && !snap.natural_end && now - a->player_last_progress_save_ms < 5000)
-        return;
-    if (snap.position_seconds < 0.0 || (snap.duration_seconds <= 1.0 && !snap.natural_end))
-        return;
-    bool completed =
-        snap.natural_end ||
-        (snap.duration_seconds > 0.0 &&
-         (snap.position_seconds / snap.duration_seconds >= 0.95 ||
-          (snap.duration_seconds > 300.0 && snap.duration_seconds - snap.position_seconds <= 60.0)));
+
+    bool completed = progress_snapshot_completed(&snap);
     vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[a->current_channel];
     vip_error_t error = {0};
     if (vip_database_set_progress(a->db, ch->provider_id, ch->id, snap.position_seconds,
-                                  snap.duration_seconds, completed, &error) == VIP_OK) {
-        if (a->progress_flags && a->current_channel < ACTIVE_CHANNELS(a).len) {
-            a->progress_flags[a->current_channel].position_seconds = snap.position_seconds;
-            a->progress_flags[a->current_channel].duration_seconds = snap.duration_seconds;
-            a->progress_flags[a->current_channel].completed = completed;
-            a->progress_flags[a->current_channel].updated_at = (int64_t)time(NULL);
-        }
-        if (a->series_episode_mode)
-            update_series_progress(a, ch->id);
-        a->player_last_progress_save_ms = now;
-    }
+                                  snap.duration_seconds, completed, &error) != VIP_OK)
+        return;
+
+    update_progress_cache(a, &snap, completed);
+    if (a->series_episode_mode)
+        update_series_progress(a, ch->id);
+    a->player_last_progress_save_ms = now;
 }
 
 /* Handle the player hud visible operation. */
@@ -3809,9 +3980,38 @@ static bool stream_needs_forced_hls(const char *url) {
 
 /* Enter playback without destroying the mpv process: loadfile is sent over
  * IPC and optional resume position is applied after the file is loaded. */
-static void enter_player(app_t *a, size_t channel_index) {
-    if (channel_index >= ACTIVE_CHANNELS(a).len || !a->player)
+static void debug_player_container(app_t *a) {
+    if (!getenv("VIPTV_MPV_DEBUG"))
         return;
+    XWindowAttributes wa;
+    if (XGetWindowAttributes(a->dpy, a->video_win, &wa))
+        fprintf(stderr, "[mpv-debug] container-window mapped=%s size=%dx%d\n",
+                wa.map_state == IsViewable ? "yes" : "no", wa.width, wa.height);
+}
+
+static double saved_resume_position(app_t *a, const vip_channel_t *ch) {
+    if (a->player_item_live || !a->db)
+        return 0.0;
+    vip_watch_progress_t saved = {0};
+    vip_error_t error = {0};
+    if (vip_database_get_progress(a->db, ch->provider_id, ch->id, &saved, &error) != VIP_OK)
+        return 0.0;
+    if (saved.completed || saved.position_seconds <= 5.0)
+        return 0.0;
+    if (saved.duration_seconds > 0.0 && saved.position_seconds >= saved.duration_seconds - 20.0)
+        return 0.0;
+    return saved.position_seconds;
+}
+
+static vip_status_t load_player_stream(app_t *a, const vip_channel_t *ch, double resume, vip_error_t *error) {
+    if (a->player_item_live && stream_needs_forced_hls(ch->stream_url))
+        return vip_mpv_player_load_hls(a->player, ch->stream_url, error);
+    if (resume > 0.0)
+        return vip_mpv_player_load_at(a->player, ch->stream_url, resume, error);
+    return vip_mpv_player_load(a->player, ch->stream_url, error);
+}
+
+static void prepare_player_screen(app_t *a, size_t channel_index) {
     if (a->screen == SCREEN_PLAYER)
         save_current_progress(a, true);
     a->current_channel = channel_index;
@@ -3826,38 +4026,22 @@ static void enter_player(app_t *a, size_t channel_index) {
     a->player_fallback_attempt = 0u;
     a->player_xtream_alt_attempted = false;
     a->timeline_dragging = false;
-    /* O player não pausa mais o pipeline de thumbnails: o cache continua
-       sendo preenchido mesmo durante a reprodução. */
     set_video_visible(a, true);
     focus_player_input(a);
-    /* This child is only a graphics container. mpv creates its own native
-       X11/GL window, which the player backend reparents into this container. */
     XSync(a->dpy, False);
-    if (getenv("VIPTV_MPV_DEBUG")) {
-        XWindowAttributes wa;
-        if (XGetWindowAttributes(a->dpy, a->video_win, &wa))
-            fprintf(stderr, "[mpv-debug] container-window mapped=%s size=%dx%d\n",
-                    wa.map_state == IsViewable ? "yes" : "no", wa.width, wa.height);
-    }
+}
+
+static void enter_player(app_t *a, size_t channel_index) {
+    if (channel_index >= ACTIVE_CHANNELS(a).len || !a->player)
+        return;
+
+    prepare_player_screen(a, channel_index);
+    debug_player_container(a);
+
     vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[channel_index];
-    double resume = 0.0;
-    if (!a->player_item_live && a->db) {
-        vip_watch_progress_t saved = {0};
-        vip_error_t db_error = {0};
-        if (vip_database_get_progress(a->db, ch->provider_id, ch->id, &saved, &db_error) == VIP_OK &&
-            !saved.completed && saved.position_seconds > 5.0 &&
-            (saved.duration_seconds <= 0.0 || saved.position_seconds < saved.duration_seconds - 20.0))
-            resume = saved.position_seconds;
-    }
+    double resume = saved_resume_position(a, ch);
     vip_error_t error = {0};
-    vip_status_t st;
-    if (a->player_item_live && stream_needs_forced_hls(ch->stream_url)) {
-        st = vip_mpv_player_load_hls(a->player, ch->stream_url, &error);
-    } else if (resume > 0.0) {
-        st = vip_mpv_player_load_at(a->player, ch->stream_url, resume, &error);
-    } else {
-        st = vip_mpv_player_load(a->player, ch->stream_url, &error);
-    }
+    vip_status_t st = load_player_stream(a, ch, resume, &error);
     if (st != VIP_OK)
         snprintf(a->player_status, sizeof(a->player_status), "%s", error.message);
     fprintf(stderr, "[player] %s%s\n", ch->name, resume > 0.0 ? " (retomado)" : "");
@@ -4007,6 +4191,32 @@ static void maybe_failover_player(app_t *a) {
 }
 
 /* Draw input. */
+static const char *input_display_text(const char *value, const char *placeholder, bool search_focused,
+                                      bool password, char *masked, size_t masked_cap) {
+    const char *text = value && value[0] ? value : (search_focused ? "Digite para buscar..." : placeholder);
+    if (!password || !value || !value[0])
+        return text;
+    size_t n = strlen(value);
+    if (n >= masked_cap)
+        n = masked_cap - 1u;
+    memset(masked, '*', n);
+    masked[n] = '\0';
+    return masked;
+}
+
+static void draw_search_caret(app_t *a, int x, int y, int w, int h, const char *value) {
+    const char *caret_text = value && value[0] ? value : "";
+    int measured = a->renderer.active ? vip_ui_render_text_width(&a->renderer, caret_text, "Sans 10")
+                                      : text_width(a, caret_text);
+    int caret_x = x + 16 + measured;
+    if (caret_x < x + 16)
+        caret_x = x + 16;
+    if (caret_x > x + w - 18)
+        caret_x = x + w - 18;
+    set_fg(a, a->colors.accent);
+    XDrawLine(a->dpy, draw_target(a), a->gc, caret_x, y + 11, caret_x, y + h - 11);
+}
+
 static void draw_input(app_t *a, int x, int y, int w, int h, const char *value, const char *placeholder,
                        int focus_id, bool password) {
     bool focused = a->input_focus == focus_id;
@@ -4020,34 +4230,17 @@ static void draw_input(app_t *a, int x, int y, int w, int h, const char *value, 
         if (search_focused)
             fill_round_rect(a, x + 5, y + 8, 4, h - 16, 2, a->colors.accent);
     }
-    const char *text = value && value[0] ? value : (search_focused ? "Digite para buscar..." : placeholder);
+
     char masked[256];
-    if (password && value && value[0]) {
-        size_t n = strlen(value);
-        if (n > sizeof(masked) - 1)
-            n = sizeof(masked) - 1;
-        memset(masked, '*', n);
-        masked[n] = '\0';
-        text = masked;
-    }
+    const char *text = input_display_text(value, placeholder, search_focused, password, masked, sizeof(masked));
     bool bright = search_focused || (value && value[0]);
     if (a->renderer.active)
         vip_ui_render_text(&a->renderer, x + 16, y + (h - 16) / 2, w - 32, text, "Sans 10",
                            bright ? 0xF6F7FBu : 0xAAB2C4u, 1.0, false);
     else
         draw_text(a, x + 16, y + h / 2 + 6, text, bright ? a->colors.text : a->colors.muted);
-    if (search_focused) {
-        const char *caret_text = value && value[0] ? value : "";
-        int measured = a->renderer.active ? vip_ui_render_text_width(&a->renderer, caret_text, "Sans 10")
-                                          : text_width(a, caret_text);
-        int caret_x = x + 16 + measured;
-        if (caret_x < x + 16)
-            caret_x = x + 16;
-        if (caret_x > x + w - 18)
-            caret_x = x + w - 18;
-        set_fg(a, a->colors.accent);
-        XDrawLine(a->dpy, draw_target(a), a->gc, caret_x, y + 11, caret_x, y + h - 11);
-    }
+    if (search_focused)
+        draw_search_caret(a, x, y, w, h, value);
 }
 
 /* Draw login. */
@@ -4324,45 +4517,52 @@ static void draw_login(app_t *a) {
 }
 
 /* Draw wrapped text. */
+static void normalize_wrapped_text(char *text) {
+    for (char *p = text; *p; ++p)
+        if (*p == '\n' || *p == '\r' || *p == '\t')
+            *p = ' ';
+}
+
+static void build_wrapped_candidate(char *candidate, size_t cap, const char *line, const char *word) {
+    size_t used = strlen(line);
+    if (used >= cap)
+        used = cap - 1u;
+    memcpy(candidate, line, used);
+    if (used > 0u && used + 1u < cap)
+        candidate[used++] = ' ';
+    size_t room = cap - used - 1u;
+    size_t word_len = strlen(word);
+    if (word_len > room)
+        word_len = room;
+    memcpy(candidate + used, word, word_len);
+    candidate[used + word_len] = '\0';
+}
+
 static int draw_wrapped_text(app_t *a, int x, int y, int width, const char *text, int max_lines,
                              unsigned long color) {
     if (!text || !text[0] || max_lines <= 0)
         return y;
+
     char copy[3072];
     snprintf(copy, sizeof(copy), "%s", text);
-    for (char *p = copy; *p; ++p)
-        if (*p == '\n' || *p == '\r' || *p == '\t')
-            *p = ' ';
+    normalize_wrapped_text(copy);
+
     char line[768] = {0};
     char *save = NULL;
     int lines = 0;
     for (char *word = strtok_r(copy, " ", &save); word && lines < max_lines;
          word = strtok_r(NULL, " ", &save)) {
         char candidate[768];
-        /* Build the candidate explicitly so very long provider text is safely
-         * truncated without triggering format-truncation warnings. */
-        size_t candidate_len = strlen(line);
-        if (candidate_len >= sizeof(candidate))
-            candidate_len = sizeof(candidate) - 1u;
-        memcpy(candidate, line, candidate_len);
-        if (candidate_len > 0u && candidate_len + 1u < sizeof(candidate))
-            candidate[candidate_len++] = ' ';
-        size_t room = sizeof(candidate) - candidate_len - 1u;
-        size_t word_len = strlen(word);
-        if (word_len > room)
-            word_len = room;
-        memcpy(candidate + candidate_len, word, word_len);
-        candidate[candidate_len + word_len] = '\0';
+        build_wrapped_candidate(candidate, sizeof(candidate), line, word);
         if (line[0] && text_width(a, candidate) > width) {
             draw_text(a, x, y, line, color);
             y += 20;
-            ++lines;
-            if (lines >= max_lines)
+            if (++lines >= max_lines)
                 break;
             snprintf(line, sizeof(line), "%s", word);
-        } else {
-            snprintf(line, sizeof(line), "%s", candidate);
+            continue;
         }
+        snprintf(line, sizeof(line), "%s", candidate);
     }
     if (line[0] && lines < max_lines) {
         draw_text(a, x, y, line, color);
@@ -4394,48 +4594,56 @@ static void enqueue_detail_artwork(app_t *a, const vip_channel_t *ch, const char
 }
 
 /* Draw details panel. */
-static void draw_details_panel(app_t *a) {
-    if (!details_panel_active(a) || a->filtered_len == 0u)
-        return;
-    if (a->focused_filtered >= a->filtered_len)
-        a->focused_filtered = a->filtered_len - 1u;
-    size_t chidx = a->filtered[a->focused_filtered];
-    if (chidx >= ACTIVE_CHANNELS(a).len)
-        return;
-    vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
+typedef struct {
+    char loaded_id[128];
+    char status[256];
+    char plot[3072];
+    char cover[1024];
+    char backdrop[1024];
+    char genre[256];
+    char release_date[128];
+    char rating[64];
+    char duration[128];
+    char cast[768];
+    char director[512];
+} details_view_data_t;
 
-    int px, py, pw, ph;
-    details_panel_geometry(a, &px, &py, &pw, &ph);
+static void read_details_view_data(app_t *a, details_view_data_t *data) {
+    pthread_mutex_lock(&a->data_mutex);
+    snprintf(data->loaded_id, sizeof(data->loaded_id), "%s", a->details_media_id);
+    snprintf(data->status, sizeof(data->status), "%s", a->details_status);
+    snprintf(data->plot, sizeof(data->plot), "%s", a->details_metadata.plot ? a->details_metadata.plot : "");
+    snprintf(data->cover, sizeof(data->cover), "%s",
+             a->details_metadata.cover_url ? a->details_metadata.cover_url : "");
+    snprintf(data->backdrop, sizeof(data->backdrop), "%s",
+             a->details_metadata.backdrop_url ? a->details_metadata.backdrop_url : "");
+    snprintf(data->genre, sizeof(data->genre), "%s",
+             a->details_metadata.genre ? a->details_metadata.genre : "");
+    snprintf(data->release_date, sizeof(data->release_date), "%s",
+             a->details_metadata.release_date ? a->details_metadata.release_date : "");
+    snprintf(data->rating, sizeof(data->rating), "%s",
+             a->details_metadata.rating ? a->details_metadata.rating : "");
+    snprintf(data->duration, sizeof(data->duration), "%s",
+             a->details_metadata.duration ? a->details_metadata.duration : "");
+    snprintf(data->cast, sizeof(data->cast), "%s", a->details_metadata.cast ? a->details_metadata.cast : "");
+    snprintf(data->director, sizeof(data->director), "%s",
+             a->details_metadata.director ? a->details_metadata.director : "");
+    pthread_mutex_unlock(&a->data_mutex);
+}
+
+static void draw_details_surface(app_t *a, int px, int py, int pw, int ph) {
     if (a->renderer.active) {
         vip_ui_render_round_rect(&a->renderer, px + 5, py + 8, pw, ph, 20, 0x000000u, 0.55);
         vip_ui_render_round_rect(&a->renderer, px, py, pw, ph, 20, 0x111722u, 0.97);
         vip_ui_render_round_stroke(&a->renderer, px, py, pw, ph, 20, 0x343A48u, 1.0, 1.0);
-    } else {
-        fill_round_rect(a, px + 4, py + 6, pw, ph, 18, a->colors.black);
-        fill_round_rect(a, px, py, pw, ph, 18, a->colors.panel);
-        stroke_round_rect(a, px, py, pw, ph, 18, a->colors.border);
+        return;
     }
+    fill_round_rect(a, px + 4, py + 6, pw, ph, 18, a->colors.black);
+    fill_round_rect(a, px, py, pw, ph, 18, a->colors.panel);
+    stroke_round_rect(a, px, py, pw, ph, 18, a->colors.border);
+}
 
-    char loaded_id[128], status[256], plot[3072], cover[1024], backdrop[1024];
-    char genre[256], release_date[128], rating[64], duration[128], cast[768], director[512];
-    pthread_mutex_lock(&a->data_mutex);
-    snprintf(loaded_id, sizeof(loaded_id), "%s", a->details_media_id);
-    snprintf(status, sizeof(status), "%s", a->details_status);
-    snprintf(plot, sizeof(plot), "%s", a->details_metadata.plot ? a->details_metadata.plot : "");
-    snprintf(cover, sizeof(cover), "%s", a->details_metadata.cover_url ? a->details_metadata.cover_url : "");
-    snprintf(backdrop, sizeof(backdrop), "%s",
-             a->details_metadata.backdrop_url ? a->details_metadata.backdrop_url : "");
-    snprintf(genre, sizeof(genre), "%s", a->details_metadata.genre ? a->details_metadata.genre : "");
-    snprintf(release_date, sizeof(release_date), "%s",
-             a->details_metadata.release_date ? a->details_metadata.release_date : "");
-    snprintf(rating, sizeof(rating), "%s", a->details_metadata.rating ? a->details_metadata.rating : "");
-    snprintf(duration, sizeof(duration), "%s",
-             a->details_metadata.duration ? a->details_metadata.duration : "");
-    snprintf(cast, sizeof(cast), "%s", a->details_metadata.cast ? a->details_metadata.cast : "");
-    snprintf(director, sizeof(director), "%s",
-             a->details_metadata.director ? a->details_metadata.director : "");
-    pthread_mutex_unlock(&a->data_mutex);
-
+static void draw_details_header(app_t *a, const vip_channel_t *ch, size_t chidx, int px, int py, int pw) {
     char title[256];
     bounded_text(title, sizeof(title), ch->name, 72);
     if (a->renderer.active)
@@ -4443,6 +4651,7 @@ static void draw_details_panel(app_t *a) {
                            false);
     else
         draw_text_font(a, a->font_heading, px + 16, py + 31, title, a->colors.text);
+
     bool favorite = a->favorite_flags && a->favorite_flags[chidx];
     int fav_w = 92, fav_h = 32, fav_x = px + pw - fav_w - 14, fav_y = py + 10;
     if (a->renderer.active) {
@@ -4452,18 +4661,21 @@ static void draw_details_panel(app_t *a) {
                                    favorite ? 0xFF5F2Eu : 0x343A48u, 1.0, 1.0);
         vip_ui_render_text(&a->renderer, fav_x, fav_y + 9, fav_w, favorite ? "SALVO" : "FAVORITAR",
                            favorite ? "Sans Bold 8" : "Sans 8", favorite ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
-    } else {
-        fill_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12, favorite ? a->colors.accent2 : a->colors.panel2);
-        stroke_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12, favorite ? a->colors.accent : a->colors.border);
-        draw_centered(a, fav_x, fav_y + 21, fav_w, favorite ? "SALVO" : "FAVORITAR",
-                      favorite ? a->colors.text : a->colors.muted);
+        return;
     }
+    fill_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12, favorite ? a->colors.accent2 : a->colors.panel2);
+    stroke_round_rect(a, fav_x, fav_y, fav_w, fav_h, 12, favorite ? a->colors.accent : a->colors.border);
+    draw_centered(a, fav_x, fav_y + 21, fav_w, favorite ? "SALVO" : "FAVORITAR",
+                  favorite ? a->colors.text : a->colors.muted);
+}
 
-    bool current = ch->id && strcmp(loaded_id, ch->id) == 0;
+static int draw_details_art(app_t *a, const vip_channel_t *ch, const details_view_data_t *data,
+                            bool current, int px, int py, int pw) {
     int art_x = px + 16, art_y = py + 50, art_w = pw - 32, art_h = 170;
     fill_rect(a, art_x, art_y, (unsigned)art_w, (unsigned)art_h, a->colors.black);
+
     bool art_ok = false;
-    const char *art_url = backdrop[0] ? backdrop : cover;
+    const char *art_url = data->backdrop[0] ? data->backdrop : data->cover;
     if (current && art_url[0]) {
         char art_id[256];
         detail_art_id(art_id, sizeof(art_id), ch->id);
@@ -4478,51 +4690,77 @@ static void draw_details_panel(app_t *a) {
         draw_centered(a, art_x, art_y + art_h / 2 + 5, art_w,
                       current ? "carregando banner..." : "carregando detalhes...", a->colors.muted);
     stroke_rect(a, art_x, art_y, (unsigned)art_w, (unsigned)art_h, a->colors.border);
+    return art_y + art_h + 24;
+}
 
-    int y = art_y + art_h + 24;
-    if (!current) {
-        draw_text(a, px + 16, y, "Carregando detalhes da obra...", a->colors.muted);
-        return;
-    }
-
-    char facts[640] = {0};
+static void build_details_facts(const details_view_data_t *data, char *facts, size_t cap) {
     size_t used = 0u;
-    const char *values[4] = {release_date, genre, rating, duration};
+    const char *values[4] = {data->release_date, data->genre, data->rating, data->duration};
     const char *labels[4] = {"Data", "Gênero", "Nota", "Duração"};
     for (size_t i = 0; i < 4u; ++i) {
         if (!values[i][0])
             continue;
-        int n =
-            snprintf(facts + used, sizeof(facts) - used, "%s%s: %s", used ? " | " : "", labels[i], values[i]);
-        if (n < 0 || (size_t)n >= sizeof(facts) - used)
+        int n = snprintf(facts + used, cap - used, "%s%s: %s", used ? " | " : "", labels[i], values[i]);
+        if (n < 0 || (size_t)n >= cap - used)
             break;
         used += (size_t)n;
     }
+}
+
+static void draw_details_text(app_t *a, const details_view_data_t *data, int px, int py, int pw, int ph, int y) {
+    char facts[640] = {0};
+    build_details_facts(data, facts, sizeof(facts));
     if (facts[0]) {
         y = draw_wrapped_text(a, px + 16, y, pw - 32, facts, 2, a->colors.muted);
         y += 6;
     }
     draw_text(a, px + 16, y, "Sinopse", a->colors.text);
     y += 22;
-    if (plot[0])
-        y = draw_wrapped_text(a, px + 16, y, pw - 32, plot, 8, a->colors.muted);
+    if (data->plot[0])
+        y = draw_wrapped_text(a, px + 16, y, pw - 32, data->plot, 8, a->colors.muted);
     else {
         draw_text(a, px + 16, y, "O provider não enviou sinopse para este item.", a->colors.muted);
         y += 20;
     }
     y += 8;
-    if (director[0] && y < py + ph - 72) {
+    if (data->director[0] && y < py + ph - 72) {
         char line[600];
-        snprintf(line, sizeof(line), "Direção: %s", director);
+        snprintf(line, sizeof(line), "Direção: %s", data->director);
         y = draw_wrapped_text(a, px + 16, y, pw - 32, line, 2, a->colors.muted);
     }
-    if (cast[0] && y < py + ph - 48) {
+    if (data->cast[0] && y < py + ph - 48) {
         char line[880];
-        snprintf(line, sizeof(line), "Elenco: %s", cast);
+        snprintf(line, sizeof(line), "Elenco: %s", data->cast);
         (void)draw_wrapped_text(a, px + 16, y, pw - 32, line, 2, a->colors.muted);
     }
-    if (!plot[0] && status[0])
-        draw_text(a, px + 16, py + ph - 18, status, a->colors.muted);
+    if (!data->plot[0] && data->status[0])
+        draw_text(a, px + 16, py + ph - 18, data->status, a->colors.muted);
+}
+
+static void draw_details_panel(app_t *a) {
+    if (!details_panel_active(a) || a->filtered_len == 0u)
+        return;
+    if (a->focused_filtered >= a->filtered_len)
+        a->focused_filtered = a->filtered_len - 1u;
+    size_t chidx = a->filtered[a->focused_filtered];
+    if (chidx >= ACTIVE_CHANNELS(a).len)
+        return;
+    vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
+
+    int px, py, pw, ph;
+    details_panel_geometry(a, &px, &py, &pw, &ph);
+    draw_details_surface(a, px, py, pw, ph);
+
+    details_view_data_t data = {0};
+    read_details_view_data(a, &data);
+    draw_details_header(a, ch, chidx, px, py, pw);
+    bool current = ch->id && strcmp(data.loaded_id, ch->id) == 0;
+    int y = draw_details_art(a, ch, &data, current, px, py, pw);
+    if (!current) {
+        draw_text(a, px + 16, y, "Carregando detalhes da obra...", a->colors.muted);
+        return;
+    }
+    draw_details_text(a, &data, px, py, pw, ph, y);
 }
 
 /* Draw toast. */
@@ -4976,122 +5214,121 @@ static void sync_video_window(app_t *a) {
 }
 
 /* Draw player. */
-static void draw_player(app_t *a) {
-    fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.black);
-    vip_mpv_player_snapshot_t snap = {0};
-    if (a->player)
-        vip_mpv_player_snapshot(a->player, &snap);
-    vip_player_state_t player_state = a->player ? snap.state : VIP_PLAYER_ERROR;
-    const char *state_text = a->player ? vip_mpv_player_state_name(player_state) : a->player_status;
-    bool hud = player_hud_visible(a);
+static void draw_player_header(app_t *a) {
+    if (a->fullscreen)
+        return;
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, 0, 0, a->width, PLAYER_HEADER_H, 0, 0x111722u, 0.97);
+        vip_ui_render_round_rect(&a->renderer, 12, 10, 132, 44, 13, 0x171C28u, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, 12, 10, 132, 44, 13, 0x343A48u, 1.0, 1.0);
+        vip_ui_render_text(&a->renderer, 28, 24, 104, "<  Voltar", "Sans SemiBold 10", 0xF6F7FBu, 1.0,
+                           false);
+        if (a->current_channel < ACTIVE_CHANNELS(a).len)
+            vip_ui_render_text(&a->renderer, 168, 22, a->width - 190,
+                               ACTIVE_CHANNELS(a).items[a->current_channel].name, "Sans Bold 12",
+                               0xF6F7FBu, 1.0, false);
+        return;
+    }
+    fill_rect(a, 0, 0, (unsigned)a->width, PLAYER_HEADER_H, a->colors.panel);
+    fill_round_rect(a, 12, 10, 132, 44, 13, a->colors.panel2);
+    stroke_round_rect(a, 12, 10, 132, 44, 13, a->colors.border);
+    draw_text(a, 28, 39, "< Voltar", a->colors.text);
+    if (a->current_channel < ACTIVE_CHANNELS(a).len)
+        draw_text_font(a, a->font_heading, 168, 39, ACTIVE_CHANNELS(a).items[a->current_channel].name,
+                       a->colors.text);
+}
 
-    if (!a->fullscreen) {
-        if (a->renderer.active) {
-            vip_ui_render_round_rect(&a->renderer, 0, 0, a->width, PLAYER_HEADER_H, 0, 0x111722u, 0.97);
-            vip_ui_render_round_rect(&a->renderer, 12, 10, 132, 44, 13, 0x171C28u, 1.0);
-            vip_ui_render_round_stroke(&a->renderer, 12, 10, 132, 44, 13, 0x343A48u, 1.0, 1.0);
-            vip_ui_render_text(&a->renderer, 28, 24, 104, "<  Voltar", "Sans SemiBold 10", 0xF6F7FBu, 1.0,
-                               false);
-            if (a->current_channel < ACTIVE_CHANNELS(a).len)
-                vip_ui_render_text(&a->renderer, 168, 22, a->width - 190,
-                                   ACTIVE_CHANNELS(a).items[a->current_channel].name, "Sans Bold 12",
-                                   0xF6F7FBu, 1.0, false);
-        } else {
-            fill_rect(a, 0, 0, (unsigned)a->width, PLAYER_HEADER_H, a->colors.panel);
-            fill_round_rect(a, 12, 10, 132, 44, 13, a->colors.panel2);
-            stroke_round_rect(a, 12, 10, 132, 44, 13, a->colors.border);
-            draw_text(a, 28, 39, "< Voltar", a->colors.text);
-            if (a->current_channel < ACTIVE_CHANNELS(a).len)
-                draw_text_font(a, a->font_heading, 168, 39, ACTIVE_CHANNELS(a).items[a->current_channel].name,
-                               a->colors.text);
-        }
+static void draw_player_control_buttons(app_t *a, const vip_mpv_player_snapshot_t *snap, int y) {
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, 10, y + 7, a->width - 20, PLAYER_CONTROLS_H - 12, 18,
+                                 0x111722u, 0.96);
+        vip_ui_render_round_stroke(&a->renderer, 10, y + 7, a->width - 20, PLAYER_CONTROLS_H - 12, 18,
+                                   0x343A48u, 0.95, 1.0);
+        vip_ui_render_round_rect(&a->renderer, 16, y + 18, 52, 46, 14, 0x171C28u, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, 16, y + 18, 52, 46, 14, 0x343A48u, 1.0, 1.0);
+        vip_ui_render_text(&a->renderer, 16, y + 31, 52, snap->paused ? ">" : "||", "Sans Bold 12",
+                           0xF6F7FBu, 1.0, true);
+        vip_ui_render_round_rect(&a->renderer, 76, y + 18, 82, 46, 14, 0x171C28u, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, 76, y + 18, 82, 46, 14, 0x343A48u, 1.0, 1.0);
+        vip_ui_render_text(&a->renderer, 76, y + 32, 82, "Voltar", "Sans SemiBold 9", 0xF6F7FBu, 1.0,
+                           true);
+        return;
+    }
+    fill_rect(a, 0, y, (unsigned)a->width, PLAYER_CONTROLS_H, a->colors.panel);
+    fill_rect(a, 0, y, (unsigned)a->width, 1, a->colors.border);
+    fill_round_rect(a, 16, y + 18, 52, 46, 14, a->colors.panel2);
+    stroke_round_rect(a, 16, y + 18, 52, 46, 14, a->colors.border);
+    draw_centered_font(a, a->font_heading, 16, y + 48, 52, snap->paused ? ">" : "||", a->colors.text);
+    fill_round_rect(a, 76, y + 18, 82, 46, 14, a->colors.panel2);
+    stroke_round_rect(a, 76, y + 18, 82, 46, 14, a->colors.border);
+    draw_centered(a, 76, y + 47, 82, "Voltar", a->colors.text);
+}
+
+static void draw_live_player_controls(app_t *a, int y) {
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, 176, y + 22, 76, 30, 12, 0xFF7185u, 0.96);
+        vip_ui_render_text(&a->renderer, 176, y + 30, 76, "AO VIVO", "Sans Bold 8", 0xF6F7FBu, 1.0, true);
+        vip_ui_render_text(&a->renderer, 270, y + 31, 220, "<-  ->  troca canal", "Sans 9", 0xAAB2C4u,
+                           1.0, false);
+        return;
+    }
+    fill_round_rect(a, 176, y + 22, 76, 30, 12, a->colors.danger);
+    draw_centered(a, 176, y + 43, 76, "AO VIVO", a->colors.text);
+    draw_text(a, 270, y + 44, "<- -> troca canal", a->colors.muted);
+}
+
+static void draw_vod_timeline(app_t *a, const vip_mpv_player_snapshot_t *snap, int y) {
+    int tx, ty, tw, th;
+    timeline_geometry(a, &tx, &ty, &tw, &th);
+    if (a->renderer.active)
+        vip_ui_render_round_rect(&a->renderer, tx, ty, tw, th, th / 2, 0x343A48u, 1.0);
+    else
+        fill_round_rect(a, tx, ty, tw, th, th / 2, a->colors.panel2);
+
+    double ratio = snap->duration_seconds > 0.0 ? snap->position_seconds / snap->duration_seconds : 0.0;
+    if (ratio < 0.0)
+        ratio = 0.0;
+    if (ratio > 1.0)
+        ratio = 1.0;
+    int fill = (int)((double)tw * ratio);
+    if (fill > 0) {
+        if (a->renderer.active)
+            vip_ui_render_round_rect(&a->renderer, tx, ty, fill, th, th / 2, 0xFF5F2Eu, 1.0);
+        else
+            fill_round_rect(a, tx, ty, fill, th, th / 2, a->colors.accent);
     }
 
-    if (hud) {
-        int y = a->height - PLAYER_CONTROLS_H;
-        if (a->renderer.active) {
-            vip_ui_render_round_rect(&a->renderer, 10, y + 7, a->width - 20, PLAYER_CONTROLS_H - 12, 18,
-                                     0x111722u, 0.96);
-            vip_ui_render_round_stroke(&a->renderer, 10, y + 7, a->width - 20, PLAYER_CONTROLS_H - 12, 18,
-                                       0x343A48u, 0.95, 1.0);
-            vip_ui_render_round_rect(&a->renderer, 16, y + 18, 52, 46, 14, 0x171C28u, 1.0);
-            vip_ui_render_round_stroke(&a->renderer, 16, y + 18, 52, 46, 14, 0x343A48u, 1.0, 1.0);
-            vip_ui_render_text(&a->renderer, 16, y + 31, 52, snap.paused ? ">" : "||", "Sans Bold 12",
-                               0xF6F7FBu, 1.0, true);
-            vip_ui_render_round_rect(&a->renderer, 76, y + 18, 82, 46, 14, 0x171C28u, 1.0);
-            vip_ui_render_round_stroke(&a->renderer, 76, y + 18, 82, 46, 14, 0x343A48u, 1.0, 1.0);
-            vip_ui_render_text(&a->renderer, 76, y + 32, 82, "Voltar", "Sans SemiBold 9", 0xF6F7FBu, 1.0,
-                               true);
-        } else {
-            fill_rect(a, 0, y, (unsigned)a->width, PLAYER_CONTROLS_H, a->colors.panel);
-            fill_rect(a, 0, y, (unsigned)a->width, 1, a->colors.border);
-            fill_round_rect(a, 16, y + 18, 52, 46, 14, a->colors.panel2);
-            stroke_round_rect(a, 16, y + 18, 52, 46, 14, a->colors.border);
-            draw_centered_font(a, a->font_heading, 16, y + 48, 52, snap.paused ? ">" : "||", a->colors.text);
-            fill_round_rect(a, 76, y + 18, 82, 46, 14, a->colors.panel2);
-            stroke_round_rect(a, 76, y + 18, 82, 46, 14, a->colors.border);
-            draw_centered(a, 76, y + 47, 82, "Voltar", a->colors.text);
-        }
-        if (a->player_item_live) {
-            if (a->renderer.active) {
-                vip_ui_render_round_rect(&a->renderer, 176, y + 22, 76, 30, 12, 0xFF7185u, 0.96);
-                vip_ui_render_text(&a->renderer, 176, y + 30, 76, "AO VIVO", "Sans Bold 8", 0xF6F7FBu, 1.0,
-                                   true);
-                vip_ui_render_text(&a->renderer, 270, y + 31, 220, "<-  ->  troca canal", "Sans 9", 0xAAB2C4u,
-                                   1.0, false);
-            } else {
-                fill_round_rect(a, 176, y + 22, 76, 30, 12, a->colors.danger);
-                draw_centered(a, 176, y + 43, 76, "AO VIVO", a->colors.text);
-                draw_text(a, 270, y + 44, "<- -> troca canal", a->colors.muted);
-            }
-        } else {
-            int tx, ty, tw, th;
-            timeline_geometry(a, &tx, &ty, &tw, &th);
-            if (a->renderer.active)
-                vip_ui_render_round_rect(&a->renderer, tx, ty, tw, th, th / 2, 0x343A48u, 1.0);
-            else
-                fill_round_rect(a, tx, ty, tw, th, th / 2, a->colors.panel2);
-            double ratio = snap.duration_seconds > 0.0 ? snap.position_seconds / snap.duration_seconds : 0.0;
-            if (ratio < 0.0)
-                ratio = 0.0;
-            if (ratio > 1.0)
-                ratio = 1.0;
-            int fill = (int)((double)tw * ratio);
-            if (fill > 0) {
-                if (a->renderer.active)
-                    vip_ui_render_round_rect(&a->renderer, tx, ty, fill, th, th / 2, 0xFF5F2Eu, 1.0);
-                else
-                    fill_round_rect(a, tx, ty, fill, th, th / 2, a->colors.accent);
-            }
-            char pos[32], dur[32];
-            format_clock(snap.position_seconds, pos);
-            format_clock(snap.duration_seconds, dur);
-            if (a->renderer.active) {
-                vip_ui_render_text(&a->renderer, 166, y + 31, 60, pos, "Sans SemiBold 9", 0xF6F7FBu, 1.0,
-                                   false);
-                vip_ui_render_text(&a->renderer, a->width - 150, y + 31, 132, dur, "Sans SemiBold 9",
-                                   0xF6F7FBu, 1.0, false);
-                vip_ui_render_text(&a->renderer, tx, y + 57, tw, "Clique/arraste para buscar  ·  <- -> 10s",
-                                   "Sans 8", 0xAAB2C4u, 1.0, false);
-            } else {
-                draw_text(a, 166, y + 45, pos, a->colors.text);
-                draw_text(a, a->width - 150, y + 45, dur, a->colors.text);
-                draw_text_font(a, a->font_small, tx, y + 70, "Clique/arraste para buscar  ·  <- -> 10s",
-                               a->colors.muted);
-            }
-        }
-        if (a->renderer.active) {
-            int sw = vip_ui_render_text_width(&a->renderer, state_text, "Sans 8");
-            vip_ui_render_text(&a->renderer, a->width - sw - 18, y + 58, sw + 2, state_text, "Sans 8",
-                               player_state == VIP_PLAYER_ERROR ? 0xFF7185u : 0xAAB2C4u, 1.0, false);
-        } else {
-            int sw = text_width(a, state_text);
-            draw_text_font(a, a->font_small, a->width - sw - 18, y + 72, state_text,
-                           player_state == VIP_PLAYER_ERROR ? a->colors.danger : a->colors.muted);
-        }
+    char pos[32], dur[32];
+    format_clock(snap->position_seconds, pos);
+    format_clock(snap->duration_seconds, dur);
+    if (a->renderer.active) {
+        vip_ui_render_text(&a->renderer, 166, y + 31, 60, pos, "Sans SemiBold 9", 0xF6F7FBu, 1.0, false);
+        vip_ui_render_text(&a->renderer, a->width - 150, y + 31, 132, dur, "Sans SemiBold 9",
+                           0xF6F7FBu, 1.0, false);
+        vip_ui_render_text(&a->renderer, tx, y + 57, tw, "Clique/arraste para buscar  ·  <- -> 10s",
+                           "Sans 8", 0xAAB2C4u, 1.0, false);
+        return;
     }
+    draw_text(a, 166, y + 45, pos, a->colors.text);
+    draw_text(a, a->width - 150, y + 45, dur, a->colors.text);
+    draw_text_font(a, a->font_small, tx, y + 70, "Clique/arraste para buscar  ·  <- -> 10s",
+                   a->colors.muted);
+}
 
-    if (player_state == VIP_PLAYER_ERROR) {
+static void draw_player_state_label(app_t *a, const char *state_text, vip_player_state_t state, int y) {
+    if (a->renderer.active) {
+        int sw = vip_ui_render_text_width(&a->renderer, state_text, "Sans 8");
+        vip_ui_render_text(&a->renderer, a->width - sw - 18, y + 58, sw + 2, state_text, "Sans 8",
+                           state == VIP_PLAYER_ERROR ? 0xFF7185u : 0xAAB2C4u, 1.0, false);
+        return;
+    }
+    int sw = text_width(a, state_text);
+    draw_text_font(a, a->font_small, a->width - sw - 18, y + 72, state_text,
+                   state == VIP_PLAYER_ERROR ? a->colors.danger : a->colors.muted);
+}
+
+static void draw_player_status_center(app_t *a, vip_player_state_t state, const char *state_text) {
+    if (state == VIP_PLAYER_ERROR) {
         const char *err = a->player ? vip_mpv_player_last_error(a->player) : a->player_status;
         char bounded[220];
         bounded_text(bounded, sizeof(bounded), err && err[0] ? err : "Falha desconhecida no stream", 90);
@@ -5102,6 +5339,27 @@ static void draw_player(app_t *a) {
     } else if (!a->video_mapped) {
         draw_centered_font(a, a->font_heading, 0, a->height / 2, a->width, state_text, a->colors.muted);
     }
+}
+
+static void draw_player(app_t *a) {
+    fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.black);
+    vip_mpv_player_snapshot_t snap = {0};
+    if (a->player)
+        vip_mpv_player_snapshot(a->player, &snap);
+    vip_player_state_t state = a->player ? snap.state : VIP_PLAYER_ERROR;
+    const char *state_text = a->player ? vip_mpv_player_state_name(state) : a->player_status;
+
+    draw_player_header(a);
+    if (player_hud_visible(a)) {
+        int y = a->height - PLAYER_CONTROLS_H;
+        draw_player_control_buttons(a, &snap, y);
+        if (a->player_item_live)
+            draw_live_player_controls(a, y);
+        else
+            draw_vod_timeline(a, &snap, y);
+        draw_player_state_label(a, state_text, state, y);
+    }
+    draw_player_status_center(a, state, state_text);
 }
 
 /* Ensure backbuffer. */
@@ -5149,265 +5407,326 @@ static void choose_category(app_t *a, int index) {
 }
 
 /* Handle browse click. */
-static void handle_browse_click(app_t *a, int x, int y) {
+static bool handle_browse_top_click(app_t *a, int x, int y) {
     const int tab_x[3] = {8, 88, 174};
     const int tab_w[3] = {74, 80, 88};
     if (y >= 12 && y < 58 && x < SIDEBAR_W) {
-        for (int k = 0; k < 3; ++k)
-            if (point_in(x, y, tab_x[k], 12, tab_w[k], 46)) {
-                switch_content(a, (content_kind_t)k);
-                browse_focus_top(a, k);
-                return;
-            }
+        for (int k = 0; k < 3; ++k) {
+            if (!point_in(x, y, tab_x[k], 12, tab_w[k], 46))
+                continue;
+            switch_content(a, (content_kind_t)k);
+            browse_focus_top(a, k);
+            return true;
+        }
     }
-    int list_w = 94, fav_w = 174, list_x = a->width - list_w - 18, fav_x = list_x - fav_w - 10;
+
+    int list_w = 94, fav_w = 174;
+    int list_x = a->width - list_w - 18;
+    int fav_x = list_x - fav_w - 10;
     int search_w = fav_x - (SIDEBAR_W + 18) - 10;
     if (search_w < 180)
         search_w = 180;
+
     if (point_in(x, y, SIDEBAR_W + 18, 12, search_w, 46)) {
         browse_focus_top(a, BROWSE_TOP_SEARCH);
-        return;
+        return true;
     }
     if (point_in(x, y, fav_x, 12, fav_w, 46)) {
         browse_focus_top(a, BROWSE_TOP_FAVORITES);
         a->favorites_only = !a->favorites_only;
         rebuild_filter(a);
         browse_focus_top(a, BROWSE_TOP_FAVORITES);
-        return;
+        return true;
     }
-    if (point_in(x, y, list_x, 12, list_w, 46)) {
-        browse_focus_top(a, BROWSE_TOP_LISTS);
-        if (a->thumbs)
-            vip_thumbnail_scheduler_cancel_pending(a->thumbs);
-        clear_details_view(a);
-        refresh_profiles(a);
-        a->screen = SCREEN_LOGIN;
-        a->input_focus = INPUT_SERVER;
-        snprintf(a->status, sizeof(a->status), "Escolha uma lista salva ou conecte outra");
-        return;
+    if (!point_in(x, y, list_x, 12, list_w, 46))
+        return false;
+
+    browse_focus_top(a, BROWSE_TOP_LISTS);
+    if (a->thumbs)
+        vip_thumbnail_scheduler_cancel_pending(a->thumbs);
+    clear_details_view(a);
+    refresh_profiles(a);
+    a->screen = SCREEN_LOGIN;
+    a->input_focus = INPUT_SERVER;
+    snprintf(a->status, sizeof(a->status), "Escolha uma lista salva ou conecte outra");
+    return true;
+}
+
+static bool handle_browse_sidebar_click(app_t *a, int x, int y) {
+    if (x >= SIDEBAR_W || y < TOPBAR_H)
+        return false;
+
+    int base = TOPBAR_H + 12;
+    if (a->series_episode_mode && point_in(x, y, 8, base, SIDEBAR_W - 16, 38)) {
+        browse_focus_sidebar(a, -2);
+        return_from_episode_list(a);
+        browse_focus_sidebar(a, -1);
+        return true;
     }
-    if (x < SIDEBAR_W && y >= TOPBAR_H) {
-        int base = TOPBAR_H + 12;
-        if (a->series_episode_mode && point_in(x, y, 8, base, SIDEBAR_W - 16, 38)) {
-            browse_focus_sidebar(a, -2);
-            return_from_episode_list(a);
-            browse_focus_sidebar(a, -1);
-            return;
-        }
-        int category_y = browse_sidebar_category_y(a);
-        int local = y - category_y;
-        if (local >= 0 && local < 36) {
-            browse_focus_sidebar(a, -1);
-            choose_category(a, -1);
-            return;
-        }
-        local -= 42;
-        if (local >= 0) {
-            int row = local / 42;
-            if (local % 42 < 36) {
-                int idx = a->category_scroll + row;
-                if (idx >= 0 && (size_t)idx < ACTIVE_CATEGORIES(a).len) {
-                    browse_focus_sidebar(a, idx);
-                    choose_category(a, idx);
-                }
-            }
-        }
-        return;
+
+    int local = y - browse_sidebar_category_y(a);
+    if (local >= 0 && local < 36) {
+        browse_focus_sidebar(a, -1);
+        choose_category(a, -1);
+        return true;
     }
-    if (details_panel_active(a)) {
-        int px, py, pw, ph;
-        details_panel_geometry(a, &px, &py, &pw, &ph);
-        if (point_in(x, y, px, py, pw, ph)) {
-            if (a->filtered_len > 0u) {
-                if (a->focused_filtered >= a->filtered_len)
-                    a->focused_filtered = a->filtered_len - 1u;
-                size_t chidx = a->filtered[a->focused_filtered];
-                int panel_fav_w = 92, panel_fav_h = 32;
-                int panel_fav_x = px + pw - panel_fav_w - 14, panel_fav_y = py + 10;
-                if (point_in(x, y, panel_fav_x, panel_fav_y, panel_fav_w, panel_fav_h))
-                    toggle_favorite(a, chidx);
-            }
-            return;
+
+    local -= 42;
+    if (local >= 0 && local % 42 < 36) {
+        int idx = a->category_scroll + local / 42;
+        if (idx >= 0 && (size_t)idx < ACTIVE_CATEGORIES(a).len) {
+            browse_focus_sidebar(a, idx);
+            choose_category(a, idx);
         }
     }
+    return true;
+}
+
+static bool handle_details_panel_click(app_t *a, int x, int y) {
+    if (!details_panel_active(a))
+        return false;
+
+    int px, py, pw, ph;
+    details_panel_geometry(a, &px, &py, &pw, &ph);
+    if (!point_in(x, y, px, py, pw, ph))
+        return false;
+
+    if (a->filtered_len > 0u) {
+        if (a->focused_filtered >= a->filtered_len)
+            a->focused_filtered = a->filtered_len - 1u;
+        size_t chidx = a->filtered[a->focused_filtered];
+        int fav_w = 92, fav_h = 32;
+        int fav_x = px + pw - fav_w - 14, fav_y = py + 10;
+        if (point_in(x, y, fav_x, fav_y, fav_w, fav_h))
+            toggle_favorite(a, chidx);
+    }
+    return true;
+}
+
+static void handle_browse_card_click(app_t *a, int x, int y) {
     card_layout_t layout = browse_layout(a);
     int content_x = SIDEBAR_W + 20, content_y = TOPBAR_H + 18;
     if (x < content_x || y < content_y)
         return;
-    int relx = x - content_x, rely = y - content_y + a->grid_scroll;
-    int col = relx / (layout.card_w + GRID_GAP), row = rely / layout.row_step;
+
+    int relx = x - content_x;
+    int rely = y - content_y + a->grid_scroll;
+    int col = relx / (layout.card_w + GRID_GAP);
+    int row = rely / layout.row_step;
     if (col < 0 || col >= layout.cols || relx % (layout.card_w + GRID_GAP) >= layout.card_w ||
         rely % layout.row_step >= layout.card_h)
         return;
+
     size_t fidx = (size_t)row * (size_t)layout.cols + (size_t)col;
-    if (fidx < a->filtered_len) {
-        browse_focus_grid(a);
-        a->focused_filtered = fidx;
-        size_t chidx = a->filtered[fidx];
-        int cx = content_x + col * (layout.card_w + GRID_GAP);
-        int cy = content_y - a->grid_scroll + row * layout.row_step;
-        if (point_in(x, y, cx + layout.card_w - 66, cy + 2, 64, 38))
-            toggle_favorite(a, chidx);
-        else
-            activate_item(a, chidx);
-    }
+    if (fidx >= a->filtered_len)
+        return;
+
+    browse_focus_grid(a);
+    a->focused_filtered = fidx;
+    size_t chidx = a->filtered[fidx];
+    int cx = content_x + col * (layout.card_w + GRID_GAP);
+    int cy = content_y - a->grid_scroll + row * layout.row_step;
+    if (point_in(x, y, cx + layout.card_w - 66, cy + 2, 64, 38))
+        toggle_favorite(a, chidx);
+    else
+        activate_item(a, chidx);
+}
+
+static void handle_browse_click(app_t *a, int x, int y) {
+    if (handle_browse_top_click(a, x, y) ||
+        handle_browse_sidebar_click(a, x, y) ||
+        handle_details_panel_click(a, x, y))
+        return;
+    handle_browse_card_click(a, x, y);
 }
 
 /* Handle click. */
-static void handle_click(app_t *a, int x, int y) {
-    if (a->screen == SCREEN_LOGIN) {
-        int w = a->width > 1120 ? 1080 : a->width - 40;
-        if (w < 720)
-            w = 720;
-        int h = 620, px = (a->width - w) / 2, py = (a->height - h) / 2;
-        if (py < 18)
-            py = 18;
-        int form_x = px + 34, form_w = (w * 58) / 100 - 50, list_x = px + (w * 60) / 100,
-            list_w = w - (list_x - px) - 34;
-        int mode_w = (form_w - 10) / 2;
-        if (point_in(x, y, form_x, py + 88, mode_w, 42)) {
-            login_select_mode(a, LOGIN_XTREAM);
+static void handle_saved_profile_click(app_t *a, int x, int y, int list_x, int list_w, int py) {
+    int row_y = py + 154;
+    for (int r = 0; r < 6; ++r) {
+        int idx = a->profile_scroll + r;
+        if (idx < 0 || (size_t)idx >= a->profiles.len)
+            break;
+        if (point_in(x, y, list_x, row_y, list_w, 52)) {
+            a->profile_focus = idx;
+            load_profile_into_form(a, (size_t)idx);
+            if (cached_m3u_matches(a))
+                start_login(a, false);
             return;
         }
-        if (point_in(x, y, form_x + mode_w + 10, py + 88, mode_w, 42)) {
-            login_select_mode(a, LOGIN_M3U);
-            return;
-        }
-        if (point_in(x, y, form_x, py + 142, form_w, 44))
-            a->input_focus = INPUT_PROFILE_NAME;
-        else if (point_in(x, y, form_x, py + 196, form_w, 44))
-            a->input_focus = INPUT_SERVER;
-        else if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 250, form_w, 44))
-            a->input_focus = INPUT_SERVER_ALT;
-        else if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 304, form_w, 44))
-            a->input_focus = INPUT_USERNAME;
-        else if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 358, form_w, 44))
-            a->input_focus = INPUT_PASSWORD;
-        else if (a->login_mode == LOGIN_M3U && point_in(x, y, form_x, py + 314, form_w, 46)) {
-            a->input_focus = INPUT_PHONE;
-            start_phone_pairing(a);
-        } else if (point_in(x, y, form_x, py + 430, form_w, 50)) {
-            a->input_focus = INPUT_CONNECT;
-            start_login(a, true);
-        }
-        else {
-            int row_y = py + 154;
-            for (int r = 0; r < 6; ++r) {
-                int idx = a->profile_scroll + r;
-                if ((size_t)idx >= a->profiles.len)
-                    break;
-                if (point_in(x, y, list_x, row_y, list_w, 52)) {
-                    a->profile_focus = idx;
-                    load_profile_into_form(a, (size_t)idx);
-
-                    /* If this is the M3U that is already in memory, a click on
-                     * the saved profile means Continue rather than another
-                     * network download. Other profiles keep the existing
-                     * behavior and are only loaded into the form. */
-                    if (cached_m3u_matches(a))
-                        start_login(a, false);
-                    return;
-                }
-                row_y += 60;
-            }
-            a->input_focus = 0;
-        }
-    } else if (a->screen == SCREEN_BROWSE)
-        handle_browse_click(a, x, y);
-    else {
-        show_player_hud(a);
-        if (!a->fullscreen && point_in(x, y, 12, 10, 132, 44)) {
-            leave_player(a);
-            return;
-        }
-        int cy = a->height - PLAYER_CONTROLS_H;
-        if (point_in(x, y, 16, cy + 18, 52, 46) && a->player) {
-            vip_mpv_player_set_paused(a->player, !vip_mpv_player_is_paused(a->player));
-            save_current_progress(a, true);
-            return;
-        }
-        if (point_in(x, y, 76, cy + 18, 82, 46)) {
-            leave_player(a);
-            return;
-        }
-        if (!a->player_item_live && a->player) {
-            int tx, ty, tw, th;
-            timeline_geometry(a, &tx, &ty, &tw, &th);
-            if (point_in(x, y, tx, ty, tw, th + 12)) {
-                vip_mpv_player_snapshot_t snap = {0};
-                vip_mpv_player_snapshot(a->player, &snap);
-                if (snap.duration_seconds > 0.0) {
-                    double pos = ((double)(x - tx) / (double)tw) * snap.duration_seconds;
-                    vip_error_t err = {0};
-                    (void)vip_mpv_player_seek(a->player, pos, &err);
-                    a->timeline_dragging = true;
-                }
-            }
-        }
+        row_y += 60;
     }
+    a->input_focus = 0;
+}
+
+static bool handle_login_mode_click(app_t *a, int x, int y, int form_x, int form_w, int py) {
+    int mode_w = (form_w - 10) / 2;
+    if (point_in(x, y, form_x, py + 88, mode_w, 42)) {
+        login_select_mode(a, LOGIN_XTREAM);
+        return true;
+    }
+    if (point_in(x, y, form_x + mode_w + 10, py + 88, mode_w, 42)) {
+        login_select_mode(a, LOGIN_M3U);
+        return true;
+    }
+    return false;
+}
+
+static bool handle_login_field_click(app_t *a, int x, int y, int form_x, int form_w, int py) {
+    if (point_in(x, y, form_x, py + 142, form_w, 44))
+        a->input_focus = INPUT_PROFILE_NAME;
+    else if (point_in(x, y, form_x, py + 196, form_w, 44))
+        a->input_focus = INPUT_SERVER;
+    else if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 250, form_w, 44))
+        a->input_focus = INPUT_SERVER_ALT;
+    else if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 304, form_w, 44))
+        a->input_focus = INPUT_USERNAME;
+    else if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 358, form_w, 44))
+        a->input_focus = INPUT_PASSWORD;
+    else
+        return false;
+    return true;
+}
+
+static bool handle_login_action_click(app_t *a, int x, int y, int form_x, int form_w, int py) {
+    if (a->login_mode == LOGIN_M3U && point_in(x, y, form_x, py + 314, form_w, 46)) {
+        a->input_focus = INPUT_PHONE;
+        start_phone_pairing(a);
+        return true;
+    }
+    if (point_in(x, y, form_x, py + 430, form_w, 50)) {
+        a->input_focus = INPUT_CONNECT;
+        start_login(a, true);
+        return true;
+    }
+    return false;
+}
+
+static void handle_login_click(app_t *a, int x, int y) {
+    int w = a->width > 1120 ? 1080 : a->width - 40;
+    if (w < 720)
+        w = 720;
+    int h = 620, px = (a->width - w) / 2, py = (a->height - h) / 2;
+    if (py < 18)
+        py = 18;
+    int form_x = px + 34;
+    int form_w = (w * 58) / 100 - 50;
+    int list_x = px + (w * 60) / 100;
+    int list_w = w - (list_x - px) - 34;
+
+    if (handle_login_mode_click(a, x, y, form_x, form_w, py) ||
+        handle_login_field_click(a, x, y, form_x, form_w, py) ||
+        handle_login_action_click(a, x, y, form_x, form_w, py))
+        return;
+    handle_saved_profile_click(a, x, y, list_x, list_w, py);
+}
+
+static void handle_player_click(app_t *a, int x, int y) {
+    show_player_hud(a);
+    if (!a->fullscreen && point_in(x, y, 12, 10, 132, 44)) {
+        leave_player(a);
+        return;
+    }
+
+    int cy = a->height - PLAYER_CONTROLS_H;
+    if (point_in(x, y, 16, cy + 18, 52, 46) && a->player) {
+        vip_mpv_player_set_paused(a->player, !vip_mpv_player_is_paused(a->player));
+        save_current_progress(a, true);
+        return;
+    }
+    if (point_in(x, y, 76, cy + 18, 82, 46)) {
+        leave_player(a);
+        return;
+    }
+    if (a->player_item_live || !a->player)
+        return;
+
+    int tx, ty, tw, th;
+    timeline_geometry(a, &tx, &ty, &tw, &th);
+    if (!point_in(x, y, tx, ty, tw, th + 12))
+        return;
+
+    vip_mpv_player_snapshot_t snap = {0};
+    vip_mpv_player_snapshot(a->player, &snap);
+    if (snap.duration_seconds <= 0.0)
+        return;
+
+    double pos = ((double)(x - tx) / (double)tw) * snap.duration_seconds;
+    vip_error_t err = {0};
+    (void)vip_mpv_player_seek(a->player, pos, &err);
+    a->timeline_dragging = true;
+}
+
+static void handle_click(app_t *a, int x, int y) {
+    if (a->screen == SCREEN_LOGIN)
+        handle_login_click(a, x, y);
+    else if (a->screen == SCREEN_BROWSE)
+        handle_browse_click(a, x, y);
+    else
+        handle_player_click(a, x, y);
 }
 
 /* Handle wheel. */
-static void handle_wheel(app_t *a, int x, int y, int direction) {
-    /* The login screen scrolls saved profiles independently of the catalog. */
-    if (a->screen == SCREEN_LOGIN) {
-        if (a->input_focus == INPUT_SAVED_PROFILE && a->profiles.len > 0u) {
-            a->profile_focus += direction;
-            login_profile_ensure_visible(a);
-            return;
-        }
-        int max_scroll = (int)a->profiles.len - 6;
-        if (max_scroll < 0)
-            max_scroll = 0;
-
-        a->profile_scroll += direction;
-        if (a->profile_scroll < 0)
-            a->profile_scroll = 0;
-        if (a->profile_scroll > max_scroll)
-            a->profile_scroll = max_scroll;
+static void handle_login_wheel(app_t *a, int direction) {
+    if (a->input_focus == INPUT_SAVED_PROFILE && a->profiles.len > 0u) {
+        a->profile_focus += direction;
+        login_profile_ensure_visible(a);
         return;
     }
+    int max_scroll = (int)a->profiles.len - 6;
+    if (max_scroll < 0)
+        max_scroll = 0;
+    a->profile_scroll += direction;
+    if (a->profile_scroll < 0)
+        a->profile_scroll = 0;
+    if (a->profile_scroll > max_scroll)
+        a->profile_scroll = max_scroll;
+}
 
-    /* Other screens either have their own input handling or do not scroll. */
+static void handle_category_wheel(app_t *a, int direction) {
+    int max_scroll = (int)ACTIVE_CATEGORIES(a).len - (category_visible_rows(a) - 1);
+    if (max_scroll < 0)
+        max_scroll = 0;
+    a->category_scroll += direction * 3;
+    if (a->category_scroll < 0)
+        a->category_scroll = 0;
+    if (a->category_scroll > max_scroll)
+        a->category_scroll = max_scroll;
+}
+
+static void handle_grid_wheel(app_t *a, int direction) {
+    card_layout_t layout = browse_layout(a);
+    int rows = (int)((a->filtered_len + (size_t)layout.cols - 1u) / (size_t)layout.cols);
+    int max_scroll = rows * layout.row_step - (a->height - TOPBAR_H - 18);
+    if (max_scroll < 0)
+        max_scroll = 0;
+
+    int base = a->grid_scroll_animating ? a->grid_scroll_target : a->grid_scroll;
+    int step = layout.mode == ART_PORTRAIT ? 220 : 180;
+    int target = base + direction * step;
+    if (target < 0)
+        target = 0;
+    if (target > max_scroll)
+        target = max_scroll;
+
+    a->grid_scroll_target = target;
+    a->grid_scroll_last_ms = monotonic_ms();
+    a->grid_scroll_animating = target != a->grid_scroll;
+    if (a->grid_scroll_animating)
+        a->ui_motion_active = true;
+}
+
+static void handle_wheel(app_t *a, int x, int y, int direction) {
+    if (a->screen == SCREEN_LOGIN) {
+        handle_login_wheel(a, direction);
+        return;
+    }
     if (a->screen != SCREEN_BROWSE)
         return;
-
-    if (x < SIDEBAR_W) {
-        /* Wheel events over the sidebar move the category list. */
-        int max_scroll = (int)ACTIVE_CATEGORIES(a).len - (category_visible_rows(a) - 1);
-        if (max_scroll < 0)
-            max_scroll = 0;
-
-        a->category_scroll += direction * 3;
-        if (a->category_scroll < 0)
-            a->category_scroll = 0;
-        if (a->category_scroll > max_scroll)
-            a->category_scroll = max_scroll;
-    } else {
-        /* Wheel events over the main grid animate between bounded row offsets. */
-        card_layout_t layout = browse_layout(a);
-        int rows = (int)((a->filtered_len + (size_t)layout.cols - 1u) / (size_t)layout.cols);
-        int content_h = rows * layout.row_step;
-        int max_scroll = content_h - (a->height - TOPBAR_H - 18);
-        if (max_scroll < 0)
-            max_scroll = 0;
-
-        int base = a->grid_scroll_animating ? a->grid_scroll_target : a->grid_scroll;
-        int step = layout.mode == ART_PORTRAIT ? 220 : 180;
-        int target = base + direction * step;
-        if (target < 0)
-            target = 0;
-        if (target > max_scroll)
-            target = max_scroll;
-
-        a->grid_scroll_target = target;
-        a->grid_scroll_last_ms = monotonic_ms();
-        a->grid_scroll_animating = target != a->grid_scroll;
-        if (a->grid_scroll_animating)
-            a->ui_motion_active = true;
-    }
-
-    /* y is intentionally unused: only the horizontal region selects a scroller. */
+    if (x < SIDEBAR_W)
+        handle_category_wheel(a, direction);
+    else
+        handle_grid_wheel(a, direction);
     (void)y;
 }
 
@@ -6252,13 +6571,16 @@ static void init_runtime(app_t *a) {
 }
 
 /* Destroy app. */
-static void destroy_app(app_t *a) {
+static void join_app_threads(app_t *a) {
     if (a->login_thread_started)
         pthread_join(a->login_thread, NULL);
     if (a->series_thread_started)
         pthread_join(a->series_thread, NULL);
     if (a->details_thread_started)
         pthread_join(a->details_thread, NULL);
+}
+
+static void destroy_app_services(app_t *a) {
     if (a->player)
         vip_mpv_player_destroy(a->player);
     if (a->thumbs)
@@ -6268,6 +6590,9 @@ static void destroy_app(app_t *a) {
         vip_thumbnail_decoder_destroy(a->decoder);
     if (a->db)
         vip_database_close(a->db);
+}
+
+static void clear_app_data(app_t *a) {
     for (size_t i = 0; i < CACHE_SLOTS; ++i)
         image_slot_clear(&a->image_cache[i]);
     free(a->filtered);
@@ -6285,34 +6610,44 @@ static void destroy_app(app_t *a) {
     vip_category_list_clear(&a->episode_categories);
     vip_channel_list_clear(&a->episode_channels);
     vip_channel_list_clear(&a->season_channels);
+}
+
+static void destroy_x11_resources(app_t *a) {
+    if (!a->dpy)
+        return;
+    if (a->font_title)
+        XFreeFont(a->dpy, a->font_title);
+    if (a->font_heading)
+        XFreeFont(a->dpy, a->font_heading);
+    if (a->font_small)
+        XFreeFont(a->dpy, a->font_small);
+    if (a->font)
+        XFreeFont(a->dpy, a->font);
+    if (a->backbuffer)
+        XFreePixmap(a->dpy, a->backbuffer);
+    if (a->gc)
+        XFreeGC(a->dpy, a->gc);
+    if (a->player_input_win)
+        XDestroyWindow(a->dpy, a->player_input_win);
+    if (a->video_win)
+        XDestroyWindow(a->dpy, a->video_win);
+    if (a->win)
+        XDestroyWindow(a->dpy, a->win);
+    XCloseDisplay(a->dpy);
+}
+
+static void destroy_app(app_t *a) {
+    join_app_threads(a);
+    destroy_app_services(a);
+    clear_app_data(a);
     stop_phone_pairing(a);
     pthread_mutex_destroy(&a->data_mutex);
-    if (a->dpy) {
-        if (a->font_title)
-            XFreeFont(a->dpy, a->font_title);
-        if (a->font_heading)
-            XFreeFont(a->dpy, a->font_heading);
-        if (a->font_small)
-            XFreeFont(a->dpy, a->font_small);
-        if (a->font)
-            XFreeFont(a->dpy, a->font);
-        if (a->backbuffer)
-            XFreePixmap(a->dpy, a->backbuffer);
-        if (a->gc)
-            XFreeGC(a->dpy, a->gc);
-        if (a->player_input_win)
-            XDestroyWindow(a->dpy, a->player_input_win);
-        if (a->video_win)
-            XDestroyWindow(a->dpy, a->video_win);
-        if (a->win)
-            XDestroyWindow(a->dpy, a->win);
-        XCloseDisplay(a->dpy);
-    }
+    destroy_x11_resources(a);
     curl_global_cleanup();
 }
 
 /* Handle async. */
-static void handle_async(app_t *a) {
+static void handle_pairing_async(app_t *a) {
     if (atomic_exchange(&a->pairing_submission, false)) {
         char url[sizeof(a->server)];
         char name[sizeof(a->profile_name)];
@@ -6330,68 +6665,89 @@ static void handle_async(app_t *a) {
         snprintf(a->profile_name, sizeof(a->profile_name), "%s", name);
         snprintf(a->status, sizeof(a->status), "Playlist recebida do celular; carregando...");
         start_login(a, false);
-    } else if (a->pairing_relay && vip_pairing_relay_finished(a->pairing_relay)) {
+        return;
+    }
+    if (a->pairing_relay && vip_pairing_relay_finished(a->pairing_relay)) {
         stop_phone_pairing(a);
         a->pairing_retry_ready = true;
         a->input_focus = INPUT_PHONE;
         snprintf(a->status, sizeof(a->status),
                  "Sessão expirou após 45 s; selecione Tentar novamente (QR)");
     }
-    if (atomic_exchange(&a->login_done, false)) {
-        if (a->login_thread_started) {
-            pthread_join(a->login_thread, NULL);
-            a->login_thread_started = false;
-        }
-        if (atomic_load(&a->login_success)) {
-            save_active_profile(a);
-            recalc_category_counts(a);
-            load_media_state(a);
-            a->favorites_only = false;
-            a->selected_category = -1;
-            a->category_scroll = 0;
-            a->search[0] = '\0';
-            rebuild_filter(a);
-            a->screen = SCREEN_BROWSE;
-            a->browse_top_focus = (int)a->content_kind;
-            a->browse_sidebar_focus = -1;
-            browse_focus_grid(a);
-            fprintf(stderr, "[catalog] %zu canais, %zu categorias\n", ACTIVE_CHANNELS(a).len,
-                    ACTIVE_CATEGORIES(a).len);
-            if (a->test_series) {
-                switch_content(a, CONTENT_SERIES);
-                if (ACTIVE_CHANNELS(a).len > 0)
-                    start_series_load(a, 0);
-            } else if (a->test_autoplay && ACTIVE_CHANNELS(a).len > 0)
-                enter_player(a, 0);
-        }
+}
+
+static void handle_login_async(app_t *a) {
+    if (!atomic_exchange(&a->login_done, false))
+        return;
+    if (a->login_thread_started) {
+        pthread_join(a->login_thread, NULL);
+        a->login_thread_started = false;
     }
-    if (atomic_exchange(&a->series_done, false)) {
-        if (a->series_thread_started) {
-            pthread_join(a->series_thread, NULL);
-            a->series_thread_started = false;
-        }
-        if (atomic_load(&a->series_success) && a->content_kind == CONTENT_SERIES) {
-            clear_details_view(a);
-            a->series_episode_mode = true;
-            a->series_season_select = true;
-            a->favorites_only = false;
-            a->selected_category = -1;
-            a->category_scroll = 0;
-            a->grid_scroll = 0;
-            a->focused_filtered = 0;
-            a->search[0] = '\0';
-            recalc_category_counts(a);
-            load_media_state(a);
-            rebuild_filter(a);
-            fprintf(stderr, "[series] %zu episódios carregados\n", ACTIVE_CHANNELS(a).len);
-        }
+    if (!atomic_load(&a->login_success))
+        return;
+
+    save_active_profile(a);
+    recalc_category_counts(a);
+    load_media_state(a);
+    a->favorites_only = false;
+    a->selected_category = -1;
+    a->category_scroll = 0;
+    a->search[0] = '\0';
+    rebuild_filter(a);
+    a->screen = SCREEN_BROWSE;
+    a->browse_top_focus = (int)a->content_kind;
+    a->browse_sidebar_focus = -1;
+    browse_focus_grid(a);
+    fprintf(stderr, "[catalog] %zu canais, %zu categorias\n", ACTIVE_CHANNELS(a).len,
+            ACTIVE_CATEGORIES(a).len);
+    if (a->test_series) {
+        switch_content(a, CONTENT_SERIES);
+        if (ACTIVE_CHANNELS(a).len > 0)
+            start_series_load(a, 0);
+    } else if (a->test_autoplay && ACTIVE_CHANNELS(a).len > 0) {
+        enter_player(a, 0);
     }
-    if (atomic_exchange(&a->details_done, false)) {
-        if (a->details_thread_started) {
-            pthread_join(a->details_thread, NULL);
-            a->details_thread_started = false;
-        }
+}
+
+static void handle_series_async(app_t *a) {
+    if (!atomic_exchange(&a->series_done, false))
+        return;
+    if (a->series_thread_started) {
+        pthread_join(a->series_thread, NULL);
+        a->series_thread_started = false;
     }
+    if (!atomic_load(&a->series_success) || a->content_kind != CONTENT_SERIES)
+        return;
+
+    clear_details_view(a);
+    a->series_episode_mode = true;
+    a->series_season_select = true;
+    a->favorites_only = false;
+    a->selected_category = -1;
+    a->category_scroll = 0;
+    a->grid_scroll = 0;
+    a->focused_filtered = 0;
+    a->search[0] = '\0';
+    recalc_category_counts(a);
+    load_media_state(a);
+    rebuild_filter(a);
+    fprintf(stderr, "[series] %zu episódios carregados\n", ACTIVE_CHANNELS(a).len);
+}
+
+static void handle_details_async(app_t *a) {
+    if (!atomic_exchange(&a->details_done, false))
+        return;
+    if (a->details_thread_started) {
+        pthread_join(a->details_thread, NULL);
+        a->details_thread_started = false;
+    }
+}
+
+static void handle_async(app_t *a) {
+    handle_pairing_async(a);
+    handle_login_async(a);
+    handle_series_async(a);
+    handle_details_async(a);
     (void)atomic_exchange(&a->thumbs_dirty, false);
 }
 
