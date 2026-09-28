@@ -145,83 +145,146 @@ static void bind_nullable(sqlite3_stmt *stmt, int index, const char *value) {
 }
 
 /* Replace catalog in the database. */
+typedef struct {
+    sqlite3_stmt *delete_categories;
+    sqlite3_stmt *delete_channels;
+    sqlite3_stmt *insert_category;
+    sqlite3_stmt *insert_channel;
+} catalog_statements_t;
+
+static void finalize_catalog_statements(catalog_statements_t *statements) {
+    sqlite3_finalize(statements->delete_categories);
+    sqlite3_finalize(statements->delete_channels);
+    sqlite3_finalize(statements->insert_category);
+    sqlite3_finalize(statements->insert_channel);
+}
+
+static vip_status_t prepare_catalog_statements(vip_database_t *db,
+                                               catalog_statements_t *statements,
+                                               vip_error_t *error) {
+    if (sqlite3_prepare_v2(db->conn,
+                          "DELETE FROM categories WHERE provider_id=?1",
+                          -1, &statements->delete_categories, NULL) != SQLITE_OK)
+        return db_error(db, error, "falha ao preparar catálogo");
+    if (sqlite3_prepare_v2(db->conn,
+                          "DELETE FROM channels WHERE provider_id=?1",
+                          -1, &statements->delete_channels, NULL) != SQLITE_OK)
+        return db_error(db, error, "falha ao preparar catálogo");
+    if (sqlite3_prepare_v2(
+            db->conn,
+            "INSERT INTO categories(provider_id,category_id,name,position) VALUES(?1,?2,?3,?4)",
+            -1, &statements->insert_category, NULL) != SQLITE_OK)
+        return db_error(db, error, "falha ao preparar catálogo");
+    if (sqlite3_prepare_v2(
+            db->conn,
+            "INSERT INTO channels(provider_id,channel_id,category_id,name,logo_url,stream_url,epg_channel_id,position)"
+            " VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+            -1, &statements->insert_channel, NULL) != SQLITE_OK)
+        return db_error(db, error, "falha ao preparar catálogo");
+    return VIP_OK;
+}
+
+static vip_status_t delete_provider_catalog(vip_database_t *db,
+                                            catalog_statements_t *statements,
+                                            const char *provider_id,
+                                            vip_error_t *error) {
+    sqlite3_bind_text(statements->delete_categories, 1, provider_id, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(statements->delete_categories) != SQLITE_DONE)
+        return db_error(db, error, "falha ao limpar categorias");
+
+    sqlite3_bind_text(statements->delete_channels, 1, provider_id, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(statements->delete_channels) != SQLITE_DONE)
+        return db_error(db, error, "falha ao limpar canais");
+    return VIP_OK;
+}
+
+static vip_status_t insert_catalog_categories(vip_database_t *db,
+                                              sqlite3_stmt *statement,
+                                              const char *provider_id,
+                                              const vip_category_list_t *categories,
+                                              vip_error_t *error) {
+    for (size_t i = 0; i < categories->len; ++i) {
+        const vip_category_t *category = &categories->items[i];
+        sqlite3_reset(statement);
+        sqlite3_clear_bindings(statement);
+        sqlite3_bind_text(statement, 1, provider_id, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement, 2, category->id, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement, 3, category->name, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(statement, 4, category->position);
+        if (sqlite3_step(statement) != SQLITE_DONE)
+            return db_error(db, error, "falha ao inserir categoria");
+    }
+    return VIP_OK;
+}
+
+static void bind_catalog_channel(sqlite3_stmt *statement,
+                                 const char *provider_id,
+                                 const vip_channel_t *channel) {
+    sqlite3_reset(statement);
+    sqlite3_clear_bindings(statement);
+    sqlite3_bind_text(statement, 1, provider_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(statement, 2, channel->id, -1, SQLITE_TRANSIENT);
+    bind_nullable(statement, 3, channel->category_id);
+    sqlite3_bind_text(statement, 4, channel->name, -1, SQLITE_TRANSIENT);
+    bind_nullable(statement, 5, channel->logo_url);
+    sqlite3_bind_text(statement, 6, channel->stream_url, -1, SQLITE_TRANSIENT);
+    bind_nullable(statement, 7, channel->epg_channel_id);
+    sqlite3_bind_int(statement, 8, channel->position);
+}
+
+static vip_status_t insert_catalog_channels(vip_database_t *db,
+                                            sqlite3_stmt *statement,
+                                            const char *provider_id,
+                                            const vip_channel_list_t *channels,
+                                            vip_error_t *error) {
+    for (size_t i = 0; i < channels->len; ++i) {
+        bind_catalog_channel(statement, provider_id, &channels->items[i]);
+        if (sqlite3_step(statement) != SQLITE_DONE)
+            return db_error(db, error, "falha ao inserir canal");
+    }
+    return VIP_OK;
+}
+
+static vip_status_t replace_catalog_transaction(vip_database_t *db,
+                                                const char *provider_id,
+                                                const vip_category_list_t *categories,
+                                                const vip_channel_list_t *channels,
+                                                catalog_statements_t *statements,
+                                                vip_error_t *error) {
+    vip_status_t st = prepare_catalog_statements(db, statements, error);
+    if (st != VIP_OK)
+        return st;
+    st = delete_provider_catalog(db, statements, provider_id, error);
+    if (st != VIP_OK)
+        return st;
+    st = insert_catalog_categories(db, statements->insert_category,
+                                   provider_id, categories, error);
+    if (st != VIP_OK)
+        return st;
+    return insert_catalog_channels(db, statements->insert_channel,
+                                   provider_id, channels, error);
+}
+
 vip_status_t vip_database_replace_catalog(vip_database_t *db, const char *provider_id,
                                           const vip_category_list_t *categories,
                                           const vip_channel_list_t *channels, vip_error_t *error) {
     if (!db || !provider_id || !categories || !channels)
         return VIP_ERR_INVALID_ARGUMENT;
+
     pthread_mutex_lock(&db->mutex);
     vip_status_t st = exec_sql(db, "BEGIN IMMEDIATE", error);
-    sqlite3_stmt *delcat = NULL, *delch = NULL, *inscat = NULL, *insch = NULL;
-    if (st != VIP_OK)
-        goto done;
-    if (sqlite3_prepare_v2(db->conn, "DELETE FROM categories WHERE provider_id=?1", -1, &delcat, NULL) !=
-            SQLITE_OK ||
-        sqlite3_prepare_v2(db->conn, "DELETE FROM channels WHERE provider_id=?1", -1, &delch, NULL) !=
-            SQLITE_OK ||
-        sqlite3_prepare_v2(
-            db->conn, "INSERT INTO categories(provider_id,category_id,name,position) VALUES(?1,?2,?3,?4)", -1,
-            &inscat, NULL) != SQLITE_OK ||
-        sqlite3_prepare_v2(
-            db->conn,
-            "INSERT INTO "
-            "channels(provider_id,channel_id,category_id,name,logo_url,stream_url,epg_channel_id,position)"
-            " VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
-            -1, &insch, NULL) != SQLITE_OK) {
-        st = db_error(db, error, "falha ao preparar catálogo");
-        goto rollback;
-    }
-    sqlite3_bind_text(delcat, 1, provider_id, -1, SQLITE_TRANSIENT);
-    if (sqlite3_step(delcat) != SQLITE_DONE) {
-        st = db_error(db, error, "falha ao limpar categorias");
-        goto rollback;
-    }
-    sqlite3_bind_text(delch, 1, provider_id, -1, SQLITE_TRANSIENT);
-    if (sqlite3_step(delch) != SQLITE_DONE) {
-        st = db_error(db, error, "falha ao limpar canais");
-        goto rollback;
-    }
+    catalog_statements_t statements = {0};
 
-    for (size_t i = 0; i < categories->len; ++i) {
-        const vip_category_t *c = &categories->items[i];
-        sqlite3_reset(inscat);
-        sqlite3_clear_bindings(inscat);
-        sqlite3_bind_text(inscat, 1, provider_id, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(inscat, 2, c->id, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(inscat, 3, c->name, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(inscat, 4, c->position);
-        if (sqlite3_step(inscat) != SQLITE_DONE) {
-            st = db_error(db, error, "falha ao inserir categoria");
-            goto rollback;
-        }
-    }
-    for (size_t i = 0; i < channels->len; ++i) {
-        const vip_channel_t *c = &channels->items[i];
-        sqlite3_reset(insch);
-        sqlite3_clear_bindings(insch);
-        sqlite3_bind_text(insch, 1, provider_id, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(insch, 2, c->id, -1, SQLITE_TRANSIENT);
-        bind_nullable(insch, 3, c->category_id);
-        sqlite3_bind_text(insch, 4, c->name, -1, SQLITE_TRANSIENT);
-        bind_nullable(insch, 5, c->logo_url);
-        sqlite3_bind_text(insch, 6, c->stream_url, -1, SQLITE_TRANSIENT);
-        bind_nullable(insch, 7, c->epg_channel_id);
-        sqlite3_bind_int(insch, 8, c->position);
-        if (sqlite3_step(insch) != SQLITE_DONE) {
-            st = db_error(db, error, "falha ao inserir canal");
-            goto rollback;
-        }
-    }
-    st = exec_sql(db, "COMMIT", error);
-    goto done;
+    if (st == VIP_OK)
+        st = replace_catalog_transaction(db, provider_id, categories, channels,
+                                         &statements, error);
 
-rollback:
-    exec_sql(db, "ROLLBACK", NULL);
-done:
-    sqlite3_finalize(delcat);
-    sqlite3_finalize(delch);
-    sqlite3_finalize(inscat);
-    sqlite3_finalize(insch);
+    if (st == VIP_OK)
+        st = exec_sql(db, "COMMIT", error);
+    else
+        (void)exec_sql(db, "ROLLBACK", NULL);
+
+    finalize_catalog_statements(&statements);
     pthread_mutex_unlock(&db->mutex);
     return st;
 }
