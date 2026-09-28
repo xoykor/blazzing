@@ -4304,255 +4304,250 @@ static void draw_input(app_t *a, int x, int y, int w, int h, const char *value, 
 }
 
 /* Draw login. */
-static void draw_login(app_t *a) {
-    if (a->renderer.active)
-        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, a->height, 0x090B11u, 0x111722u);
-    else
-        fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.bg);
-    int w = a->width > 1120 ? 1080 : a->width - 40;
-    if (w < 720)
-        w = 720;
-    int h = 620;
-    int x = (a->width - w) / 2, y = (a->height - h) / 2;
-    if (y < 18)
-        y = 18;
+static void draw_login_shell(app_t *a, int x, int y, int w, int h) {
     if (a->renderer.active) {
+        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, a->height, 0x090B11u, 0x111722u);
         vip_ui_render_round_rect(&a->renderer, x + 8, y + 10, w, h, 26, 0x000000u, 0.58);
         vip_ui_render_round_rect(&a->renderer, x, y, w, h, 26, 0x111722u, 0.97);
         vip_ui_render_round_stroke(&a->renderer, x, y, w, h, 26, 0x343A48u, 1.0, 1.0);
-    } else {
-        fill_round_rect(a, x + 8, y + 10, w, h, 24, a->colors.black);
-        fill_round_rect(a, x, y, w, h, 24, a->colors.panel);
-        stroke_round_rect(a, x, y, w, h, 24, a->colors.border);
+        return;
     }
+    fill_rect(a, 0, 0, (unsigned)a->width, (unsigned)a->height, a->colors.bg);
+    fill_round_rect(a, x + 8, y + 10, w, h, 24, a->colors.black);
+    fill_round_rect(a, x, y, w, h, 24, a->colors.panel);
+    stroke_round_rect(a, x, y, w, h, 24, a->colors.border);
+}
 
+static void draw_login_brand(app_t *a, int x, int y) {
     if (a->renderer.active) {
         vip_ui_render_round_rect(&a->renderer, x + 30, y + 25, 42, 42, 13, 0xFF5F2Eu, 1.0);
         vip_ui_render_text(&a->renderer, x + 30, y + 35, 42, "B", "Sans Bold 13", 0x090B11u, 1.0, true);
-    } else {
-        fill_round_rect(a, x + 30, y + 25, 42, 42, 13, a->colors.accent);
-        draw_centered_font(a, a->font_heading, x + 30, y + 53, 42, "B", a->colors.bg);
-    }
-    if (a->renderer.active) {
         vip_ui_render_text(&a->renderer, x + 86, y + 27, 360, "Blazzing", "Sans Bold 22", 0xF6F7FBu, 1.0,
                            false);
         vip_ui_render_text(&a->renderer, x + 86, y + 55, 420, "IPTV para Linux",
                            "Sans 10", 0xAAB2C4u, 1.0, false);
-    } else {
-        draw_text_font(a, a->font_title, x + 86, y + 49, "Blazzing", a->colors.text);
-        draw_text(a, x + 86, y + 69, "Streaming, listas e biblioteca em um só lugar", a->colors.muted);
+        return;
     }
+    fill_round_rect(a, x + 30, y + 25, 42, 42, 13, a->colors.accent);
+    draw_centered_font(a, a->font_heading, x + 30, y + 53, 42, "B", a->colors.bg);
+    draw_text_font(a, a->font_title, x + 86, y + 49, "Blazzing", a->colors.text);
+    draw_text(a, x + 86, y + 69, "Streaming, listas e biblioteca em um só lugar", a->colors.muted);
+}
 
-    int form_x = x + 34, form_w = (w * 58) / 100 - 50;
-    int list_x = x + (w * 60) / 100, list_w = w - (list_x - x) - 34;
+static void draw_login_mode_tabs(app_t *a, int form_x, int form_w, int y) {
     int mode_y = y + 88;
     int mode_w = (form_w - 10) / 2;
     for (int i = 0; i < 2; ++i) {
         bool selected = (int)a->login_mode == i;
-        bool mode_focused = a->input_focus == INPUT_MODE;
+        bool focused = a->input_focus == INPUT_MODE;
         int bx = form_x + i * (mode_w + 10);
         if (a->renderer.active) {
             vip_ui_render_round_rect(&a->renderer, bx, mode_y, mode_w, 42, 12,
                                      selected ? 0x572517u : 0x171C28u, 1.0);
             vip_ui_render_round_stroke(&a->renderer, bx, mode_y, mode_w, 42, 12,
-                                       mode_focused && selected ? 0xFFFFFFu
-                                                                : (selected ? 0xFF5F2Eu : 0x343A48u),
-                                       1.0, mode_focused && selected ? 2.5 : (selected ? 1.5 : 1.0));
-            vip_ui_render_text(&a->renderer, bx, mode_y + 12, mode_w, i == LOGIN_XTREAM ? "Xtream" : "M3U",
-                               selected ? "Sans Bold 10" : "Sans 10", selected ? 0xF6F7FBu : 0xAAB2C4u, 1.0,
-                               true);
+                                       focused && selected ? 0xFFFFFFu
+                                                           : (selected ? 0xFF5F2Eu : 0x343A48u),
+                                       1.0, focused && selected ? 2.5 : (selected ? 1.5 : 1.0));
+            vip_ui_render_text(&a->renderer, bx, mode_y + 12, mode_w,
+                               i == LOGIN_XTREAM ? "Xtream" : "M3U",
+                               selected ? "Sans Bold 10" : "Sans 10",
+                               selected ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
         } else {
-            fill_round_rect(a, bx, mode_y, mode_w, 42, 12, selected ? a->colors.accent2 : a->colors.panel2);
+            fill_round_rect(a, bx, mode_y, mode_w, 42, 12,
+                            selected ? a->colors.accent2 : a->colors.panel2);
             stroke_round_rect(a, bx, mode_y, mode_w, 42, 12,
-                              mode_focused && selected ? a->colors.text
-                                                       : (selected ? a->colors.accent : a->colors.border));
+                              focused && selected ? a->colors.text
+                                                  : (selected ? a->colors.accent : a->colors.border));
             draw_centered(a, bx, mode_y + 27, mode_w, i == LOGIN_XTREAM ? "Xtream" : "M3U",
                           selected ? a->colors.text : a->colors.muted);
         }
     }
+}
 
-    draw_input(a, form_x, y + 142, form_w, 44, a->profile_name, "Nome da lista (opcional)",
-               INPUT_PROFILE_NAME, false);
-    if (a->login_mode == LOGIN_XTREAM) {
-        draw_input(a, form_x, y + 196, form_w, 44, a->server, "Servidor primário (https://...)", INPUT_SERVER,
-                   false);
-        draw_input(a, form_x, y + 250, form_w, 44, a->server_alt, "Servidor alternativo (opcional)",
-                   INPUT_SERVER_ALT, false);
-        draw_input(a, form_x, y + 304, form_w, 44, a->username, "Usuário", INPUT_USERNAME, false);
-        draw_input(a, form_x, y + 358, form_w, 44, a->password, "Senha", INPUT_PASSWORD, true);
-    } else {
-        draw_input(a, form_x, y + 196, form_w, 44, a->server, "URL ou caminho de playlist .m3u/.m3u8",
-                   INPUT_SERVER, false);
-        if (a->renderer.active) {
-            vip_ui_render_text(&a->renderer, form_x, y + 252, form_w,
-                               "M3U remoto (HTTP/HTTPS) ou arquivo local.", "Sans 9", 0xAAB2C4u, 1.0, false);
-            vip_ui_render_text(&a->renderer, form_x, y + 278, form_w,
-                               "A playlist é processada diretamente pelo Blazzing.", "Sans 9", 0xAAB2C4u, 1.0,
-                               false);
-        } else {
-            draw_text(a, form_x, y + 266, "M3U remoto (HTTP/HTTPS) ou arquivo local.", a->colors.muted);
-            draw_text(a, form_x, y + 292, "A playlist é processada diretamente pelo Blazzing.",
-                      a->colors.muted);
-        }
+static void draw_xtream_login_fields(app_t *a, int form_x, int form_w, int y) {
+    draw_input(a, form_x, y + 196, form_w, 44, a->server, "Servidor primário (https://...)", INPUT_SERVER,
+               false);
+    draw_input(a, form_x, y + 250, form_w, 44, a->server_alt, "Servidor alternativo (opcional)",
+               INPUT_SERVER_ALT, false);
+    draw_input(a, form_x, y + 304, form_w, 44, a->username, "Usuário", INPUT_USERNAME, false);
+    draw_input(a, form_x, y + 358, form_w, 44, a->password, "Senha", INPUT_PASSWORD, true);
+}
 
-        int phone_y = y + 314;
-        bool waiting_phone = a->pairing_relay != NULL;
-        bool phone_focused = a->input_focus == INPUT_PHONE;
-        const char *phone_label = waiting_phone ? "Aguardando celular..."
-                                  : (a->pairing_retry_ready
-                                         ? "Tentar novamente (QR)"
-                                         : "Adicionar pelo celular");
-        if (a->renderer.active) {
-            vip_ui_render_round_rect(&a->renderer, form_x, phone_y, form_w, 46, 12,
-                                     waiting_phone ? 0x572517u : 0x171C28u, 1.0);
-            vip_ui_render_round_stroke(&a->renderer, form_x, phone_y, form_w, 46, 12,
-                                       phone_focused ? 0xFFFFFFu
-                                                     : (waiting_phone ? 0xFF5F2Eu : 0x343A48u),
-                                       1.0, phone_focused ? 2.5 : 1.0);
-            vip_ui_render_text(&a->renderer, form_x, phone_y + 13, form_w,
-                               phone_label,
-                               waiting_phone ? "Sans Bold 10" : "Sans 10",
-                               waiting_phone ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
-            if (waiting_phone)
-                vip_ui_render_text(&a->renderer, form_x, phone_y + 57, form_w,
-                                   "Pareamento HTTPS pela Internet", "Sans 8",
-                                   0xAAB2C4u, 1.0, false);
-        } else {
-            fill_round_rect(a, form_x, phone_y, form_w, 46, 12,
-                            waiting_phone ? a->colors.accent2 : a->colors.panel2);
-            stroke_round_rect(a, form_x, phone_y, form_w, 46, 12,
-                              phone_focused ? a->colors.text
-                                            : (waiting_phone ? a->colors.accent : a->colors.border));
-            draw_centered(a, form_x, phone_y + 29, form_w,
-                          phone_label,
-                          waiting_phone ? a->colors.text : a->colors.muted);
-            if (waiting_phone)
-                draw_text(a, form_x, phone_y + 69,
-                          "Pareamento HTTPS pela Internet", a->colors.muted);
-        }
+static void draw_m3u_help(app_t *a, int form_x, int form_w, int y) {
+    if (a->renderer.active) {
+        vip_ui_render_text(&a->renderer, form_x, y + 252, form_w,
+                           "M3U remoto (HTTP/HTTPS) ou arquivo local.", "Sans 9", 0xAAB2C4u, 1.0, false);
+        vip_ui_render_text(&a->renderer, form_x, y + 278, form_w,
+                           "A playlist é processada diretamente pelo Blazzing.", "Sans 9", 0xAAB2C4u, 1.0,
+                           false);
+        return;
     }
+    draw_text(a, form_x, y + 266, "M3U remoto (HTTP/HTTPS) ou arquivo local.", a->colors.muted);
+    draw_text(a, form_x, y + 292, "A playlist é processada diretamente pelo Blazzing.", a->colors.muted);
+}
+
+static void draw_phone_pairing_button(app_t *a, int form_x, int form_w, int y) {
+    int phone_y = y + 314;
+    bool waiting = a->pairing_relay != NULL;
+    bool focused = a->input_focus == INPUT_PHONE;
+    const char *label = waiting ? "Aguardando celular..."
+                                : (a->pairing_retry_ready ? "Tentar novamente (QR)" : "Adicionar pelo celular");
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, form_x, phone_y, form_w, 46, 12,
+                                 waiting ? 0x572517u : 0x171C28u, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, form_x, phone_y, form_w, 46, 12,
+                                   focused ? 0xFFFFFFu : (waiting ? 0xFF5F2Eu : 0x343A48u),
+                                   1.0, focused ? 2.5 : 1.0);
+        vip_ui_render_text(&a->renderer, form_x, phone_y + 13, form_w, label,
+                           waiting ? "Sans Bold 10" : "Sans 10",
+                           waiting ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
+        if (waiting)
+            vip_ui_render_text(&a->renderer, form_x, phone_y + 57, form_w,
+                               "Pareamento HTTPS pela Internet", "Sans 8", 0xAAB2C4u, 1.0, false);
+        return;
+    }
+    fill_round_rect(a, form_x, phone_y, form_w, 46, 12,
+                    waiting ? a->colors.accent2 : a->colors.panel2);
+    stroke_round_rect(a, form_x, phone_y, form_w, 46, 12,
+                      focused ? a->colors.text : (waiting ? a->colors.accent : a->colors.border));
+    draw_centered(a, form_x, phone_y + 29, form_w, label, waiting ? a->colors.text : a->colors.muted);
+    if (waiting)
+        draw_text(a, form_x, phone_y + 69, "Pareamento HTTPS pela Internet", a->colors.muted);
+}
+
+static void draw_m3u_login_fields(app_t *a, int form_x, int form_w, int y) {
+    draw_input(a, form_x, y + 196, form_w, 44, a->server, "URL ou caminho de playlist .m3u/.m3u8",
+               INPUT_SERVER, false);
+    draw_m3u_help(a, form_x, form_w, y);
+    draw_phone_pairing_button(a, form_x, form_w, y);
+}
+
+static void draw_login_connect_button(app_t *a, int form_x, int form_w, int y) {
     bool ready = a->server[0] && !atomic_load(&a->login_running) &&
                  (a->login_mode == LOGIN_M3U || (a->username[0] && a->password[0]));
     int connect_y = y + 430;
-    bool connect_focused = a->input_focus == INPUT_CONNECT;
+    bool focused = a->input_focus == INPUT_CONNECT;
+    const char *label = atomic_load(&a->login_running) ? "Conectando..." : "Conectar";
     if (a->renderer.active) {
         vip_ui_render_round_rect(&a->renderer, form_x + 3, connect_y + 5, form_w, 50, 15, 0x000000u, 0.48);
         vip_ui_render_round_rect(&a->renderer, form_x, connect_y, form_w, 50, 15,
                                  ready ? 0xFF5F2Eu : 0x171C28u, 1.0);
         vip_ui_render_round_stroke(&a->renderer, form_x, connect_y, form_w, 50, 15,
-                                   connect_focused ? 0xFFFFFFu
-                                                   : (ready ? 0xFF8A45u : 0x343A48u),
-                                   1.0, connect_focused ? 2.5 : 1.0);
-        vip_ui_render_text(&a->renderer, form_x, connect_y + 15, form_w,
-                           atomic_load(&a->login_running) ? "Conectando..." : "Conectar", "Sans Bold 11",
+                                   focused ? 0xFFFFFFu : (ready ? 0xFF8A45u : 0x343A48u),
+                                   1.0, focused ? 2.5 : 1.0);
+        vip_ui_render_text(&a->renderer, form_x, connect_y + 15, form_w, label, "Sans Bold 11",
                            ready ? 0x090B11u : 0xAAB2C4u, 1.0, true);
-    } else {
-        fill_round_rect(a, form_x + 2, connect_y + 4, form_w, 50, 14, a->colors.black);
-        fill_round_rect(a, form_x, connect_y, form_w, 50, 14, ready ? a->colors.accent : a->colors.panel2);
-        stroke_round_rect(a, form_x, connect_y, form_w, 50, 14,
-                          connect_focused ? a->colors.text
-                                          : (ready ? a->colors.accent : a->colors.border));
-        draw_centered_font(a, a->font_heading, form_x, connect_y + 32, form_w,
-                           atomic_load(&a->login_running) ? "Conectando..." : "Conectar",
-                           ready ? a->colors.bg : a->colors.muted);
+        return;
     }
+    fill_round_rect(a, form_x + 2, connect_y + 4, form_w, 50, 14, a->colors.black);
+    fill_round_rect(a, form_x, connect_y, form_w, 50, 14, ready ? a->colors.accent : a->colors.panel2);
+    stroke_round_rect(a, form_x, connect_y, form_w, 50, 14,
+                      focused ? a->colors.text : (ready ? a->colors.accent : a->colors.border));
+    draw_centered_font(a, a->font_heading, form_x, connect_y + 32, form_w, label,
+                       ready ? a->colors.bg : a->colors.muted);
+}
 
-    const char *side_title = a->pairing_relay ? "Adicionar pelo celular" : "Suas listas";
-    const char *side_subtitle =
-        a->pairing_relay ? "Escaneie o QR Code em qualquer conexão"
-                         : "Acesso rápido aos perfis salvos";
+static void draw_login_side_header(app_t *a, int list_x, int list_w, int y) {
+    const char *title = a->pairing_relay ? "Adicionar pelo celular" : "Suas listas";
+    const char *subtitle = a->pairing_relay ? "Escaneie o QR Code em qualquer conexão"
+                                            : "Acesso rápido aos perfis salvos";
     if (a->renderer.active) {
         vip_ui_render_round_rect(&a->renderer, list_x - 14, y + 88, list_w + 28, 438, 18,
                                  0x111A28u, 0.98);
         vip_ui_render_round_stroke(&a->renderer, list_x - 14, y + 88, list_w + 28, 438, 18,
                                    0x343A48u, 1.0, 1.0);
-        vip_ui_render_text(&a->renderer, list_x, y + 102, list_w, side_title,
+        vip_ui_render_text(&a->renderer, list_x, y + 102, list_w, title,
                            "Sans Bold 12", 0xF6F7FBu, 1.0, false);
-        vip_ui_render_text(&a->renderer, list_x, y + 126, list_w, side_subtitle,
+        vip_ui_render_text(&a->renderer, list_x, y + 126, list_w, subtitle,
                            "Sans 9", 0xAAB2C4u, 1.0, false);
+        return;
+    }
+    fill_round_rect(a, list_x - 14, y + 88, list_w + 28, 438, 18, a->colors.panel2);
+    stroke_round_rect(a, list_x - 14, y + 88, list_w + 28, 438, 18, a->colors.border);
+    draw_text_font(a, a->font_heading, list_x, y + 116, title, a->colors.text);
+    draw_text(a, list_x, y + 137, subtitle, a->colors.muted);
+}
+
+static void draw_login_pairing_qr(app_t *a, int list_x, int list_w, int y) {
+    if (!a->pairing_relay || !a->pairing_qr)
+        return;
+    int qr_size = list_w < 290 ? list_w - 20 : 270;
+    if (qr_size < 120)
+        qr_size = 120;
+    int qr_x = list_x + (list_w - qr_size) / 2;
+    int qr_y = y + 158;
+    draw_pairing_qr(a, qr_x, qr_y, qr_size);
+
+    char session_hint[96];
+    snprintf(session_hint, sizeof(session_hint), "Sessão %.8s • expira em 45 s",
+             vip_pairing_relay_session_id(a->pairing_relay));
+    if (a->renderer.active) {
+        vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 16, list_w,
+                           "Via Internet • nenhuma porta local necessária", "Sans 8", 0xAAB2C4u, 1.0, true);
+        vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 38, list_w,
+                           session_hint, "Sans 8", 0xAAB2C4u, 1.0, true);
+        vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 60, list_w,
+                           "Back/Esc cancela o pareamento", "Sans 8", 0xAAB2C4u, 1.0, true);
+        return;
+    }
+    draw_centered(a, list_x, qr_y + qr_size + 30, list_w,
+                  "Via Internet • nenhuma porta local necessária", a->colors.muted);
+    draw_centered(a, list_x, qr_y + qr_size + 52, list_w, session_hint, a->colors.muted);
+    draw_centered(a, list_x, qr_y + qr_size + 74, list_w, "Back/Esc cancela o pareamento", a->colors.muted);
+}
+
+static void draw_saved_profile_row(app_t *a, vip_profile_t *profile, int idx,
+                                   int list_x, int list_w, int row_y) {
+    bool focused = a->input_focus == INPUT_SAVED_PROFILE && a->profile_focus == idx;
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, list_x, row_y, list_w, 52, 12,
+                                 focused ? 0x572517u : 0x171C28u, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, list_x, row_y, list_w, 52, 12,
+                                   focused ? 0xFFFFFFu : 0x343A48u, 1.0, focused ? 2.5 : 1.0);
     } else {
-        fill_round_rect(a, list_x - 14, y + 88, list_w + 28, 438, 18, a->colors.panel2);
-        stroke_round_rect(a, list_x - 14, y + 88, list_w + 28, 438, 18, a->colors.border);
-        draw_text_font(a, a->font_heading, list_x, y + 116, side_title, a->colors.text);
-        draw_text(a, list_x, y + 137, side_subtitle, a->colors.muted);
+        draw_surface(a, list_x, row_y, list_w, 52, 12, focused);
+        if (focused)
+            stroke_round_rect(a, list_x - 2, row_y - 2, list_w + 4, 56, 13, a->colors.text);
     }
 
-    if (a->pairing_relay && a->pairing_qr) {
-        int qr_size = list_w < 290 ? list_w - 20 : 270;
-        if (qr_size < 120)
-            qr_size = 120;
-        int qr_x = list_x + (list_w - qr_size) / 2;
-        int qr_y = y + 158;
-        draw_pairing_qr(a, qr_x, qr_y, qr_size);
-
-        char session_hint[96];
-        snprintf(session_hint, sizeof(session_hint), "Sessão %.8s • expira em 45 s",
-                 vip_pairing_relay_session_id(a->pairing_relay));
-        if (a->renderer.active) {
-            vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 16, list_w,
-                               "Via Internet • nenhuma porta local necessária",
-                               "Sans 8", 0xAAB2C4u, 1.0, true);
-            vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 38, list_w,
-                               session_hint, "Sans 8", 0xAAB2C4u, 1.0, true);
-            vip_ui_render_text(&a->renderer, list_x, qr_y + qr_size + 60, list_w,
-                               "Back/Esc cancela o pareamento",
-                               "Sans 8", 0xAAB2C4u, 1.0, true);
-        } else {
-            draw_centered(a, list_x, qr_y + qr_size + 30, list_w,
-                          "Via Internet • nenhuma porta local necessária", a->colors.muted);
-            draw_centered(a, list_x, qr_y + qr_size + 52, list_w,
-                          session_hint, a->colors.muted);
-            draw_centered(a, list_x, qr_y + qr_size + 74, list_w,
-                          "Back/Esc cancela o pareamento", a->colors.muted);
-        }
+    char label[220];
+    snprintf(label, sizeof(label), "%s  ·  %s", profile->name ? profile->name : "Lista",
+             profile->type == VIP_PROFILE_M3U ? "M3U" : "Xtream");
+    bounded_text(label, sizeof(label), label, 44);
+    char sub[220];
+    bounded_text(sub, sizeof(sub), profile->server ? profile->server : "", 46);
+    if (a->renderer.active) {
+        vip_ui_render_text(&a->renderer, list_x + 13, row_y + 8, list_w - 26, label,
+                           focused ? "Sans Bold 9" : "Sans SemiBold 9", 0xF6F7FBu, 1.0, false);
+        vip_ui_render_text(&a->renderer, list_x + 13, row_y + 29, list_w - 26, sub, "Sans 8",
+                           0xAAB2C4u, 1.0, false);
+    } else {
+        draw_text(a, list_x + 13, row_y + 22, label, a->colors.text);
+        draw_text_font(a, a->font_small, list_x + 13, row_y + 42, sub, a->colors.muted);
     }
+}
 
+static void draw_login_profiles(app_t *a, int list_x, int list_w, int y) {
+    if (a->pairing_relay)
+        return;
     int row_y = y + 154;
-    int visible = 6;
-    for (int r = 0; !a->pairing_relay && r < visible; ++r) {
+    for (int r = 0; r < 6; ++r) {
         int idx = a->profile_scroll + r;
         if (idx < 0 || (size_t)idx >= a->profiles.len)
             break;
-        vip_profile_t *p = &a->profiles.items[idx];
-        bool profile_focused = a->input_focus == INPUT_SAVED_PROFILE && a->profile_focus == idx;
-        if (a->renderer.active) {
-            vip_ui_render_round_rect(&a->renderer, list_x, row_y, list_w, 52, 12,
-                                     profile_focused ? 0x572517u : 0x171C28u, 1.0);
-            vip_ui_render_round_stroke(&a->renderer, list_x, row_y, list_w, 52, 12,
-                                       profile_focused ? 0xFFFFFFu : 0x343A48u,
-                                       1.0, profile_focused ? 2.5 : 1.0);
-        } else {
-            draw_surface(a, list_x, row_y, list_w, 52, 12, profile_focused);
-            if (profile_focused)
-                stroke_round_rect(a, list_x - 2, row_y - 2, list_w + 4, 56, 13, a->colors.text);
-        }
-        char label[220];
-        snprintf(label, sizeof(label), "%s  ·  %s", p->name ? p->name : "Lista",
-                 p->type == VIP_PROFILE_M3U ? "M3U" : "Xtream");
-        bounded_text(label, sizeof(label), label, 44);
-        char sub[220];
-        bounded_text(sub, sizeof(sub), p->server ? p->server : "", 46);
-        if (a->renderer.active) {
-            vip_ui_render_text(&a->renderer, list_x + 13, row_y + 8, list_w - 26, label,
-                               profile_focused ? "Sans Bold 9" : "Sans SemiBold 9",
-                               0xF6F7FBu, 1.0, false);
-            vip_ui_render_text(&a->renderer, list_x + 13, row_y + 29, list_w - 26, sub, "Sans 8", 0xAAB2C4u,
-                               1.0, false);
-        } else {
-            draw_text(a, list_x + 13, row_y + 22, label,
-                      profile_focused ? a->colors.text : a->colors.text);
-            draw_text_font(a, a->font_small, list_x + 13, row_y + 42, sub, a->colors.muted);
-        }
+        draw_saved_profile_row(a, &a->profiles.items[idx], idx, list_x, list_w, row_y);
         row_y += 60;
     }
-    if (!a->pairing_relay && a->profiles.len == 0u) {
+    if (a->profiles.len == 0u) {
         if (a->renderer.active)
             vip_ui_render_text(&a->renderer, list_x, y + 168, list_w, "Nenhuma lista salva ainda.", "Sans 9",
                                0xAAB2C4u, 1.0, false);
         else
             draw_text(a, list_x, y + 182, "Nenhuma lista salva ainda.", a->colors.muted);
     }
+}
 
+static void draw_login_footer(app_t *a, int form_x, int form_w, int y, int h) {
     char status_copy[512];
     pthread_mutex_lock(&a->data_mutex);
     snprintf(status_copy, sizeof(status_copy), "%s", a->status);
@@ -4562,7 +4557,8 @@ static void draw_login(app_t *a) {
         vip_ui_render_text(&a->renderer, form_x, y + h - 56, form_w, status_copy, "Sans 8",
                            status_error ? 0xFF7185u : 0xAAB2C4u, 1.0, false);
     else
-        draw_text(a, form_x, y + h - 42, status_copy, status_error ? a->colors.danger : a->colors.muted);
+        draw_text(a, form_x, y + h - 42, status_copy,
+                  status_error ? a->colors.danger : a->colors.muted);
 
     const char *credit = "by Xoykor";
     if (a->renderer.active) {
@@ -4574,6 +4570,37 @@ static void draw_login(app_t *a) {
         draw_text_font(a, a->font_small, a->width - credit_w - 18, a->height - 16,
                        credit, a->colors.muted);
     }
+}
+
+static void draw_login(app_t *a) {
+    int w = a->width > 1120 ? 1080 : a->width - 40;
+    if (w < 720)
+        w = 720;
+    int h = 620;
+    int x = (a->width - w) / 2;
+    int y = (a->height - h) / 2;
+    if (y < 18)
+        y = 18;
+
+    int form_x = x + 34;
+    int form_w = (w * 58) / 100 - 50;
+    int list_x = x + (w * 60) / 100;
+    int list_w = w - (list_x - x) - 34;
+
+    draw_login_shell(a, x, y, w, h);
+    draw_login_brand(a, x, y);
+    draw_login_mode_tabs(a, form_x, form_w, y);
+    draw_input(a, form_x, y + 142, form_w, 44, a->profile_name, "Nome da lista (opcional)",
+               INPUT_PROFILE_NAME, false);
+    if (a->login_mode == LOGIN_XTREAM)
+        draw_xtream_login_fields(a, form_x, form_w, y);
+    else
+        draw_m3u_login_fields(a, form_x, form_w, y);
+    draw_login_connect_button(a, form_x, form_w, y);
+    draw_login_side_header(a, list_x, list_w, y);
+    draw_login_pairing_qr(a, list_x, list_w, y);
+    draw_login_profiles(a, list_x, list_w, y);
+    draw_login_footer(a, form_x, form_w, y, h);
 }
 
 /* Draw wrapped text. */
