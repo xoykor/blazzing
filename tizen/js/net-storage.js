@@ -238,9 +238,361 @@
         }).catch(function () {});
     }
 
+function playlistSectionKey(spec) {
+        return spec.kind === "series" && spec.summaryOnly ?
+            "seriesSummary" : spec.kind;
+    }
+
+    function createPlaylistSectionState(url, classifyEntry, onProgress, dir, sourceFile) {
+        return {
+            url: url,
+            classifyEntry: classifyEntry,
+            onProgress: onProgress,
+            dir: dir,
+            sourceFile: sourceFile,
+            specs: playlistSectionKinds(),
+            files: {},
+            streams: {},
+            buffers: {
+                live: "",
+                vod: "",
+                series: "",
+                seriesSummary: ""
+            },
+            seriesSeen: {},
+            rawStream: null,
+            carry: "",
+            pendingExtinf: "",
+            readChars: 0
+        };
+    }
+
+    function appendPlaylistSectionBuffer(state, key, text) {
+        state.buffers[key] += text;
+        if (state.buffers[key].length < SECTION_WRITE_BUFFER_CHARS) {
+            return;
+        }
+        state.streams[key].write(state.buffers[key]);
+        state.buffers[key] = "";
+    }
+
+    function appendPlaylistSectionHeader(state, line) {
+        var text = line + "\n";
+        appendPlaylistSectionBuffer(state, "live", text);
+        appendPlaylistSectionBuffer(state, "vod", text);
+        appendPlaylistSectionBuffer(state, "series", text);
+        appendPlaylistSectionBuffer(state, "seriesSummary", text);
+    }
+
+    function appendClassifiedPlaylistEntry(state, classified, entry) {
+        var key;
+        if (classified.kind === "live") {
+            appendPlaylistSectionBuffer(state, "live", entry);
+            return;
+        }
+        if (classified.kind === "vod") {
+            appendPlaylistSectionBuffer(state, "vod", entry);
+            return;
+        }
+        if (classified.kind !== "series") {
+            return;
+        }
+
+        appendPlaylistSectionBuffer(state, "series", entry);
+        key = classified.seriesKey || "";
+        if (key && !state.seriesSeen[key]) {
+            state.seriesSeen[key] = true;
+            appendPlaylistSectionBuffer(state, "seriesSummary", entry);
+        }
+    }
+
+    function processPlaylistSectionLine(state, rawLine) {
+        var line = String(rawLine || "").replace(/\r$/, "");
+        var classified;
+        var entry;
+
+        if (!line) {
+            return;
+        }
+        if (line.indexOf("#EXTM3U") === 0 ||
+                line.indexOf("#EXT-X-LISTA-") === 0) {
+            appendPlaylistSectionHeader(state, line);
+            return;
+        }
+        if (line.indexOf("#EXTINF:") === 0) {
+            state.pendingExtinf = line;
+            return;
+        }
+        if (line.charAt(0) === "#" || !state.pendingExtinf) {
+            return;
+        }
+
+        classified = state.classifyEntry(
+            state.url,
+            state.pendingExtinf,
+            line
+        );
+        entry = state.pendingExtinf + "\n" + line + "\n";
+        state.pendingExtinf = "";
+        if (classified && classified.kind) {
+            appendClassifiedPlaylistEntry(state, classified, entry);
+        }
+    }
+
+    function consumePlaylistSectionChunk(state, chunk) {
+        var text = state.carry + String(chunk || "");
+        var cursor = 0;
+        var next;
+
+        while (cursor < text.length) {
+            next = text.indexOf("\n", cursor);
+            if (next === -1) {
+                state.carry = text.slice(cursor);
+                return;
+            }
+            processPlaylistSectionLine(state, text.slice(cursor, next));
+            cursor = next + 1;
+        }
+        state.carry = "";
+    }
+
+    function closePlaylistSectionStreams(state) {
+        if (state.rawStream) {
+            try {
+                state.rawStream.close();
+            } catch (ignoreRawClose) {}
+            state.rawStream = null;
+        }
+
+        Object.keys(state.streams).forEach(function (key) {
+            try {
+                state.streams[key].close();
+            } catch (ignoreClose) {}
+        });
+        state.streams = {};
+    }
+
+    function flushPlaylistSectionBuffers(state) {
+        Object.keys(state.buffers).forEach(function (key) {
+            if (!state.buffers[key]) {
+                return;
+            }
+            state.streams[key].write(state.buffers[key]);
+            state.buffers[key] = "";
+        });
+    }
+
+    function cleanupPlaylistSectionTemps(state) {
+        return Promise.all(state.specs.map(function (spec) {
+            return removeFileByName(
+                state.dir,
+                playlistSectionFileName(
+                    state.url,
+                    spec.kind,
+                    spec.summaryOnly
+                ) + ".tmp"
+            );
+        }));
+    }
+
+    function publishPlaylistSectionFile(state, spec) {
+        var tempFile;
+        var finalName = playlistSectionFileName(
+            state.url,
+            spec.kind,
+            spec.summaryOnly
+        );
+
+        try {
+            tempFile = state.dir.resolve(finalName + ".tmp");
+        } catch (error) {
+            return Promise.reject(storageError(
+                "Cache de seção temporário ausente",
+                error
+            ));
+        }
+
+        return new Promise(function (resolve, reject) {
+            try {
+                state.dir.moveTo(
+                    tempFile.fullPath,
+                    "wgt-private/" + PLAYLIST_DIR + "/" + finalName,
+                    true,
+                    function () {
+                        resolve();
+                    },
+                    function (error) {
+                        reject(storageError(
+                            "Falha ao publicar cache de seção",
+                            error
+                        ));
+                    }
+                );
+            } catch (error) {
+                reject(storageError(
+                    "Falha ao substituir cache de seção",
+                    error
+                ));
+            }
+        });
+    }
+
+    function publishPlaylistSectionCaches(state) {
+        var chain = Promise.resolve(true);
+        state.specs.forEach(function (spec) {
+            chain = chain.then(function () {
+                return publishPlaylistSectionFile(state, spec);
+            });
+        });
+        return chain;
+    }
+
+    function openPlaylistSectionFile(state, spec) {
+        var finalName = playlistSectionFileName(
+            state.url,
+            spec.kind,
+            spec.summaryOnly
+        );
+        var tempName = finalName + ".tmp";
+        var key = playlistSectionKey(spec);
+        var file;
+
+        try {
+            file = state.dir.createFile(tempName);
+        } catch (exists) {
+            file = state.dir.resolve(tempName);
+        }
+        state.files[key] = file;
+
+        return new Promise(function (resolve, reject) {
+            file.openStream(
+                "w",
+                function (stream) {
+                    state.streams[key] = stream;
+                    resolve();
+                },
+                function (error) {
+                    reject(storageError(
+                        "Falha ao abrir cache de seção",
+                        error
+                    ));
+                },
+                "UTF-8"
+            );
+        });
+    }
+
+    function openPlaylistSectionOutputFiles(state) {
+        return cleanupPlaylistSectionTemps(state).then(function () {
+            return Promise.all(state.specs.map(function (spec) {
+                return openPlaylistSectionFile(state, spec);
+            }));
+        });
+    }
+
+    function reportPlaylistSectionProgress(state, chunkLength) {
+        state.readChars += chunkLength;
+        if (typeof state.onProgress === "function") {
+            state.onProgress(state.readChars);
+        }
+    }
+
+    function finishPlaylistSectionScan(state, resolve, reject) {
+        if (state.carry) {
+            processPlaylistSectionLine(state, state.carry);
+            state.carry = "";
+        }
+        flushPlaylistSectionBuffers(state);
+        closePlaylistSectionStreams(state);
+        publishPlaylistSectionCaches(state).then(resolve).catch(reject);
+    }
+
+    function failPlaylistSectionScan(state, reject, message, error) {
+        closePlaylistSectionStreams(state);
+        cleanupPlaylistSectionTemps(state);
+        reject(storageError(message, error));
+    }
+
+    function pumpPlaylistSectionSource(state, stream, resolve, reject) {
+        var chunk;
+
+        try {
+            if (stream.bytesAvailable <= 0) {
+                finishPlaylistSectionScan(state, resolve, reject);
+                return;
+            }
+
+            chunk = stream.read(
+                Math.min(
+                    stream.bytesAvailable,
+                    PLAYLIST_CHUNK_CHARS
+                )
+            );
+            reportPlaylistSectionProgress(state, chunk.length);
+            consumePlaylistSectionChunk(state, chunk);
+        } catch (error) {
+            failPlaylistSectionScan(
+                state,
+                reject,
+                "Falha ao indexar playlist",
+                error
+            );
+            return;
+        }
+
+        setTimeout(function () {
+            pumpPlaylistSectionSource(state, stream, resolve, reject);
+        }, 0);
+    }
+
+    function scanPlaylistSectionSource(state) {
+        return new Promise(function (resolve, reject) {
+            state.sourceFile.openStream(
+                "r",
+                function (stream) {
+                    state.rawStream = stream;
+                    try {
+                        stream.position = 0;
+                        setTimeout(function () {
+                            pumpPlaylistSectionSource(
+                                state,
+                                stream,
+                                resolve,
+                                reject
+                            );
+                        }, 0);
+                    } catch (error) {
+                        failPlaylistSectionScan(
+                            state,
+                            reject,
+                            "Falha ao iniciar indexação da playlist",
+                            error
+                        );
+                    }
+                },
+                function (error) {
+                    failPlaylistSectionScan(
+                        state,
+                        reject,
+                        "Falha ao abrir playlist para indexação",
+                        error
+                    );
+                },
+                "UTF-8"
+            );
+        });
+    }
+
+    function resolveStoredPlaylistFile(dir, url) {
+        try {
+            return dir.resolve(playlistFileName(url));
+        } catch (missing) {
+            throw new Error("Playlist salva não encontrada.");
+        }
+    }
+
     function buildPlaylistSectionCaches(url, classifyEntry, onProgress) {
         url = String(url || "").replace(/^\s+|\s+$/g, "");
-
         if (!url) {
             return Promise.reject(new Error("URL M3U inválida."));
         }
@@ -249,320 +601,25 @@
         }
 
         return resolvePlaylistDirectory("rw").then(function (dir) {
-            var sourceFile;
-            var specs = playlistSectionKinds();
-            var files = {};
-            var streams = {};
-            var buffers = {
-                live: "",
-                vod: "",
-                series: "",
-                seriesSummary: ""
-            };
-            var seriesSeen = {};
-            var rawStream = null;
-            var carry = "";
-            var pendingExtinf = "";
-            var readChars = 0;
+            var sourceFile = resolveStoredPlaylistFile(dir, url);
+            var state = createPlaylistSectionState(
+                url,
+                classifyEntry,
+                onProgress,
+                dir,
+                sourceFile
+            );
 
-            try {
-                sourceFile = dir.resolve(playlistFileName(url));
-            } catch (missing) {
-                throw new Error("Playlist salva não encontrada.");
-            }
-
-            function keyForSpec(spec) {
-                return spec.kind === "series" && spec.summaryOnly ?
-                    "seriesSummary" : spec.kind;
-            }
-
-            function appendBuffer(key, text) {
-                buffers[key] += text;
-                if (buffers[key].length >= SECTION_WRITE_BUFFER_CHARS) {
-                    streams[key].write(buffers[key]);
-                    buffers[key] = "";
-                }
-            }
-
-            function appendHeader(line) {
-                var text = line + "\n";
-                appendBuffer("live", text);
-                appendBuffer("vod", text);
-                appendBuffer("series", text);
-                appendBuffer("seriesSummary", text);
-            }
-
-            function processLine(rawLine) {
-                var line = String(rawLine || "").replace(/\r$/, "");
-                var classified;
-                var entry;
-                var key;
-
-                if (!line) {
-                    return;
-                }
-
-                if (line.indexOf("#EXTM3U") === 0 ||
-                        line.indexOf("#EXT-X-LISTA-") === 0) {
-                    appendHeader(line);
-                    return;
-                }
-
-                if (line.indexOf("#EXTINF:") === 0) {
-                    pendingExtinf = line;
-                    return;
-                }
-
-                if (line.charAt(0) === "#") {
-                    return;
-                }
-
-                if (!pendingExtinf) {
-                    return;
-                }
-
-                classified = classifyEntry(url, pendingExtinf, line);
-                entry = pendingExtinf + "\n" + line + "\n";
-                pendingExtinf = "";
-
-                if (!classified || !classified.kind) {
-                    return;
-                }
-
-                if (classified.kind === "live") {
-                    appendBuffer("live", entry);
-                    return;
-                }
-
-                if (classified.kind === "vod") {
-                    appendBuffer("vod", entry);
-                    return;
-                }
-
-                if (classified.kind === "series") {
-                    appendBuffer("series", entry);
-                    key = classified.seriesKey || "";
-                    if (key && !seriesSeen[key]) {
-                        seriesSeen[key] = true;
-                        appendBuffer("seriesSummary", entry);
-                    }
-                }
-            }
-
-            function consumeChunk(chunk) {
-                var text = carry + String(chunk || "");
-                var cursor = 0;
-                var next;
-
-                while (cursor < text.length) {
-                    next = text.indexOf("\n", cursor);
-                    if (next === -1) {
-                        carry = text.slice(cursor);
-                        return;
-                    }
-                    processLine(text.slice(cursor, next));
-                    cursor = next + 1;
-                }
-                carry = "";
-            }
-
-            function closeAll() {
-                if (rawStream) {
-                    try { rawStream.close(); } catch (ignoreRawClose) {}
-                    rawStream = null;
-                }
-                Object.keys(streams).forEach(function (key) {
-                    try { streams[key].close(); } catch (ignoreClose) {}
+            return openPlaylistSectionOutputFiles(state)
+                .then(function () {
+                    return scanPlaylistSectionSource(state);
+                })
+                .catch(function (error) {
+                    closePlaylistSectionStreams(state);
+                    return cleanupPlaylistSectionTemps(state).then(function () {
+                        throw error;
+                    });
                 });
-                streams = {};
-            }
-
-            function flushAll() {
-                Object.keys(buffers).forEach(function (key) {
-                    if (buffers[key]) {
-                        streams[key].write(buffers[key]);
-                        buffers[key] = "";
-                    }
-                });
-            }
-
-            function cleanupTemps() {
-                return Promise.all(specs.map(function (spec) {
-                    return removeFileByName(
-                        dir,
-                        playlistSectionFileName(url, spec.kind, spec.summaryOnly) + ".tmp"
-                    );
-                }));
-            }
-
-            function publishAll() {
-                var index = 0;
-
-                function next() {
-                    var spec;
-                    var tmp;
-                    var finalName;
-
-                    if (index >= specs.length) {
-                        return Promise.resolve(true);
-                    }
-
-                    spec = specs[index];
-                    index += 1;
-                    finalName = playlistSectionFileName(url, spec.kind, spec.summaryOnly);
-
-                    try {
-                        tmp = dir.resolve(finalName + ".tmp");
-                    } catch (error) {
-                        return Promise.reject(storageError(
-                            "Cache de seção temporário ausente",
-                            error
-                        ));
-                    }
-
-                    return new Promise(function (resolve, reject) {
-                        try {
-                            dir.moveTo(
-                                tmp.fullPath,
-                                "wgt-private/" + PLAYLIST_DIR + "/" + finalName,
-                                true,
-                                function () { resolve(); },
-                                function (error) {
-                                    reject(storageError(
-                                        "Falha ao publicar cache de seção",
-                                        error
-                                    ));
-                                }
-                            );
-                        } catch (error) {
-                            reject(storageError(
-                                "Falha ao substituir cache de seção",
-                                error
-                            ));
-                        }
-                    }).then(next);
-                }
-
-                return next();
-            }
-
-            function openOutputFiles() {
-                return cleanupTemps().then(function () {
-                    return Promise.all(specs.map(function (spec) {
-                        var finalName = playlistSectionFileName(
-                            url,
-                            spec.kind,
-                            spec.summaryOnly
-                        );
-                        var tmpName = finalName + ".tmp";
-                        var file;
-                        var key = keyForSpec(spec);
-
-                        try {
-                            file = dir.createFile(tmpName);
-                        } catch (exists) {
-                            file = dir.resolve(tmpName);
-                        }
-                        files[key] = file;
-
-                        return new Promise(function (resolve, reject) {
-                            file.openStream(
-                                "w",
-                                function (stream) {
-                                    streams[key] = stream;
-                                    resolve();
-                                },
-                                function (error) {
-                                    reject(storageError(
-                                        "Falha ao abrir cache de seção",
-                                        error
-                                    ));
-                                },
-                                "UTF-8"
-                            );
-                        });
-                    }));
-                });
-            }
-
-            function scanSource() {
-                return new Promise(function (resolve, reject) {
-                    sourceFile.openStream(
-                        "r",
-                        function (stream) {
-                            rawStream = stream;
-
-                            function pump() {
-                                var chunk;
-
-                                try {
-                                    if (stream.bytesAvailable <= 0) {
-                                        if (carry) {
-                                            processLine(carry);
-                                            carry = "";
-                                        }
-                                        flushAll();
-                                        closeAll();
-                                        publishAll().then(resolve).catch(reject);
-                                        return;
-                                    }
-
-                                    chunk = stream.read(
-                                        Math.min(
-                                            stream.bytesAvailable,
-                                            PLAYLIST_CHUNK_CHARS
-                                        )
-                                    );
-                                    readChars += chunk.length;
-                                    consumeChunk(chunk);
-
-                                    if (typeof onProgress === "function") {
-                                        onProgress(readChars);
-                                    }
-                                } catch (error) {
-                                    closeAll();
-                                    cleanupTemps();
-                                    reject(storageError(
-                                        "Falha ao indexar playlist",
-                                        error
-                                    ));
-                                    return;
-                                }
-
-                                setTimeout(pump, 0);
-                            }
-
-                            try {
-                                stream.position = 0;
-                                setTimeout(pump, 0);
-                            } catch (error) {
-                                closeAll();
-                                cleanupTemps();
-                                reject(storageError(
-                                    "Falha ao iniciar indexação da playlist",
-                                    error
-                                ));
-                            }
-                        },
-                        function (error) {
-                            closeAll();
-                            cleanupTemps();
-                            reject(storageError(
-                                "Falha ao abrir playlist para indexação",
-                                error
-                            ));
-                        },
-                        "UTF-8"
-                    );
-                });
-            }
-
-            return openOutputFiles().then(scanSource).catch(function (error) {
-                closeAll();
-                return cleanupTemps().then(function () {
-                    throw error;
-                });
-            });
         });
     }
 
