@@ -131,24 +131,34 @@
         return isNaN(index) ? -1 : index;
     }
 
-    function focusableIsRelevant(element, activeIndex) {
+
+    function catalogCardIsNearby(element, activeIndex) {
         var cardIndex;
-        var rect;
 
-        if (element.disabled) { return false; }
-
-        if (state.view === "catalog" &&
-                element.hasAttribute("data-card-index") &&
-                activeIndex >= 0) {
-            cardIndex = parseInt(element.getAttribute("data-card-index"), 10);
-            if (!isNaN(cardIndex) && Math.abs(cardIndex - activeIndex) > 24) {
-                return false;
-            }
+        if (state.view !== "catalog" ||
+                !element.hasAttribute("data-card-index") ||
+                activeIndex < 0) {
+            return true;
         }
 
-        rect = element.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0 &&
-            rect.bottom >= -500 && rect.top <= 1580;
+        cardIndex = parseInt(element.getAttribute("data-card-index"), 10);
+        return isNaN(cardIndex) ||
+            Math.abs(cardIndex - activeIndex) <= 24;
+    }
+
+    function elementIsVisibleForFocus(element) {
+        var rect = element.getBoundingClientRect();
+        return rect.width > 0 &&
+            rect.height > 0 &&
+            rect.bottom >= -500 &&
+            rect.top <= 1580;
+    }
+
+
+    function focusableIsRelevant(element, activeIndex) {
+        return !element.disabled &&
+            catalogCardIsNearby(element, activeIndex) &&
+            elementIsVisibleForFocus(element);
     }
 
     function rectCenter(rect) {
@@ -308,23 +318,29 @@
         showToast("Use o botão Home para sair.");
     }
 
-    function goBack() {
-        if (state.pairingActive) {
-            cancelPairing();
-        } else if (state.view === "player") {
-            closePlayer();
-        } else if (state.view === "series") {
-            setView("catalog");
-        } else if (state.view === "catalog") {
-            /*
-             * O botão Back do controle não abandona a playlist ativa.
-             * A troca/saída para a tela de perfis é uma ação explícita pelo
-             * botão "Listas" no topo do catálogo.
-             */
-            showToast("Use “Listas” para trocar de playlist.");
-        } else {
-            exitApplication();
+
+    function catalogBackAction() {
+        showToast("Use “Listas” para trocar de playlist.");
+    }
+
+    function backActionForView() {
+        if (state.pairingActive) { return cancelPairing; }
+
+        switch (state.view) {
+        case "player":
+            return closePlayer;
+        case "series":
+            return function () { setView("catalog"); };
+        case "catalog":
+            return catalogBackAction;
+        default:
+            return exitApplication;
         }
+    }
+
+
+    function goBack() {
+        backActionForView()();
     }
 
     function isBackKey(name, keyCode) {
