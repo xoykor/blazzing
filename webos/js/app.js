@@ -111,66 +111,85 @@
         }
     }
 
-    function geometricMove(direction) {
-        var current = document.activeElement;
-        var items = focusables();
-        var currentRect;
-        var cx;
-        var cy;
+function elementCenter(element) {
+        var rect = element.getBoundingClientRect();
+        return {
+            x: rect.left + rect.width / 2,
+            y: rect.top + rect.height / 2
+        };
+    }
+
+    function moveAllowed(direction, dx, dy) {
+        if (direction === "left") {
+            return dx < -4;
+        }
+        if (direction === "right") {
+            return dx > 4;
+        }
+        if (direction === "up") {
+            return dy < -4;
+        }
+        return dy > 4;
+    }
+
+    function directionalScore(direction, dx, dy) {
+        var horizontal = direction === "left" || direction === "right";
+        var primary = horizontal ? Math.abs(dx) : Math.abs(dy);
+        var secondary = horizontal ? Math.abs(dy) : Math.abs(dx);
+        return primary + secondary * 2.4;
+    }
+
+    function bestDirectionalCandidate(items, current, direction) {
+        var origin = elementCenter(current);
         var best = null;
         var bestScore = Infinity;
 
-        if (!current || items.indexOf(current) === -1) {
-            focusFirst();
-            return;
-        }
-
-        currentRect = current.getBoundingClientRect();
-        cx = currentRect.left + currentRect.width / 2;
-        cy = currentRect.top + currentRect.height / 2;
-
         items.forEach(function (candidate) {
-            var rect;
-            var x;
-            var y;
-            var dx;
-            var dy;
-            var primary;
-            var secondary;
-            var score;
-
             if (candidate === current) {
                 return;
             }
 
-            rect = candidate.getBoundingClientRect();
-            x = rect.left + rect.width / 2;
-            y = rect.top + rect.height / 2;
-            dx = x - cx;
-            dy = y - cy;
+            var point = elementCenter(candidate);
+            var dx = point.x - origin.x;
+            var dy = point.y - origin.y;
+            if (!moveAllowed(direction, dx, dy)) {
+                return;
+            }
 
-            if (direction === "left" && dx >= -4) { return; }
-            if (direction === "right" && dx <= 4) { return; }
-            if (direction === "up" && dy >= -4) { return; }
-            if (direction === "down" && dy <= 4) { return; }
-
-            primary = (direction === "left" || direction === "right") ?
-                Math.abs(dx) : Math.abs(dy);
-            secondary = (direction === "left" || direction === "right") ?
-                Math.abs(dy) : Math.abs(dx);
-            score = primary + secondary * 2.4;
-
+            var score = directionalScore(direction, dx, dy);
             if (score < bestScore) {
                 bestScore = score;
                 best = candidate;
             }
         });
 
-        if (best) {
-            best.focus();
-            try { best.scrollIntoView(false); } catch (ignoreScroll) {}
-            maybeAppendCards(best);
+        return best;
+    }
+
+    function focusDirectionalCandidate(candidate) {
+        if (!candidate) {
+            return;
         }
+
+        candidate.focus();
+        try {
+            candidate.scrollIntoView(false);
+        } catch (ignoreScroll) {}
+        maybeAppendCards(candidate);
+    }
+
+    function geometricMove(direction) {
+        var current = document.activeElement;
+        var items = focusables();
+
+        if (!current || items.indexOf(current) === -1) {
+            focusFirst();
+            return;
+        }
+
+        focusDirectionalCandidate(
+            bestDirectionalCandidate(items, current, direction)
+        );
     }
 
     function registerRemoteKeys() {
