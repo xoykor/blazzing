@@ -403,66 +403,79 @@ void vip_thumbnail_scheduler_cancel_pending(vip_thumbnail_scheduler_t *s) {
 }
 
 /* Handle the thumbnail scheduler enqueue operation. */
+static bool thumbnail_request_backpressured(const vip_thumbnail_scheduler_t *scheduler,
+                                            const vip_thumbnail_request_t *request) {
+    return scheduler->heap_len >= THUMB_MAX_PENDING &&
+           request->priority < THUMB_INTERACTIVE_PRIORITY;
+}
+
+static bool thumbnail_entry_blocks_request(const sched_entry_t *entry,
+                                           const vip_thumbnail_request_t *request) {
+    if (!entry)
+        return false;
+    if (entry->generating)
+        return true;
+    return request->priority <= entry->priority;
+}
+
+static vip_status_t enqueue_thumbnail_locked(vip_thumbnail_scheduler_t *scheduler,
+                                             queue_item_t *item,
+                                             const vip_thumbnail_request_t *request,
+                                             vip_error_t *error) {
+    if (scheduler->stopping)
+        return VIP_ERR_CANCELLED;
+    if (thumbnail_request_backpressured(scheduler, request))
+        return VIP_OK;
+
+    sched_entry_t *entry = map_find(
+        scheduler, request->provider_id, request->channel_id
+    );
+    if (thumbnail_entry_blocks_request(entry, request))
+        return VIP_OK;
+
+    bool inserted = false;
+    if (!entry) {
+        entry = map_insert(
+            scheduler, request->provider_id, request->channel_id, error
+        );
+        if (!entry)
+            return VIP_ERR_NOMEM;
+        inserted = true;
+    }
+
+    uint64_t generation = ++scheduler->next_generation;
+    item->generation = generation;
+    vip_status_t st = heap_push(scheduler, *item, error);
+    if (st == VIP_OK) {
+        entry->generation = generation;
+        entry->priority = request->priority;
+        pthread_cond_signal(&scheduler->cond);
+        return VIP_OK;
+    }
+
+    if (inserted)
+        map_remove(scheduler, request->provider_id, request->channel_id);
+    return st;
+}
+
 vip_status_t vip_thumbnail_scheduler_enqueue(vip_thumbnail_scheduler_t *s,
-                                             const vip_thumbnail_request_t *request, vip_error_t *error) {
-    if (!s || !request || !request->provider_id || !request->channel_id || !request->stream_url)
+                                             const vip_thumbnail_request_t *request,
+                                             vip_error_t *error) {
+    if (!s || !request || !request->provider_id ||
+        !request->channel_id || !request->stream_url)
         return VIP_ERR_INVALID_ARGUMENT;
+
     queue_item_t item = {0};
     vip_status_t st = request_copy(&item.request, request, error);
     if (st != VIP_OK)
         return st;
+
     pthread_mutex_lock(&s->mutex);
-    if (s->stopping) {
-        pthread_mutex_unlock(&s->mutex);
-        request_clear(&item.request);
-        return VIP_ERR_CANCELLED;
-    }
-    /* Backpressure: background prefetch is intentionally lossy when the
-       queue is already full. The UI keeps scanning continuously and will
-       enqueue those items later as workers drain the queue. Interactive
-       viewport/detail requests always bypass this cap. */
-    if (s->heap_len >= THUMB_MAX_PENDING && request->priority < THUMB_INTERACTIVE_PRIORITY) {
-        pthread_mutex_unlock(&s->mutex);
-        request_clear(&item.request);
-        return VIP_OK;
-    }
-    sched_entry_t *e = map_find(s, request->provider_id, request->channel_id);
-    bool inserted = false;
-    if (e && e->generating) {
-        pthread_mutex_unlock(&s->mutex);
-        request_clear(&item.request);
-        return VIP_OK;
-    }
-    /* Repetir a mesma prioridade (ou uma menor) não cria outro nó no heap.
-       Uma prioridade maior ainda pode promover um card que acabou de entrar
-       no viewport, preservando a responsividade da interface. */
-    if (e && request->priority <= e->priority) {
-        pthread_mutex_unlock(&s->mutex);
-        request_clear(&item.request);
-        return VIP_OK;
-    }
-    if (!e) {
-        e = map_insert(s, request->provider_id, request->channel_id, error);
-        if (!e) {
-            pthread_mutex_unlock(&s->mutex);
-            request_clear(&item.request);
-            return VIP_ERR_NOMEM;
-        }
-        inserted = true;
-    }
-    uint64_t generation = ++s->next_generation;
-    item.generation = generation;
-    st = heap_push(s, item, error);
-    if (st == VIP_OK) {
-        e->generation = generation;
-        e->priority = request->priority;
-        pthread_cond_signal(&s->cond);
-    } else {
-        if (inserted)
-            map_remove(s, request->provider_id, request->channel_id);
-        request_clear(&item.request);
-    }
+    st = enqueue_thumbnail_locked(s, &item, request, error);
     pthread_mutex_unlock(&s->mutex);
+
+    if (st != VIP_OK || item.generation == 0u)
+        request_clear(&item.request);
     return st;
 }
 
