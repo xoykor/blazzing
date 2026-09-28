@@ -4334,34 +4334,48 @@ static void draw_login_brand(app_t *a, int x, int y) {
     draw_text(a, x + 86, y + 69, "Streaming, listas e biblioteca em um só lugar", a->colors.muted);
 }
 
+static void draw_login_mode_tab_renderer(app_t *a, int x, int y, int w,
+                                         const char *label, bool selected, bool focused) {
+    unsigned long fill = selected ? 0x572517u : 0x171C28u;
+    unsigned long stroke = selected ? 0xFF5F2Eu : 0x343A48u;
+    double stroke_width = selected ? 1.5 : 1.0;
+    if (focused && selected) {
+        stroke = 0xFFFFFFu;
+        stroke_width = 2.5;
+    }
+    vip_ui_render_round_rect(&a->renderer, x, y, w, 42, 12, fill, 1.0);
+    vip_ui_render_round_stroke(&a->renderer, x, y, w, 42, 12, stroke, 1.0, stroke_width);
+    vip_ui_render_text(&a->renderer, x, y + 12, w, label,
+                       selected ? "Sans Bold 10" : "Sans 10",
+                       selected ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
+}
+
+static void draw_login_mode_tab_legacy(app_t *a, int x, int y, int w,
+                                       const char *label, bool selected, bool focused) {
+    unsigned long fill = selected ? a->colors.accent2 : a->colors.panel2;
+    unsigned long stroke = selected ? a->colors.accent : a->colors.border;
+    if (focused && selected)
+        stroke = a->colors.text;
+    fill_round_rect(a, x, y, w, 42, 12, fill);
+    stroke_round_rect(a, x, y, w, 42, 12, stroke);
+    draw_centered(a, x, y + 27, w, label, selected ? a->colors.text : a->colors.muted);
+}
+
+static void draw_login_mode_tab(app_t *a, int x, int y, int w, int mode) {
+    bool selected = (int)a->login_mode == mode;
+    bool focused = a->input_focus == INPUT_MODE;
+    const char *label = mode == LOGIN_XTREAM ? "Xtream" : "M3U";
+    if (a->renderer.active)
+        draw_login_mode_tab_renderer(a, x, y, w, label, selected, focused);
+    else
+        draw_login_mode_tab_legacy(a, x, y, w, label, selected, focused);
+}
+
 static void draw_login_mode_tabs(app_t *a, int form_x, int form_w, int y) {
     int mode_y = y + 88;
     int mode_w = (form_w - 10) / 2;
-    for (int i = 0; i < 2; ++i) {
-        bool selected = (int)a->login_mode == i;
-        bool focused = a->input_focus == INPUT_MODE;
-        int bx = form_x + i * (mode_w + 10);
-        if (a->renderer.active) {
-            vip_ui_render_round_rect(&a->renderer, bx, mode_y, mode_w, 42, 12,
-                                     selected ? 0x572517u : 0x171C28u, 1.0);
-            vip_ui_render_round_stroke(&a->renderer, bx, mode_y, mode_w, 42, 12,
-                                       focused && selected ? 0xFFFFFFu
-                                                           : (selected ? 0xFF5F2Eu : 0x343A48u),
-                                       1.0, focused && selected ? 2.5 : (selected ? 1.5 : 1.0));
-            vip_ui_render_text(&a->renderer, bx, mode_y + 12, mode_w,
-                               i == LOGIN_XTREAM ? "Xtream" : "M3U",
-                               selected ? "Sans Bold 10" : "Sans 10",
-                               selected ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
-        } else {
-            fill_round_rect(a, bx, mode_y, mode_w, 42, 12,
-                            selected ? a->colors.accent2 : a->colors.panel2);
-            stroke_round_rect(a, bx, mode_y, mode_w, 42, 12,
-                              focused && selected ? a->colors.text
-                                                  : (selected ? a->colors.accent : a->colors.border));
-            draw_centered(a, bx, mode_y + 27, mode_w, i == LOGIN_XTREAM ? "Xtream" : "M3U",
-                          selected ? a->colors.text : a->colors.muted);
-        }
-    }
+    draw_login_mode_tab(a, form_x, mode_y, mode_w, LOGIN_XTREAM);
+    draw_login_mode_tab(a, form_x + mode_w + 10, mode_y, mode_w, LOGIN_M3U);
 }
 
 static void draw_xtream_login_fields(app_t *a, int form_x, int form_w, int y) {
@@ -4386,33 +4400,54 @@ static void draw_m3u_help(app_t *a, int form_x, int form_w, int y) {
     draw_text(a, form_x, y + 292, "A playlist é processada diretamente pelo Blazzing.", a->colors.muted);
 }
 
+static const char *phone_pairing_label(const app_t *a, bool waiting) {
+    if (waiting)
+        return "Aguardando celular...";
+    if (a->pairing_retry_ready)
+        return "Tentar novamente (QR)";
+    return "Adicionar pelo celular";
+}
+
+static void draw_phone_pairing_renderer(app_t *a, int form_x, int phone_y, int form_w,
+                                        const char *label, bool waiting, bool focused) {
+    unsigned long fill = waiting ? 0x572517u : 0x171C28u;
+    unsigned long stroke = waiting ? 0xFF5F2Eu : 0x343A48u;
+    if (focused)
+        stroke = 0xFFFFFFu;
+    vip_ui_render_round_rect(&a->renderer, form_x, phone_y, form_w, 46, 12, fill, 1.0);
+    vip_ui_render_round_stroke(&a->renderer, form_x, phone_y, form_w, 46, 12,
+                               stroke, 1.0, focused ? 2.5 : 1.0);
+    vip_ui_render_text(&a->renderer, form_x, phone_y + 13, form_w, label,
+                       waiting ? "Sans Bold 10" : "Sans 10",
+                       waiting ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
+    if (waiting)
+        vip_ui_render_text(&a->renderer, form_x, phone_y + 57, form_w,
+                           "Pareamento HTTPS pela Internet", "Sans 8", 0xAAB2C4u, 1.0, false);
+}
+
+static void draw_phone_pairing_legacy(app_t *a, int form_x, int phone_y, int form_w,
+                                      const char *label, bool waiting, bool focused) {
+    unsigned long fill = waiting ? a->colors.accent2 : a->colors.panel2;
+    unsigned long stroke = waiting ? a->colors.accent : a->colors.border;
+    if (focused)
+        stroke = a->colors.text;
+    fill_round_rect(a, form_x, phone_y, form_w, 46, 12, fill);
+    stroke_round_rect(a, form_x, phone_y, form_w, 46, 12, stroke);
+    draw_centered(a, form_x, phone_y + 29, form_w, label,
+                  waiting ? a->colors.text : a->colors.muted);
+    if (waiting)
+        draw_text(a, form_x, phone_y + 69, "Pareamento HTTPS pela Internet", a->colors.muted);
+}
+
 static void draw_phone_pairing_button(app_t *a, int form_x, int form_w, int y) {
     int phone_y = y + 314;
     bool waiting = a->pairing_relay != NULL;
     bool focused = a->input_focus == INPUT_PHONE;
-    const char *label = waiting ? "Aguardando celular..."
-                                : (a->pairing_retry_ready ? "Tentar novamente (QR)" : "Adicionar pelo celular");
-    if (a->renderer.active) {
-        vip_ui_render_round_rect(&a->renderer, form_x, phone_y, form_w, 46, 12,
-                                 waiting ? 0x572517u : 0x171C28u, 1.0);
-        vip_ui_render_round_stroke(&a->renderer, form_x, phone_y, form_w, 46, 12,
-                                   focused ? 0xFFFFFFu : (waiting ? 0xFF5F2Eu : 0x343A48u),
-                                   1.0, focused ? 2.5 : 1.0);
-        vip_ui_render_text(&a->renderer, form_x, phone_y + 13, form_w, label,
-                           waiting ? "Sans Bold 10" : "Sans 10",
-                           waiting ? 0xF6F7FBu : 0xAAB2C4u, 1.0, true);
-        if (waiting)
-            vip_ui_render_text(&a->renderer, form_x, phone_y + 57, form_w,
-                               "Pareamento HTTPS pela Internet", "Sans 8", 0xAAB2C4u, 1.0, false);
-        return;
-    }
-    fill_round_rect(a, form_x, phone_y, form_w, 46, 12,
-                    waiting ? a->colors.accent2 : a->colors.panel2);
-    stroke_round_rect(a, form_x, phone_y, form_w, 46, 12,
-                      focused ? a->colors.text : (waiting ? a->colors.accent : a->colors.border));
-    draw_centered(a, form_x, phone_y + 29, form_w, label, waiting ? a->colors.text : a->colors.muted);
-    if (waiting)
-        draw_text(a, form_x, phone_y + 69, "Pareamento HTTPS pela Internet", a->colors.muted);
+    const char *label = phone_pairing_label(a, waiting);
+    if (a->renderer.active)
+        draw_phone_pairing_renderer(a, form_x, phone_y, form_w, label, waiting, focused);
+    else
+        draw_phone_pairing_legacy(a, form_x, phone_y, form_w, label, waiting, focused);
 }
 
 static void draw_m3u_login_fields(app_t *a, int form_x, int form_w, int y) {
@@ -4422,29 +4457,50 @@ static void draw_m3u_login_fields(app_t *a, int form_x, int form_w, int y) {
     draw_phone_pairing_button(a, form_x, form_w, y);
 }
 
-static void draw_login_connect_button(app_t *a, int form_x, int form_w, int y) {
-    bool ready = a->server[0] && !atomic_load(&a->login_running) &&
-                 (a->login_mode == LOGIN_M3U || (a->username[0] && a->password[0]));
-    int connect_y = y + 430;
-    bool focused = a->input_focus == INPUT_CONNECT;
-    const char *label = atomic_load(&a->login_running) ? "Conectando..." : "Conectar";
-    if (a->renderer.active) {
-        vip_ui_render_round_rect(&a->renderer, form_x + 3, connect_y + 5, form_w, 50, 15, 0x000000u, 0.48);
-        vip_ui_render_round_rect(&a->renderer, form_x, connect_y, form_w, 50, 15,
-                                 ready ? 0xFF5F2Eu : 0x171C28u, 1.0);
-        vip_ui_render_round_stroke(&a->renderer, form_x, connect_y, form_w, 50, 15,
-                                   focused ? 0xFFFFFFu : (ready ? 0xFF8A45u : 0x343A48u),
-                                   1.0, focused ? 2.5 : 1.0);
-        vip_ui_render_text(&a->renderer, form_x, connect_y + 15, form_w, label, "Sans Bold 11",
-                           ready ? 0x090B11u : 0xAAB2C4u, 1.0, true);
-        return;
-    }
+static bool login_connect_ready(const app_t *a) {
+    if (!a->server[0] || atomic_load(&a->login_running))
+        return false;
+    if (a->login_mode == LOGIN_M3U)
+        return true;
+    return a->username[0] && a->password[0];
+}
+
+static void draw_login_connect_renderer(app_t *a, int form_x, int connect_y, int form_w,
+                                        const char *label, bool ready, bool focused) {
+    unsigned long fill = ready ? 0xFF5F2Eu : 0x171C28u;
+    unsigned long stroke = ready ? 0xFF8A45u : 0x343A48u;
+    if (focused)
+        stroke = 0xFFFFFFu;
+    vip_ui_render_round_rect(&a->renderer, form_x + 3, connect_y + 5, form_w, 50, 15, 0x000000u, 0.48);
+    vip_ui_render_round_rect(&a->renderer, form_x, connect_y, form_w, 50, 15, fill, 1.0);
+    vip_ui_render_round_stroke(&a->renderer, form_x, connect_y, form_w, 50, 15,
+                               stroke, 1.0, focused ? 2.5 : 1.0);
+    vip_ui_render_text(&a->renderer, form_x, connect_y + 15, form_w, label, "Sans Bold 11",
+                       ready ? 0x090B11u : 0xAAB2C4u, 1.0, true);
+}
+
+static void draw_login_connect_legacy(app_t *a, int form_x, int connect_y, int form_w,
+                                      const char *label, bool ready, bool focused) {
+    unsigned long fill = ready ? a->colors.accent : a->colors.panel2;
+    unsigned long stroke = ready ? a->colors.accent : a->colors.border;
+    if (focused)
+        stroke = a->colors.text;
     fill_round_rect(a, form_x + 2, connect_y + 4, form_w, 50, 14, a->colors.black);
-    fill_round_rect(a, form_x, connect_y, form_w, 50, 14, ready ? a->colors.accent : a->colors.panel2);
-    stroke_round_rect(a, form_x, connect_y, form_w, 50, 14,
-                      focused ? a->colors.text : (ready ? a->colors.accent : a->colors.border));
+    fill_round_rect(a, form_x, connect_y, form_w, 50, 14, fill);
+    stroke_round_rect(a, form_x, connect_y, form_w, 50, 14, stroke);
     draw_centered_font(a, a->font_heading, form_x, connect_y + 32, form_w, label,
                        ready ? a->colors.bg : a->colors.muted);
+}
+
+static void draw_login_connect_button(app_t *a, int form_x, int form_w, int y) {
+    bool ready = login_connect_ready(a);
+    bool focused = a->input_focus == INPUT_CONNECT;
+    const char *label = atomic_load(&a->login_running) ? "Conectando..." : "Conectar";
+    int connect_y = y + 430;
+    if (a->renderer.active)
+        draw_login_connect_renderer(a, form_x, connect_y, form_w, label, ready, focused);
+    else
+        draw_login_connect_legacy(a, form_x, connect_y, form_w, label, ready, focused);
 }
 
 static void draw_login_side_header(app_t *a, int list_x, int list_w, int y) {
