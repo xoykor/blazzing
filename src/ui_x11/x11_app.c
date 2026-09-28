@@ -34,6 +34,7 @@
 #include <jpeglib.h>
 #include <pthread.h>
 #include <setjmp.h>
+#include <spawn.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -3192,6 +3193,40 @@ static bool write_all_fd(int fd, const char *data, size_t len) {
     return true;
 }
 
+extern char **environ;
+
+/* Spawn secret-tool directly with a fixed executable path and explicit file
+ * actions.  No shell is involved and no executable lookup uses PATH. */
+static bool spawn_secret_tool(const char *secret_tool, char *const argv[],
+                              int stdin_fd, int stdout_fd, pid_t *pid_out) {
+    if (!secret_tool || !secret_tool[0] || !argv || !pid_out)
+        return false;
+
+    posix_spawn_file_actions_t actions;
+    if (posix_spawn_file_actions_init(&actions) != 0)
+        return false;
+
+    int rc = 0;
+    if (stdin_fd >= 0)
+        rc = posix_spawn_file_actions_adddup2(&actions, stdin_fd, STDIN_FILENO);
+    if (rc == 0 && stdout_fd >= 0)
+        rc = posix_spawn_file_actions_adddup2(&actions, stdout_fd, STDOUT_FILENO);
+    if (rc == 0 && stdout_fd >= 0)
+        rc = posix_spawn_file_actions_addopen(
+            &actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+
+    pid_t pid = -1;
+    if (rc == 0)
+        rc = posix_spawn(&pid, secret_tool, &actions, NULL, argv, environ);
+
+    posix_spawn_file_actions_destroy(&actions);
+    if (rc != 0)
+        return false;
+
+    *pid_out = pid;
+    return true;
+}
+
 /* Password persistence is delegated to Secret Service via secret-tool.
  * SQLite stores only non-secret profile fields. */
 static bool keyring_store_password(const char *profile_id, const char *password) {
@@ -3199,29 +3234,28 @@ static bool keyring_store_password(const char *profile_id, const char *password)
     if (!keyring_profile_id_is_safe(profile_id) || !password || !password[0] ||
         !find_secret_tool(secret_tool, sizeof(secret_tool)))
         return false;
+
     int inpipe[2];
     if (pipe(inpipe) != 0)
         return false;
-    pid_t pid = fork();
-    if (pid == 0) {
-        dup2(inpipe[0], STDIN_FILENO);
-        close(inpipe[0]);
-        close(inpipe[1]);
-        char *const argv[] = {
-            "secret-tool", "store", "--label=Blazzing", "application", "visual-iptv",
-            "profile", (char *)profile_id, NULL
-        };
-        execv(secret_tool, argv);
-        _exit(127);
-    }
+
+    char *const argv[] = {
+        "secret-tool", "store", "--label=Blazzing", "application", "visual-iptv",
+        "profile", (char *)profile_id, NULL
+    };
+    pid_t pid = -1;
+    bool spawned = spawn_secret_tool(secret_tool, argv, inpipe[0], -1, &pid);
     close(inpipe[0]);
-    if (pid < 0) {
+    if (!spawned) {
         close(inpipe[1]);
         return false;
     }
+
     size_t len = strlen(password);
-    bool wrote = write_all_fd(inpipe[1], password, len) && write_all_fd(inpipe[1], "\n", 1u);
+    bool wrote = write_all_fd(inpipe[1], password, len) &&
+                 write_all_fd(inpipe[1], "\n", 1u);
     close(inpipe[1]);
+
     int status = 0;
     while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
     }
@@ -3233,37 +3267,31 @@ static bool keyring_lookup_password(const char *profile_id, char *out, size_t ca
     if (!out || cap == 0u)
         return false;
     out[0] = '\0';
+
     char secret_tool[256];
     if (!keyring_profile_id_is_safe(profile_id) ||
         !find_secret_tool(secret_tool, sizeof(secret_tool)))
         return false;
+
     int outpipe[2];
     if (pipe(outpipe) != 0)
         return false;
-    pid_t pid = fork();
-    if (pid == 0) {
-        dup2(outpipe[1], STDOUT_FILENO);
-        int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) {
-            dup2(devnull, STDERR_FILENO);
-            close(devnull);
-        }
-        close(outpipe[0]);
-        close(outpipe[1]);
-        char *const argv[] = {
-            "secret-tool", "lookup", "application", "visual-iptv",
-            "profile", (char *)profile_id, NULL
-        };
-        execv(secret_tool, argv);
-        _exit(127);
-    }
+
+    char *const argv[] = {
+        "secret-tool", "lookup", "application", "visual-iptv",
+        "profile", (char *)profile_id, NULL
+    };
+    pid_t pid = -1;
+    bool spawned = spawn_secret_tool(secret_tool, argv, -1, outpipe[1], &pid);
     close(outpipe[1]);
-    if (pid < 0) {
+    if (!spawned) {
         close(outpipe[0]);
         return false;
     }
+
     ssize_t n = read(outpipe[0], out, cap - 1u);
     close(outpipe[0]);
+
     int status = 0;
     while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
     }
@@ -3271,6 +3299,7 @@ static bool keyring_lookup_password(const char *profile_id, char *out, size_t ca
         out[0] = '\0';
         return false;
     }
+
     out[n] = '\0';
     while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r'))
         out[--n] = '\0';
