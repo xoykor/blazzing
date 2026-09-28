@@ -607,80 +607,159 @@ static void draw_header(pluto_app_t *a) {
 }
 
 /* Draw grid. */
-static void draw_grid(pluto_app_t *a) {
-    if (a->renderer.active)
-        vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, a->height, 0x050811u, 0x090F1Au);
-    else
-        fill_rect(a, 0, 0, a->width, a->height, a->bg);
-    draw_header(a);
-    if (a->channels.len == 0u) {
-        if (a->renderer.active)
-            vip_ui_render_text(&a->renderer, 40, a->height / 2 - 10, a->width - 80,
-                               a->status[0] ? a->status : "Nenhum canal recebido do Pluto TV", "Sans 10",
-                               0x91A0B7u, 1.0, true);
-        else
-            draw_center(a, 0, a->height / 2, a->width,
-                        a->status[0] ? a->status : "Nenhum canal recebido do Pluto TV", a->muted);
+static void draw_empty_pluto_grid(pluto_app_t *a) {
+    const char *message = a->status[0]
+                              ? a->status
+                              : "Nenhum canal recebido do Pluto TV";
+    if (a->renderer.active) {
+        vip_ui_render_text(&a->renderer, 40, a->height / 2 - 10,
+                           a->width - 80, message,
+                           "Sans 10", 0x91A0B7u, 1.0, true);
+        return;
+    }
+    draw_center(a, 0, a->height / 2, a->width, message, a->muted);
+}
+
+static void draw_pluto_card_frame(pluto_app_t *a,
+                                  int x,
+                                  int y,
+                                  bool selected) {
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, x + 4, y + 6,
+                                 PLUTO_CARD_W, PLUTO_CARD_H, 16,
+                                 0x000000u, 0.46);
+        vip_ui_render_round_rect(&a->renderer, x, y,
+                                 PLUTO_CARD_W, PLUTO_CARD_H, 16,
+                                 selected ? 0x173B67u : 0x151E2Du, 1.0);
+        vip_ui_render_round_stroke(&a->renderer, x, y,
+                                   PLUTO_CARD_W, PLUTO_CARD_H, 16,
+                                   selected ? 0x62A9FFu : 0x2B3950u,
+                                   1.0, selected ? 1.8 : 1.0);
         return;
     }
 
+    if (!selected)
+        return;
+    stroke_rect(a, x - 3, y - 3,
+                PLUTO_CARD_W + 6, PLUTO_CARD_H + 6, a->accent);
+    stroke_rect(a, x - 2, y - 2,
+                PLUTO_CARD_W + 4, PLUTO_CARD_H + 4, a->accent);
+}
+
+static void draw_pluto_card_image(pluto_app_t *a,
+                                  vip_channel_t *channel,
+                                  size_t index,
+                                  int x,
+                                  int y,
+                                  bool selected) {
+    fill_rect(a, x, y, PLUTO_CARD_W, PLUTO_ART_H, a->black);
+
+    vip_error_t error = {0};
+    char *path = vip_thumbnail_cache_path(
+        a->cache_dir, channel->provider_id, channel->id, &error
+    );
+    bool image_ok = path &&
+                    draw_cached_image(a, path, x, y,
+                                      PLUTO_CARD_W, PLUTO_ART_H);
+    free(path);
+
+    if (!image_ok) {
+        if (a->renderer.active)
+            vip_ui_render_text(&a->renderer,
+                               x + 8, y + PLUTO_ART_H / 2 - 7,
+                               PLUTO_CARD_W - 16,
+                               "carregando imagem...",
+                               "Sans 9", 0x91A0B7u, 1.0, true);
+        else
+            draw_center(a, x, y + PLUTO_ART_H / 2 + 5,
+                        PLUTO_CARD_W, "carregando imagem...", a->muted);
+        enqueue_thumbnail(a, channel, 1000000LL - (int64_t)index);
+    }
+
+    stroke_rect(a, x, y, PLUTO_CARD_W, PLUTO_ART_H,
+                selected ? a->accent : a->border);
+}
+
+static void draw_pluto_card_title(pluto_app_t *a,
+                                  vip_channel_t *channel,
+                                  int x,
+                                  int y,
+                                  bool selected) {
+    char title[192];
+    bounded_text(title, sizeof(title), channel->name, 72u);
+    if (a->renderer.active) {
+        vip_ui_render_text(&a->renderer,
+                           x + 10, y + PLUTO_ART_H + 12,
+                           PLUTO_CARD_W - 20, title,
+                           selected ? "Sans SemiBold 10" : "Sans 10",
+                           0xF6F8FCu, 1.0, false);
+        return;
+    }
+    draw_text(a, x, y + PLUTO_ART_H + 24, title, a->text);
+}
+
+static void draw_pluto_card(pluto_app_t *a,
+                            size_t index,
+                            int x,
+                            int y) {
+    vip_channel_t *channel = &a->channels.items[index];
+    bool selected = index == a->selected;
+    draw_pluto_card_frame(a, x, y, selected);
+    draw_pluto_card_image(a, channel, index, x, y, selected);
+    draw_pluto_card_title(a, channel, x, y, selected);
+}
+
+static void draw_pluto_status_bar(pluto_app_t *a) {
+    if (!a->status[0])
+        return;
+
+    if (a->renderer.active) {
+        vip_ui_render_round_rect(&a->renderer, 0, a->height - 34,
+                                 a->width, 34, 0, 0x0E1420u, 0.96);
+        vip_ui_render_text(&a->renderer, 30, a->height - 25,
+                           a->width - 60, a->status,
+                           "Sans 8", 0x91A0B7u, 1.0, false);
+        return;
+    }
+
+    fill_rect(a, 0, a->height - 32, a->width, 32, a->panel);
+    draw_text(a, 30, a->height - 11, a->status, a->muted);
+}
+
+static void draw_pluto_cards(pluto_app_t *a) {
     int cols = grid_columns(a);
     int start_x = 30;
     int start_y = PLUTO_HEADER_H + 18;
     int content_bottom = a->height - (a->status[0] ? 42 : 8);
+
     for (size_t i = 0u; i < a->channels.len; ++i) {
         int row = (int)(i / (size_t)cols);
         int col = (int)(i % (size_t)cols);
         int x = start_x + col * (PLUTO_CARD_W + PLUTO_GAP);
         int y = start_y + row * (PLUTO_CARD_H + PLUTO_GAP) - a->scroll;
-        if (y + PLUTO_CARD_H > content_bottom || y + PLUTO_CARD_H < PLUTO_HEADER_H)
+        if (y + PLUTO_CARD_H > content_bottom ||
+            y + PLUTO_CARD_H < PLUTO_HEADER_H)
             continue;
-        vip_channel_t *channel = &a->channels.items[i];
-        bool selected = i == a->selected;
-        if (a->renderer.active) {
-            vip_ui_render_round_rect(&a->renderer, x + 4, y + 6, PLUTO_CARD_W, PLUTO_CARD_H, 16, 0x000000u,
-                                     0.46);
-            vip_ui_render_round_rect(&a->renderer, x, y, PLUTO_CARD_W, PLUTO_CARD_H, 16,
-                                     selected ? 0x173B67u : 0x151E2Du, 1.0);
-            vip_ui_render_round_stroke(&a->renderer, x, y, PLUTO_CARD_W, PLUTO_CARD_H, 16,
-                                       selected ? 0x62A9FFu : 0x2B3950u, 1.0, selected ? 1.8 : 1.0);
-        } else if (selected) {
-            stroke_rect(a, x - 3, y - 3, PLUTO_CARD_W + 6, PLUTO_CARD_H + 6, a->accent);
-            stroke_rect(a, x - 2, y - 2, PLUTO_CARD_W + 4, PLUTO_CARD_H + 4, a->accent);
-        }
-        fill_rect(a, x, y, PLUTO_CARD_W, PLUTO_ART_H, a->black);
-        vip_error_t error = {0};
-        char *path = vip_thumbnail_cache_path(a->cache_dir, channel->provider_id, channel->id, &error);
-        bool image_ok = path && draw_cached_image(a, path, x, y, PLUTO_CARD_W, PLUTO_ART_H);
-        free(path);
-        if (!image_ok) {
-            if (a->renderer.active)
-                vip_ui_render_text(&a->renderer, x + 8, y + PLUTO_ART_H / 2 - 7, PLUTO_CARD_W - 16,
-                                   "carregando imagem...", "Sans 9", 0x91A0B7u, 1.0, true);
-            else
-                draw_center(a, x, y + PLUTO_ART_H / 2 + 5, PLUTO_CARD_W, "carregando imagem...", a->muted);
-            enqueue_thumbnail(a, channel, 1000000LL - (int64_t)i);
-        }
-        stroke_rect(a, x, y, PLUTO_CARD_W, PLUTO_ART_H, selected ? a->accent : a->border);
-        char title[192];
-        bounded_text(title, sizeof(title), channel->name, 72u);
-        if (a->renderer.active)
-            vip_ui_render_text(&a->renderer, x + 10, y + PLUTO_ART_H + 12, PLUTO_CARD_W - 20, title,
-                               selected ? "Sans SemiBold 10" : "Sans 10", 0xF6F8FCu, 1.0, false);
-        else
-            draw_text(a, x, y + PLUTO_ART_H + 24, title, a->text);
+        draw_pluto_card(a, i, x, y);
+    }
+}
+
+static void draw_grid(pluto_app_t *a) {
+    if (a->renderer.active)
+        vip_ui_render_linear_gradient(&a->renderer, 0, 0,
+                                      a->width, a->height,
+                                      0x050811u, 0x090F1Au);
+    else
+        fill_rect(a, 0, 0, a->width, a->height, a->bg);
+
+    draw_header(a);
+    if (a->channels.len == 0u) {
+        draw_empty_pluto_grid(a);
+        return;
     }
 
-    if (a->status[0]) {
-        if (a->renderer.active) {
-            vip_ui_render_round_rect(&a->renderer, 0, a->height - 34, a->width, 34, 0, 0x0E1420u, 0.96);
-            vip_ui_render_text(&a->renderer, 30, a->height - 25, a->width - 60, a->status, "Sans 8",
-                               0x91A0B7u, 1.0, false);
-        } else {
-            fill_rect(a, 0, a->height - 32, a->width, 32, a->panel);
-            draw_text(a, 30, a->height - 11, a->status, a->muted);
-        }
-    }
+    draw_pluto_cards(a);
+    draw_pluto_status_bar(a);
 }
 
 /* Draw player. */
@@ -978,99 +1057,143 @@ static void cleanup(pluto_app_t *a) {
 }
 
 /* Run the requested state in the pluto app. */
+static void handle_pluto_configure(pluto_app_t *a, const XConfigureEvent *event) {
+    if (event->window != a->win)
+        return;
+
+    a->width = event->width;
+    a->height = event->height;
+    if (a->playing)
+        layout_video(a);
+    else
+        ensure_selected_visible(a);
+    redraw(a);
+}
+
+static void handle_pluto_button(pluto_app_t *a, const XButtonEvent *event) {
+    if (event->button == Button1) {
+        if (a->playing)
+            handle_player_click(a, event->x, event->y);
+        else
+            handle_grid_click(a, event->x, event->y);
+        redraw(a);
+        return;
+    }
+
+    if (a->playing ||
+        (event->button != Button4 && event->button != Button5)) {
+        redraw(a);
+        return;
+    }
+
+    int direction = event->button == Button4 ? -1 : 1;
+    a->scroll += direction * 180;
+    int max_scroll = grid_max_scroll(a);
+    if (a->scroll < 0)
+        a->scroll = 0;
+    if (a->scroll > max_scroll)
+        a->scroll = max_scroll;
+    redraw(a);
+}
+
+static void handle_pluto_event(pluto_app_t *a, XEvent *event) {
+    switch (event->type) {
+    case Expose:
+        redraw(a);
+        break;
+    case ConfigureNotify:
+        handle_pluto_configure(a, &event->xconfigure);
+        break;
+    case ClientMessage:
+        if ((Atom)event->xclient.data.l[0] == a->wm_delete)
+            a->quit = true;
+        break;
+    case KeyPress:
+        handle_key(a, &event->xkey);
+        redraw(a);
+        break;
+    case ButtonPress:
+        handle_pluto_button(a, &event->xbutton);
+        break;
+    default:
+        break;
+    }
+}
+
+static void process_pluto_events(pluto_app_t *a) {
+    while (XPending(a->dpy)) {
+        XEvent event;
+        XNextEvent(a->dpy, &event);
+        handle_pluto_event(a, &event);
+    }
+}
+
+static void refresh_pluto_player_visibility(pluto_app_t *a) {
+    if (!a->playing || !a->player)
+        return;
+
+    vip_mpv_player_snapshot_t snapshot = {0};
+    vip_mpv_player_snapshot(a->player, &snapshot);
+    set_video_visible(a, snapshot.state != VIP_PLAYER_ERROR);
+}
+
+static void run_pluto_event_loop(pluto_app_t *a) {
+    while (!a->quit) {
+        process_pluto_events(a);
+        if (atomic_exchange(&a->thumbs_dirty, false))
+            redraw(a);
+        refresh_pluto_player_visibility(a);
+
+        struct timespec pause = {
+            .tv_sec = 0,
+            .tv_nsec = 16000000L
+        };
+        (void)nanosleep(&pause, NULL);
+    }
+}
+
+static void report_pluto_catalog_result(pluto_app_t *a,
+                                        vip_status_t status,
+                                        const vip_error_t *error) {
+    if (status != VIP_OK) {
+        snprintf(a->status, sizeof(a->status),
+                 "Falha ao carregar Pluto TV: %.230s", error->message);
+        fprintf(stderr, "[pluto] %s\n", a->status);
+        return;
+    }
+
+    snprintf(a->status, sizeof(a->status),
+             "%zu canais Pluto TV", a->channels.len);
+    fprintf(stderr, "[pluto] %zu canais carregados\n", a->channels.len);
+}
+
 int vip_pluto_app_run(void) {
     curl_global_init(CURL_GLOBAL_DEFAULT);
-    pluto_app_t a;
-    memset(&a, 0, sizeof(a));
-    vip_category_list_init(&a.categories);
-    vip_channel_list_init(&a.channels);
-    atomic_init(&a.thumbs_dirty, false);
-    init_cache_path(&a);
+
+    pluto_app_t app;
+    memset(&app, 0, sizeof(app));
+    vip_category_list_init(&app.categories);
+    vip_channel_list_init(&app.channels);
+    atomic_init(&app.thumbs_dirty, false);
+    init_cache_path(&app);
 
     vip_error_t error = {0};
-    if (!init_x11(&a, &error)) {
+    if (!init_x11(&app, &error)) {
         fprintf(stderr, "[pluto] %s\n", error.message);
-        cleanup(&a);
+        cleanup(&app);
         curl_global_cleanup();
         return 1;
     }
-    draw_loading(&a, "Carregando catalogo do Pluto TV...");
-    vip_status_t st = load_catalog(&a, &error);
-    if (st != VIP_OK) {
-        snprintf(a.status, sizeof(a.status), "Falha ao carregar Pluto TV: %.230s", error.message);
-        fprintf(stderr, "[pluto] %s\n", a.status);
-    } else {
-        snprintf(a.status, sizeof(a.status), "%zu canais Pluto TV", a.channels.len);
-        fprintf(stderr, "[pluto] %zu canais carregados\n", a.channels.len);
-    }
-    init_media_runtime(&a);
-    redraw(&a);
 
-    while (!a.quit) {
-        while (XPending(a.dpy)) {
-            XEvent event;
-            XNextEvent(a.dpy, &event);
-            switch (event.type) {
-            case Expose:
-                redraw(&a);
-                break;
-            case ConfigureNotify:
-                if (event.xconfigure.window == a.win) {
-                    a.width = event.xconfigure.width;
-                    a.height = event.xconfigure.height;
-                    if (a.playing)
-                        layout_video(&a);
-                    else
-                        ensure_selected_visible(&a);
-                    redraw(&a);
-                }
-                break;
-            case ClientMessage:
-                if ((Atom)event.xclient.data.l[0] == a.wm_delete)
-                    a.quit = true;
-                break;
-            case KeyPress:
-                handle_key(&a, &event.xkey);
-                redraw(&a);
-                break;
-            case ButtonPress:
-                if (event.xbutton.button == Button1) {
-                    if (a.playing)
-                        handle_player_click(&a, event.xbutton.x, event.xbutton.y);
-                    else
-                        handle_grid_click(&a, event.xbutton.x, event.xbutton.y);
-                } else if (!a.playing &&
-                           (event.xbutton.button == Button4 || event.xbutton.button == Button5)) {
-                    int direction = event.xbutton.button == Button4 ? -1 : 1;
-                    a.scroll += direction * 180;
-                    int max_scroll = grid_max_scroll(&a);
-                    if (a.scroll < 0)
-                        a.scroll = 0;
-                    if (a.scroll > max_scroll)
-                        a.scroll = max_scroll;
-                }
-                redraw(&a);
-                break;
-            default:
-                break;
-            }
-        }
+    draw_loading(&app, "Carregando catalogo do Pluto TV...");
+    vip_status_t status = load_catalog(&app, &error);
+    report_pluto_catalog_result(&app, status, &error);
+    init_media_runtime(&app);
+    redraw(&app);
 
-        if (atomic_exchange(&a.thumbs_dirty, false))
-            redraw(&a);
-        if (a.playing && a.player) {
-            vip_mpv_player_snapshot_t snapshot = {0};
-            vip_mpv_player_snapshot(a.player, &snapshot);
-            if (snapshot.state == VIP_PLAYER_ERROR)
-                set_video_visible(&a, false);
-            else
-                set_video_visible(&a, true);
-        }
-        struct timespec pause = {.tv_sec = 0, .tv_nsec = 16000000L};
-        (void)nanosleep(&pause, NULL);
-    }
+    run_pluto_event_loop(&app);
 
-    cleanup(&a);
+    cleanup(&app);
     curl_global_cleanup();
     return 0;
 }
