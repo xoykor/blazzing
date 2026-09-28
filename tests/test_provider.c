@@ -48,6 +48,35 @@ int main(void) {
     TEST_CHECK(vod.genre && strcmp(vod.genre, "Drama") == 0);
     vip_media_metadata_clear(&vod);
 
+    /* Preserve primary fields, but fill missing values from movie_data.
+     * movie_data intentionally prefers stream_icon over movie_image. */
+    vip_media_metadata_init(&vod);
+    const char *vod_fallback =
+        "{\"info\":{\"plot\":\"Primário\",\"movie_image\":\"\"},"
+        "\"movie_data\":{\"plot\":\"Fallback\",\"stream_icon\":\"https://img/fallback-icon.jpg\","
+        "\"movie_image\":\"https://img/fallback-movie.jpg\",\"runtime\":\"97\"}}";
+    TEST_STATUS(vip_xtream_parse_vod_info_json(vod_fallback, &vod, &error), VIP_OK, &error);
+    TEST_CHECK(vod.plot && strcmp(vod.plot, "Primário") == 0);
+    TEST_CHECK(vod.cover_url && strstr(vod.cover_url, "fallback-icon.jpg"));
+    TEST_CHECK(vod.duration && strcmp(vod.duration, "97") == 0);
+    vip_media_metadata_clear(&vod);
+
+    /* When info itself is unusable, movie_data becomes the primary source and
+     * keeps the primary cover precedence: movie_image before stream_icon. */
+    vip_media_metadata_init(&vod);
+    const char *vod_primary_from_fallback =
+        "{\"info\":[],\"movie_data\":{\"plot\":\"Só fallback\","
+        "\"movie_image\":\"https://img/movie.jpg\",\"stream_icon\":\"https://img/icon.jpg\"}}";
+    TEST_STATUS(vip_xtream_parse_vod_info_json(vod_primary_from_fallback, &vod, &error), VIP_OK, &error);
+    TEST_CHECK(vod.plot && strcmp(vod.plot, "Só fallback") == 0);
+    TEST_CHECK(vod.cover_url && strstr(vod.cover_url, "movie.jpg"));
+    vip_media_metadata_clear(&vod);
+
+    vip_media_metadata_init(&vod);
+    TEST_STATUS(vip_xtream_parse_vod_info_json("{}", &vod, &error), VIP_ERR_MALFORMED, &error);
+    vip_media_metadata_clear(&vod);
+    TEST_STATUS(vip_xtream_parse_vod_info_json("[]", &vod, &error), VIP_ERR_MALFORMED, &error);
+
     vip_media_metadata_t series;
     vip_media_metadata_init(&series);
     const char *series_info =
