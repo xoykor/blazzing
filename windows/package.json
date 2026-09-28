@@ -1,6 +1,6 @@
 {
   "name": "blazzing-windows",
-  "version": "1.4.8",
+  "version": "1.4.9",
   "private": true,
   "description": "Blazzing desktop port for Windows",
   "main": "main.js",
