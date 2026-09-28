@@ -1602,60 +1602,57 @@
         });
     }
 
-    function makeCard(item, index) {
-        var card = document.createElement("article");
-        var main = document.createElement("button");
+    function appendCardPosterImage(poster, item) {
+        var imageUrl = safeImageUrl(item.logo);
+        var image;
+
+        if (!imageUrl && !item.cardKey &&
+                item.kind !== "vod" && item.kind !== "series") {
+            return;
+        }
+
+        image = document.createElement("img");
+        image.alt = "";
+        image.className = "poster-image";
+        image.setAttribute("draggable", "false");
+        image.setAttribute("referrerpolicy", "no-referrer");
+        poster.appendChild(image);
+
+        if (imageUrl) {
+            observeImage(image, imageUrl);
+            return;
+        }
+
+        resolveCardLogo(item).then(function (resolvedUrl) {
+            resolvedUrl = safeImageUrl(resolvedUrl);
+            if (resolvedUrl) { observeImage(image, resolvedUrl); }
+        });
+    }
+
+    function makeCardPoster(item) {
         var poster = document.createElement("div");
+        poster.className = "poster";
+        poster.appendChild(posterFallback(item.name));
+        appendCardPosterImage(poster, item);
+        return poster;
+    }
+
+    function makeCardCopy(item) {
         var copy = document.createElement("div");
         var title = document.createElement("strong");
         var meta = document.createElement("small");
-        var favorite = document.createElement("span");
-        var imageUrl = safeImageUrl(item.logo);
-        var fallback = posterFallback(item.name);
-
-        card.className = "media-card kind-" + (item.kind || "item");
-        card.setAttribute("data-item-uid", item.uid);
-
-        main.className = "card-main";
-        main.setAttribute("data-focusable", "true");
-        main.setAttribute("data-item-uid", item.uid);
-        main.setAttribute("data-card-index", String(index));
-
-        poster.className = "poster";
-        poster.appendChild(fallback);
-
-        if (imageUrl || item.cardKey ||
-                item.kind === "vod" || item.kind === "series") {
-            var image = document.createElement("img");
-            image.alt = "";
-            image.className = "poster-image";
-            image.setAttribute("draggable", "false");
-            image.setAttribute("referrerpolicy", "no-referrer");
-            poster.appendChild(image);
-
-            if (imageUrl) {
-                observeImage(image, imageUrl);
-            } else {
-                resolveCardLogo(item).then(function (resolvedUrl) {
-                    resolvedUrl = safeImageUrl(resolvedUrl);
-                    if (resolvedUrl) {
-                        observeImage(image, resolvedUrl);
-                    }
-                });
-            }
-        }
 
         copy.className = "card-copy";
         title.textContent = item.name || "Item";
         meta.textContent = item.categoryName ||
             item.group ||
             sectionTitle(state.kind);
-
         copy.appendChild(title);
         copy.appendChild(meta);
-        main.appendChild(poster);
-        main.appendChild(copy);
+        return copy;
+    }
 
+    function bindCardMain(main, card, item) {
         main.addEventListener("click", function () {
             if (item.kind === "series") {
                 openSeries(item);
@@ -1663,7 +1660,6 @@
                 playItem(item);
             }
         });
-
         main.addEventListener("focus", function () {
             card.classList.add("focused");
             state.returnFocusUid = item.uid || "";
@@ -1672,7 +1668,10 @@
         main.addEventListener("blur", function () {
             card.classList.remove("focused");
         });
+    }
 
+    function makeFavoriteMarker(item) {
+        var favorite = document.createElement("span");
         favorite.className = "favorite" +
             (window.BlazzingStorage.isFavorite(item.uid) ? " on" : "");
         favorite.textContent = "★";
@@ -1684,9 +1683,24 @@
          * get trapped between the card and its favorite control. Favorites
          * are toggled with the yellow remote key instead.
          */
+        return favorite;
+    }
 
+    function makeCard(item, index) {
+        var card = document.createElement("article");
+        var main = document.createElement("button");
+
+        card.className = "media-card kind-" + (item.kind || "item");
+        card.setAttribute("data-item-uid", item.uid);
+        main.className = "card-main";
+        main.setAttribute("data-focusable", "true");
+        main.setAttribute("data-item-uid", item.uid);
+        main.setAttribute("data-card-index", String(index));
+        main.appendChild(makeCardPoster(item));
+        main.appendChild(makeCardCopy(item));
+        bindCardMain(main, card, item);
         card.appendChild(main);
-        card.appendChild(favorite);
+        card.appendChild(makeFavoriteMarker(item));
         return card;
     }
 
