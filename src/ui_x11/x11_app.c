@@ -5865,6 +5865,141 @@ static void handle_selection(app_t *a, XSelectionEvent *sel) {
     }
 }
 
+/* Apply ConfigureNotify only for the top-level application window. */
+static void handle_configure_event(app_t *a, const XConfigureEvent *event) {
+    /*
+     * video_win also selects StructureNotifyMask and emits ConfigureNotify
+     * events (including its initial 1px geometry). Treating those as main
+     * window resizes collapses the player container to 1px high.
+     */
+    if (event->window != a->win)
+        return;
+    a->width = event->width;
+    a->height = event->height;
+    if (a->screen == SCREEN_PLAYER)
+        layout_video_window(a);
+}
+
+/* Synchronize fullscreen state after the WM changes _NET_WM_STATE. */
+static void handle_property_event(app_t *a, const XPropertyEvent *event) {
+    if (event->window != a->win ||
+        event->atom != XInternAtom(a->dpy, "_NET_WM_STATE", False))
+        return;
+    bool actual = wm_reports_fullscreen(a);
+    if (actual || !a->fullscreen_fallback)
+        a->fullscreen = actual || a->fullscreen_fallback;
+    if (a->fullscreen)
+        layout_video_window(a);
+}
+
+/* Seek while dragging the player timeline. */
+static void handle_timeline_motion(app_t *a, const XMotionEvent *event) {
+    if (!a->timeline_dragging || a->player_item_live || !a->player ||
+        event->window != a->win)
+        return;
+
+    int tx, ty, tw, th;
+    timeline_geometry(a, &tx, &ty, &tw, &th);
+    vip_mpv_player_snapshot_t sn = {0};
+    vip_mpv_player_snapshot(a->player, &sn);
+    if (sn.duration_seconds <= 0 || event->x < tx || event->x > tx + tw)
+        return;
+
+    double pos = ((double)(event->x - tx) / (double)tw) * sn.duration_seconds;
+    vip_error_t error = {0};
+    (void)vip_mpv_player_seek(a->player, pos, &error);
+}
+
+/* Handle pointer motion for browse hover or player HUD/timeline. */
+static void handle_motion_event(app_t *a, const XMotionEvent *event) {
+    if (a->screen == SCREEN_BROWSE && event->window == a->win) {
+        update_browse_hover(a, event->x, event->y);
+        return;
+    }
+    if (a->screen != SCREEN_PLAYER)
+        return;
+
+    show_player_hud(a);
+    if (getenv("VIPTV_MPV_DEBUG"))
+        fprintf(stderr, "[mpv-debug] input MotionNotify window=%lu\n",
+                (unsigned long)event->window);
+    handle_timeline_motion(a, event);
+}
+
+/* Clear browse hover state after the pointer leaves the window. */
+static void handle_leave_event(app_t *a) {
+    if (a->screen != SCREEN_BROWSE)
+        return;
+    a->mouse_inside = false;
+    if (a->hovered_card_valid)
+        vip_ui_motion_set_target(&a->hover_motion, 0.0f, monotonic_ms());
+    a->hovered_control = HOVER_NONE;
+    vip_ui_motion_init(&a->control_motion, 0.0f, monotonic_ms());
+    a->ui_motion_active = true;
+}
+
+/* Finish mouse interactions after releasing the primary button. */
+static void handle_button_release_event(app_t *a, const XButtonEvent *event) {
+    if (event->button != Button1)
+        return;
+    a->mouse_down = false;
+    if (a->screen != SCREEN_PLAYER)
+        return;
+    a->timeline_dragging = false;
+    save_current_progress(a, true);
+    show_player_hud(a);
+}
+
+/* Return whether a player-surface click was consumed before normal UI hit-testing. */
+static bool handle_player_surface_press(app_t *a, const XButtonEvent *event) {
+    if (a->screen != SCREEN_PLAYER ||
+        (event->window != a->video_win && event->window != a->player_input_win))
+        return false;
+    show_player_hud(a);
+    focus_player_input(a);
+    if (getenv("VIPTV_MPV_DEBUG"))
+        fprintf(stderr, "[mpv-debug] input ButtonPress window=%lu button=%u\n",
+                (unsigned long)event->window, event->button);
+    return true;
+}
+
+/* Dispatch a mouse button press after player-surface handling. */
+static void handle_button_press_event(app_t *a, const XButtonEvent *event) {
+    a->mouse_down = true;
+    if (handle_player_surface_press(a, event))
+        return;
+    if (event->button == Button1)
+        handle_click(a, event->x, event->y);
+    else if (event->button == Button4)
+        handle_wheel(a, event->x, event->y, -1);
+    else if (event->button == Button5)
+        handle_wheel(a, event->x, event->y, 1);
+    else if (event->button == Button2)
+        request_paste(a, XA_PRIMARY);
+}
+
+/* Log and dispatch an X11 key press. */
+static void handle_key_press_event(app_t *a, XKeyEvent *event) {
+    if (a->screen == SCREEN_PLAYER && getenv("VIPTV_MPV_DEBUG"))
+        fprintf(stderr, "[mpv-debug] input KeyPress window=%lu keycode=%u\n",
+                (unsigned long)event->window, event->keycode);
+    handle_key(a, event);
+}
+
+/* Diagnose focus changes and recover player input focus when necessary. */
+static void handle_focus_event(app_t *a, const XFocusChangeEvent *event, int type) {
+    if (a->screen == SCREEN_PLAYER && getenv("VIPTV_MPV_DEBUG")) {
+        Window focus = None;
+        int revert = 0;
+        XGetInputFocus(a->dpy, &focus, &revert);
+        fprintf(stderr, "[mpv-debug] input %s event-window=%lu current-focus=%lu\n",
+                type == FocusIn ? "FocusIn" : "FocusOut",
+                (unsigned long)event->window, (unsigned long)focus);
+    }
+    if (type == FocusOut && a->screen == SCREEN_PLAYER)
+        recover_player_focus_if_needed(a, event);
+}
+
 /* Single-threaded X11 event dispatch.  Background jobs communicate by
  * state/flags and are observed from the main loop rather than calling Xlib. */
 static void process_event(app_t *a, XEvent *e) {
@@ -5872,110 +6007,33 @@ static void process_event(app_t *a, XEvent *e) {
     case Expose:
         break;
     case ConfigureNotify:
-        /* Only the top-level application window owns the global layout size.
-           video_win also selects StructureNotifyMask and emits ConfigureNotify
-           events (including its initial 1px geometry). Treating those as main
-           window resizes collapses the player container to 1px high. */
-        if (e->xconfigure.window == a->win) {
-            a->width = e->xconfigure.width;
-            a->height = e->xconfigure.height;
-            if (a->screen == SCREEN_PLAYER)
-                layout_video_window(a);
-        }
+        handle_configure_event(a, &e->xconfigure);
         break;
     case ClientMessage:
         if ((Atom)e->xclient.data.l[0] == a->wm_delete)
             a->quit = true;
         break;
     case PropertyNotify:
-        if (e->xproperty.window == a->win &&
-            e->xproperty.atom == XInternAtom(a->dpy, "_NET_WM_STATE", False)) {
-            bool actual = wm_reports_fullscreen(a);
-            if (actual || !a->fullscreen_fallback)
-                a->fullscreen = actual || a->fullscreen_fallback;
-            if (a->fullscreen)
-                layout_video_window(a);
-        }
+        handle_property_event(a, &e->xproperty);
         break;
     case MotionNotify:
-        if (a->screen == SCREEN_BROWSE && e->xmotion.window == a->win) {
-            update_browse_hover(a, e->xmotion.x, e->xmotion.y);
-        } else if (a->screen == SCREEN_PLAYER) {
-            show_player_hud(a);
-            if (getenv("VIPTV_MPV_DEBUG"))
-                fprintf(stderr, "[mpv-debug] input MotionNotify window=%lu\n",
-                        (unsigned long)e->xmotion.window);
-            if (a->timeline_dragging && !a->player_item_live && a->player && e->xmotion.window == a->win) {
-                int tx, ty, tw, th;
-                timeline_geometry(a, &tx, &ty, &tw, &th);
-                vip_mpv_player_snapshot_t sn = {0};
-                vip_mpv_player_snapshot(a->player, &sn);
-                if (sn.duration_seconds > 0 && e->xmotion.x >= tx && e->xmotion.x <= tx + tw) {
-                    double pos = ((double)(e->xmotion.x - tx) / (double)tw) * sn.duration_seconds;
-                    vip_error_t er = {0};
-                    (void)vip_mpv_player_seek(a->player, pos, &er);
-                }
-            }
-        }
+        handle_motion_event(a, &e->xmotion);
         break;
     case LeaveNotify:
-        if (a->screen == SCREEN_BROWSE) {
-            a->mouse_inside = false;
-            if (a->hovered_card_valid)
-                vip_ui_motion_set_target(&a->hover_motion, 0.0f, monotonic_ms());
-            a->hovered_control = HOVER_NONE;
-            vip_ui_motion_init(&a->control_motion, 0.0f, monotonic_ms());
-            a->ui_motion_active = true;
-        }
+        handle_leave_event(a);
         break;
     case ButtonRelease:
-        if (e->xbutton.button == Button1) {
-            a->mouse_down = false;
-            if (a->screen == SCREEN_PLAYER) {
-                a->timeline_dragging = false;
-                save_current_progress(a, true);
-                show_player_hud(a);
-            }
-        }
+        handle_button_release_event(a, &e->xbutton);
         break;
     case ButtonPress:
-        a->mouse_down = true;
-        if (a->screen == SCREEN_PLAYER &&
-            (e->xbutton.window == a->video_win || e->xbutton.window == a->player_input_win)) {
-            show_player_hud(a);
-            focus_player_input(a);
-            if (getenv("VIPTV_MPV_DEBUG"))
-                fprintf(stderr, "[mpv-debug] input ButtonPress window=%lu button=%u\n",
-                        (unsigned long)e->xbutton.window, e->xbutton.button);
-            break;
-        }
-        if (e->xbutton.button == Button1)
-            handle_click(a, e->xbutton.x, e->xbutton.y);
-        else if (e->xbutton.button == Button4)
-            handle_wheel(a, e->xbutton.x, e->xbutton.y, -1);
-        else if (e->xbutton.button == Button5)
-            handle_wheel(a, e->xbutton.x, e->xbutton.y, 1);
-        else if (e->xbutton.button == Button2)
-            request_paste(a, XA_PRIMARY);
+        handle_button_press_event(a, &e->xbutton);
         break;
     case KeyPress:
-        if (a->screen == SCREEN_PLAYER && getenv("VIPTV_MPV_DEBUG"))
-            fprintf(stderr, "[mpv-debug] input KeyPress window=%lu keycode=%u\n",
-                    (unsigned long)e->xkey.window, e->xkey.keycode);
-        handle_key(a, &e->xkey);
+        handle_key_press_event(a, &e->xkey);
         break;
     case FocusIn:
     case FocusOut:
-        if (a->screen == SCREEN_PLAYER && getenv("VIPTV_MPV_DEBUG")) {
-            Window focus = None;
-            int revert = 0;
-            XGetInputFocus(a->dpy, &focus, &revert);
-            fprintf(stderr, "[mpv-debug] input %s event-window=%lu current-focus=%lu\n",
-                    e->type == FocusIn ? "FocusIn" : "FocusOut", (unsigned long)e->xfocus.window,
-                    (unsigned long)focus);
-        }
-        if (e->type == FocusOut && a->screen == SCREEN_PLAYER)
-            recover_player_focus_if_needed(a, &e->xfocus);
+        handle_focus_event(a, &e->xfocus, e->type);
         break;
     case SelectionNotify:
         handle_selection(a, &e->xselection);
