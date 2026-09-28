@@ -483,34 +483,150 @@ static void terminate_and_reap(pid_t pid) {
 }
 
 /* Spawn runtime. */
-static int spawn_runtime(vip_mpv_player_t *player, int *log_read_fd) {
-    const char *renderer = getenv("VIPTV_MPV_RENDERER");
-    bool use_gpu_next = renderer && (!strcasecmp(renderer, "next") || !strcasecmp(renderer, "gpu-next"));
-    bool use_x11_vo = renderer && (!strcasecmp(renderer, "x11") || !strcasecmp(renderer, "software-x11"));
-    const char *requested_hwdec = getenv("VIPTV_MPV_HWDEC");
-    const char *hwdec = "auto-safe";
-    if (requested_hwdec && (!strcmp(requested_hwdec, "no") || !strcmp(requested_hwdec, "auto") ||
-                            !strcmp(requested_hwdec, "auto-safe") || !strcmp(requested_hwdec, "auto-copy") ||
-                            !strcmp(requested_hwdec, "auto-copy-safe") || !strcmp(requested_hwdec, "vaapi") ||
-                            !strcmp(requested_hwdec, "vaapi-copy") || !strcmp(requested_hwdec, "vulkan") ||
-                            !strcmp(requested_hwdec, "vulkan-copy")))
-        hwdec = requested_hwdec;
+typedef struct {
+    bool use_gpu_next;
+    bool use_x11_vo;
+    const char *hwdec;
+    const char *vo_arg;
+    const char *context_arg;
+} mpv_runtime_config_t;
 
-    const char *vo_arg = use_x11_vo ? "--vo=x11" : (use_gpu_next ? "--vo=gpu-next,gpu" : "--vo=gpu");
-    const char *context_arg =
-        use_x11_vo ? NULL : (use_gpu_next ? "--gpu-context=x11egl,x11,x11vk" : "--gpu-context=x11");
+static bool hwdec_value_supported(const char *value) {
+    if (!value)
+        return false;
+    return !strcmp(value, "no") ||
+           !strcmp(value, "auto") ||
+           !strcmp(value, "auto-safe") ||
+           !strcmp(value, "auto-copy") ||
+           !strcmp(value, "auto-copy-safe") ||
+           !strcmp(value, "vaapi") ||
+           !strcmp(value, "vaapi-copy") ||
+           !strcmp(value, "vulkan") ||
+           !strcmp(value, "vulkan-copy");
+}
+
+static mpv_runtime_config_t runtime_config_from_env(void) {
+    const char *renderer = getenv("VIPTV_MPV_RENDERER");
+    const char *requested_hwdec = getenv("VIPTV_MPV_HWDEC");
+
+    mpv_runtime_config_t config = {
+        .use_gpu_next = renderer &&
+                        (!strcasecmp(renderer, "next") ||
+                         !strcasecmp(renderer, "gpu-next")),
+        .use_x11_vo = renderer &&
+                      (!strcasecmp(renderer, "x11") ||
+                       !strcasecmp(renderer, "software-x11")),
+        .hwdec = hwdec_value_supported(requested_hwdec)
+                     ? requested_hwdec
+                     : "auto-safe",
+    };
+
+    config.vo_arg = config.use_x11_vo
+                        ? "--vo=x11"
+                        : (config.use_gpu_next ? "--vo=gpu-next,gpu" : "--vo=gpu");
+    config.context_arg = config.use_x11_vo
+                             ? NULL
+                             : (config.use_gpu_next
+                                    ? "--gpu-context=x11egl,x11,x11vk"
+                                    : "--gpu-context=x11");
+    return config;
+}
+
+static const char *runtime_renderer_name(const mpv_runtime_config_t *config) {
+    if (config->use_x11_vo)
+        return "x11";
+    if (config->use_gpu_next)
+        return "gpu-next-x11";
+    return "gpu-x11";
+}
+
+static bool prepare_runtime_pipe(vip_mpv_player_t *player, int log_pipe[2]) {
+    if (pipe(log_pipe) != 0)
+        return false;
+    if (make_ipc_path(player))
+        return true;
+
+    close(log_pipe[0]);
+    close(log_pipe[1]);
+    errno = ENAMETOOLONG;
+    return false;
+}
+
+static void setup_child_log_pipe(const int log_pipe[2]) {
+    if (dup2(log_pipe[1], STDOUT_FILENO) < 0)
+        _exit(126);
+    if (dup2(log_pipe[1], STDERR_FILENO) < 0)
+        _exit(126);
+    close(log_pipe[0]);
+    if (log_pipe[1] > STDERR_FILENO)
+        close(log_pipe[1]);
+}
+
+static void exec_mpv_runtime_child(vip_mpv_player_t *player,
+                                   const mpv_runtime_config_t *config,
+                                   const int log_pipe[2]) {
+    setup_child_log_pipe(log_pipe);
+
+    char ipc_arg[160];
+    char hwdec_arg[96];
+    char title_arg[96];
+    char wid_arg[96];
+    snprintf(ipc_arg, sizeof(ipc_arg), "--input-ipc-server=%s", player->ipc_path);
+    snprintf(hwdec_arg, sizeof(hwdec_arg), "--hwdec=%s", config->hwdec);
+    snprintf(title_arg, sizeof(title_arg), "--title=visual-iptv-mpv-%ld", (long)getpid());
+    snprintf(wid_arg, sizeof(wid_arg), "--wid=%lu", player->window_id);
+
+    char *const audio_arg = player->audio ? "--audio=auto" : "--no-audio";
+    char *argv[36];
+    size_t ai = 0u;
+    argv[ai++] = player->mpv_path;
+    argv[ai++] = "--no-config";
+    argv[ai++] = "--idle=yes";
+    argv[ai++] = "--force-window=immediate";
+    argv[ai++] = "--no-border";
+    argv[ai++] = wid_arg;
+    argv[ai++] = title_arg;
+    argv[ai++] = "--keep-open=no";
+    argv[ai++] = "--osc=no";
+    argv[ai++] = "--osd-level=0";
+    argv[ai++] = "--input-terminal=no";
+    argv[ai++] = "--input-default-bindings=no";
+    argv[ai++] = "--ytdl=no";
+    argv[ai++] = player->debug ? "--msg-level=all=info" : "--msg-level=all=warn";
+    argv[ai++] = (char *)config->vo_arg;
+    if (config->context_arg)
+        argv[ai++] = (char *)config->context_arg;
+    argv[ai++] = hwdec_arg;
+    argv[ai++] = "--video-sync=audio";
+    argv[ai++] = "--interpolation=no";
+    argv[ai++] = ipc_arg;
+    argv[ai++] = audio_arg;
+    argv[ai] = NULL;
+
+    if (strchr(player->mpv_path, '/'))
+        execv(player->mpv_path, argv);
+    else
+        execvp(player->mpv_path, argv);
+
+    dprintf(STDERR_FILENO, "exec mpv falhou: %s\n", strerror(errno));
+    _exit(127);
+}
+
+static int finish_runtime_spawn_parent(int log_pipe[2], int *log_read_fd, pid_t pid) {
+    close(log_pipe[1]);
+    set_nonblocking(log_pipe[0]);
+    *log_read_fd = log_pipe[0];
+    return (int)pid;
+}
+
+static int spawn_runtime(vip_mpv_player_t *player, int *log_read_fd) {
+    mpv_runtime_config_t config = runtime_config_from_env();
     debug_log(player, "runtime persistente renderer=%s hwdec=%s embed=wid parent=%lu",
-              use_x11_vo ? "x11" : (use_gpu_next ? "gpu-next-x11" : "gpu-x11"), hwdec, player->window_id);
+              runtime_renderer_name(&config), config.hwdec, player->window_id);
 
     int log_pipe[2] = {-1, -1};
-    if (pipe(log_pipe) != 0)
+    if (!prepare_runtime_pipe(player, log_pipe))
         return -1;
-    if (!make_ipc_path(player)) {
-        close(log_pipe[0]);
-        close(log_pipe[1]);
-        errno = ENAMETOOLONG;
-        return -1;
-    }
     (void)unlink(player->ipc_path);
 
     pid_t pid = fork();
@@ -519,66 +635,10 @@ static int spawn_runtime(vip_mpv_player_t *player, int *log_read_fd) {
         close(log_pipe[1]);
         return -1;
     }
-    if (pid == 0) {
-        if (dup2(log_pipe[1], STDOUT_FILENO) < 0)
-            _exit(126);
-        if (dup2(log_pipe[1], STDERR_FILENO) < 0)
-            _exit(126);
-        close(log_pipe[0]);
-        if (log_pipe[1] > STDERR_FILENO)
-            close(log_pipe[1]);
+    if (pid == 0)
+        exec_mpv_runtime_child(player, &config, log_pipe);
 
-        char ipc_arg[160];
-        char hwdec_arg[96];
-        char title_arg[96];
-        char wid_arg[96];
-        snprintf(ipc_arg, sizeof(ipc_arg), "--input-ipc-server=%s", player->ipc_path);
-        snprintf(hwdec_arg, sizeof(hwdec_arg), "--hwdec=%s", hwdec);
-        snprintf(title_arg, sizeof(title_arg), "--title=visual-iptv-mpv-%ld", (long)getpid());
-        snprintf(wid_arg, sizeof(wid_arg), "--wid=%lu", player->window_id);
-        char *const audio_arg = player->audio ? "--audio=auto" : "--no-audio";
-        char *argv[36];
-        size_t ai = 0u;
-        argv[ai++] = player->mpv_path;
-        argv[ai++] = "--no-config";
-        argv[ai++] = "--idle=yes";
-        argv[ai++] = "--force-window=immediate";
-        argv[ai++] = "--no-border";
-        argv[ai++] = wid_arg;
-        argv[ai++] = title_arg;
-        argv[ai++] = "--keep-open=no";
-        argv[ai++] = "--osc=no";
-        argv[ai++] = "--osd-level=0";
-        argv[ai++] = "--input-terminal=no";
-        argv[ai++] = "--input-default-bindings=no";
-        /*
-         * Blazzing plays direct provider URLs. If a malformed/non-standard
-         * stream fails, mpv's default ytdl hook only adds a misleading
-         * "yt-dlp/youtube-dl not found" error. Never invoke that hook here.
-         */
-        argv[ai++] = "--ytdl=no";
-        argv[ai++] = player->debug ? "--msg-level=all=info" : "--msg-level=all=warn";
-        argv[ai++] = (char *)vo_arg;
-        if (context_arg)
-            argv[ai++] = (char *)context_arg;
-        argv[ai++] = hwdec_arg;
-        argv[ai++] = "--video-sync=audio";
-        argv[ai++] = "--interpolation=no";
-        argv[ai++] = ipc_arg;
-        argv[ai++] = audio_arg;
-        argv[ai] = NULL;
-        if (strchr(player->mpv_path, '/'))
-            execv(player->mpv_path, argv);
-        else
-            execvp(player->mpv_path, argv);
-        dprintf(STDERR_FILENO, "exec mpv falhou: %s\n", strerror(errno));
-        _exit(127);
-    }
-
-    close(log_pipe[1]);
-    set_nonblocking(log_pipe[0]);
-    *log_read_fd = log_pipe[0];
-    return (int)pid;
+    return finish_runtime_spawn_parent(log_pipe, log_read_fd, pid);
 }
 
 /* Handle the drain mpv log operation. */
@@ -980,123 +1040,197 @@ static void consume_ipc(vip_mpv_player_t *player, char *buf, size_t *len) {
 
 /* One monitor thread owns runtime observation: socket reads, mpv stderr,
  * process liveness and native-window reparent/resize synchronization. */
-static void *monitor_main(void *userdata) {
-    vip_mpv_player_t *player = userdata;
+typedef struct {
+    pid_t pid;
+    int log_fd;
+    int ipc_fd;
+    bool shutting_down;
+    char path[108];
+} mpv_monitor_snapshot_t;
+
+typedef struct {
+    int status;
+    bool status_valid;
+} mpv_monitor_result_t;
+
+static mpv_monitor_snapshot_t monitor_snapshot(vip_mpv_player_t *player) {
+    mpv_monitor_snapshot_t snapshot = {0};
+    pthread_mutex_lock(&player->mutex);
+    snapshot.pid = player->pid;
+    snapshot.log_fd = player->log_fd;
+    snapshot.ipc_fd = player->ipc_fd;
+    snapshot.shutting_down = player->shutting_down;
+    snprintf(snapshot.path, sizeof(snapshot.path), "%s", player->ipc_path);
+    pthread_mutex_unlock(&player->mutex);
+    return snapshot;
+}
+
+static void monitor_try_connect_ipc(vip_mpv_player_t *player,
+                                    const mpv_monitor_snapshot_t *snapshot) {
+    if (snapshot->ipc_fd >= 0 || snapshot->shutting_down)
+        return;
+
+    int connected = try_connect_ipc(snapshot->path);
+    if (connected < 0)
+        return;
+
+    bool accepted = false;
+    pthread_mutex_lock(&player->mutex);
+    if (player->ipc_fd < 0) {
+        player->ipc_fd = connected;
+        ++player->serial;
+        accepted = true;
+    }
+    pthread_mutex_unlock(&player->mutex);
+
+    if (!accepted) {
+        close(connected);
+        return;
+    }
+    debug_log(player, "IPC conectado; mpv persistente pronto");
+    send_observers(player);
+}
+
+static void monitor_refresh_fds(vip_mpv_player_t *player, int *log_fd, int *ipc_fd) {
+    pthread_mutex_lock(&player->mutex);
+    *ipc_fd = player->ipc_fd;
+    *log_fd = player->log_fd;
+    pthread_mutex_unlock(&player->mutex);
+}
+
+static void monitor_poll_io(vip_mpv_player_t *player,
+                            int log_fd,
+                            int ipc_fd,
+                            char *ipc_buf,
+                            size_t *ipc_len) {
+    struct pollfd pfds[2];
+    nfds_t nfds = 0u;
+    if (log_fd >= 0)
+        pfds[nfds++] = (struct pollfd){.fd = log_fd, .events = POLLIN | POLLHUP | POLLERR};
+    if (ipc_fd >= 0)
+        pfds[nfds++] = (struct pollfd){.fd = ipc_fd, .events = POLLIN | POLLHUP | POLLERR};
+
+    if (nfds > 0u)
+        (void)poll(pfds, nfds, 50);
+    else
+        sleep_ms(50);
+
+    if (log_fd >= 0)
+        drain_mpv_log(player, log_fd);
+    if (ipc_fd >= 0)
+        consume_ipc(player, ipc_buf, ipc_len);
+}
+
+static bool monitor_process_exit(pid_t pid,
+                                 bool shutting_down,
+                                 mpv_monitor_result_t *result) {
+    pid_t waited = waitpid(pid, &result->status, WNOHANG);
+    if (waited == pid) {
+        result->status_valid = true;
+        return true;
+    }
+    if (waited < 0 && errno != EINTR)
+        return true;
+    return shutting_down;
+}
+
+static mpv_monitor_result_t monitor_runtime_loop(vip_mpv_player_t *player) {
     char ipc_buf[VIP_MPV_IPC_BUF_CAP] = {0};
     size_t ipc_len = 0u;
-    int status = 0;
-    bool status_valid = false;
+    mpv_monitor_result_t result = {0};
 
     for (;;) {
-        pthread_mutex_lock(&player->mutex);
-        pid_t pid = player->pid;
-        int log_fd = player->log_fd;
-        int ipc_fd = player->ipc_fd;
-        bool shutting_down = player->shutting_down;
-        char path[108];
-        snprintf(path, sizeof(path), "%s", player->ipc_path);
-        pthread_mutex_unlock(&player->mutex);
-        if (pid <= 0)
+        mpv_monitor_snapshot_t snapshot = monitor_snapshot(player);
+        if (snapshot.pid <= 0)
             break;
 
-        if (ipc_fd < 0 && !shutting_down) {
-            int connected = try_connect_ipc(path);
-            if (connected >= 0) {
-                bool accepted = false;
-                pthread_mutex_lock(&player->mutex);
-                if (player->ipc_fd < 0) {
-                    player->ipc_fd = connected;
-                    ++player->serial;
-                    accepted = true;
-                }
-                pthread_mutex_unlock(&player->mutex);
-                if (!accepted)
-                    close(connected);
-                else {
-                    debug_log(player, "IPC conectado; mpv persistente pronto");
-                    send_observers(player);
-                }
-            }
-        }
-
-        pthread_mutex_lock(&player->mutex);
-        ipc_fd = player->ipc_fd;
-        log_fd = player->log_fd;
-        pthread_mutex_unlock(&player->mutex);
-        struct pollfd pfds[2];
-        nfds_t nfds = 0u;
-        if (log_fd >= 0)
-            pfds[nfds++] = (struct pollfd){.fd = log_fd, .events = POLLIN | POLLHUP | POLLERR};
-        if (ipc_fd >= 0)
-            pfds[nfds++] = (struct pollfd){.fd = ipc_fd, .events = POLLIN | POLLHUP | POLLERR};
-        if (nfds > 0u)
-            (void)poll(pfds, nfds, 50);
-        else
-            sleep_ms(50);
-        if (log_fd >= 0)
-            drain_mpv_log(player, log_fd);
-        if (ipc_fd >= 0)
-            consume_ipc(player, ipc_buf, &ipc_len);
-
-        pid_t result = waitpid(pid, &status, WNOHANG);
-        if (result == pid) {
-            status_valid = true;
-            break;
-        }
-        if (result < 0 && errno != EINTR)
-            break;
-        if (shutting_down)
+        monitor_try_connect_ipc(player, &snapshot);
+        monitor_refresh_fds(player, &snapshot.log_fd, &snapshot.ipc_fd);
+        monitor_poll_io(player, snapshot.log_fd, snapshot.ipc_fd, ipc_buf, &ipc_len);
+        if (monitor_process_exit(snapshot.pid, snapshot.shutting_down, &result))
             break;
     }
+    return result;
+}
 
+static mpv_monitor_snapshot_t detach_runtime_locked(vip_mpv_player_t *player) {
+    mpv_monitor_snapshot_t snapshot = {0};
     pthread_mutex_lock(&player->mutex);
-    int log_fd = player->log_fd;
-    int ipc_fd = player->ipc_fd;
-    pid_t pid = player->pid;
-    bool shutting_down = player->shutting_down;
+    snapshot.log_fd = player->log_fd;
+    snapshot.ipc_fd = player->ipc_fd;
+    snapshot.pid = player->pid;
+    snapshot.shutting_down = player->shutting_down;
     player->log_fd = -1;
     player->ipc_fd = -1;
     player->pid = -1;
     pthread_mutex_unlock(&player->mutex);
+    return snapshot;
+}
 
-    if (ipc_fd >= 0)
-        close(ipc_fd);
-    if (log_fd >= 0) {
-        drain_mpv_log(player, log_fd);
-        close(log_fd);
+static void close_runtime_resources(vip_mpv_player_t *player,
+                                    const mpv_monitor_snapshot_t *snapshot,
+                                    mpv_monitor_result_t *result) {
+    if (snapshot->ipc_fd >= 0)
+        close(snapshot->ipc_fd);
+    if (snapshot->log_fd >= 0) {
+        drain_mpv_log(player, snapshot->log_fd);
+        close(snapshot->log_fd);
     }
-    if (pid > 0 && !status_valid) {
-        terminate_and_reap(pid);
-        status = 0;
+    if (snapshot->pid > 0 && !result->status_valid) {
+        terminate_and_reap(snapshot->pid);
+        result->status = 0;
     }
     (void)unlink(player->ipc_path);
+}
 
+static void set_unexpected_runtime_error_locked(vip_mpv_player_t *player,
+                                                const mpv_monitor_result_t *result) {
+    trim_text(player->recent_log);
+    if (player->recent_log[0])
+        snprintf(player->last_error, sizeof(player->last_error), "%.511s", player->recent_log);
+    else if (result->status_valid && WIFEXITED(result->status) &&
+             WEXITSTATUS(result->status) == 127)
+        snprintf(player->last_error, sizeof(player->last_error),
+                 "mpv não encontrado; instale o pacote mpv");
+    else
+        snprintf(player->last_error, sizeof(player->last_error),
+                 "processo mpv encerrou inesperadamente");
+    touch_state_locked(player, VIP_PLAYER_ERROR);
+}
+
+static void finalize_runtime_state(vip_mpv_player_t *player,
+                                   const mpv_monitor_snapshot_t *snapshot,
+                                   const mpv_monitor_result_t *result) {
     pthread_mutex_lock(&player->mutex);
     player->runtime_running = false;
     player->media_running = false;
-    if (status_valid && WIFEXITED(status)) {
+    if (result->status_valid && WIFEXITED(result->status)) {
         player->exit_code_valid = true;
-        player->exit_code = WEXITSTATUS(status);
+        player->exit_code = WEXITSTATUS(result->status);
     }
-    if (!shutting_down) {
-        trim_text(player->recent_log);
-        if (player->recent_log[0])
-            snprintf(player->last_error, sizeof(player->last_error), "%.511s", player->recent_log);
-        else if (status_valid && WIFEXITED(status) && WEXITSTATUS(status) == 127)
-            snprintf(player->last_error, sizeof(player->last_error),
-                     "mpv não encontrado; instale o pacote mpv");
-        else
-            snprintf(player->last_error, sizeof(player->last_error), "processo mpv encerrou inesperadamente");
-        touch_state_locked(player, VIP_PLAYER_ERROR);
-    }
+    if (!snapshot->shutting_down)
+        set_unexpected_runtime_error_locked(player, result);
     pthread_mutex_unlock(&player->mutex);
+}
 
-    if (player->debug && status_valid) {
-        if (WIFEXITED(status))
-            debug_log(player, "runtime-exit-code=%d", WEXITSTATUS(status));
-        else if (WIFSIGNALED(status))
-            debug_log(player, "runtime-terminated-by-signal=%d", WTERMSIG(status));
-    }
+static void log_runtime_exit(vip_mpv_player_t *player,
+                             const mpv_monitor_result_t *result) {
+    if (!player->debug || !result->status_valid)
+        return;
+    if (WIFEXITED(result->status))
+        debug_log(player, "runtime-exit-code=%d", WEXITSTATUS(result->status));
+    else if (WIFSIGNALED(result->status))
+        debug_log(player, "runtime-terminated-by-signal=%d", WTERMSIG(result->status));
+}
+
+static void *monitor_main(void *userdata) {
+    vip_mpv_player_t *player = userdata;
+    mpv_monitor_result_t result = monitor_runtime_loop(player);
+    mpv_monitor_snapshot_t snapshot = detach_runtime_locked(player);
+
+    close_runtime_resources(player, &snapshot, &result);
+    finalize_runtime_state(player, &snapshot, &result);
+    log_runtime_exit(player, &result);
     return NULL;
 }
 
