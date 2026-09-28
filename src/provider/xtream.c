@@ -319,26 +319,22 @@ static void metadata_values_read(json_object *obj, bool fallback_layout, xtream_
     values->trailer = jstr_alias(obj, "youtube_trailer", "trailer", NULL);
 }
 
+static const char *metadata_prefer(const char *value, const char *fallback) {
+    return value && value[0] ? value : fallback;
+}
+
 static void metadata_values_fill_missing(xtream_metadata_values_t *values,
                                          const xtream_metadata_values_t *fallback) {
-#define FILL_METADATA_FIELD(field)                                                                                     \
-    do {                                                                                                               \
-        if ((!values->field || !values->field[0]) && fallback->field && fallback->field[0])                           \
-            values->field = fallback->field;                                                                           \
-    } while (0)
-
-    FILL_METADATA_FIELD(plot);
-    FILL_METADATA_FIELD(cover);
-    FILL_METADATA_FIELD(backdrop);
-    FILL_METADATA_FIELD(genre);
-    FILL_METADATA_FIELD(release_date);
-    FILL_METADATA_FIELD(rating);
-    FILL_METADATA_FIELD(duration);
-    FILL_METADATA_FIELD(cast);
-    FILL_METADATA_FIELD(director);
-    FILL_METADATA_FIELD(trailer);
-
-#undef FILL_METADATA_FIELD
+    values->plot = metadata_prefer(values->plot, fallback->plot);
+    values->cover = metadata_prefer(values->cover, fallback->cover);
+    values->backdrop = metadata_prefer(values->backdrop, fallback->backdrop);
+    values->genre = metadata_prefer(values->genre, fallback->genre);
+    values->release_date = metadata_prefer(values->release_date, fallback->release_date);
+    values->rating = metadata_prefer(values->rating, fallback->rating);
+    values->duration = metadata_prefer(values->duration, fallback->duration);
+    values->cast = metadata_prefer(values->cast, fallback->cast);
+    values->director = metadata_prefer(values->director, fallback->director);
+    values->trailer = metadata_prefer(values->trailer, fallback->trailer);
 }
 
 static vip_status_t metadata_values_store(const xtream_metadata_values_t *values, vip_media_metadata_t *out,
