@@ -2908,13 +2908,6 @@ static bool same_text_case(const char *a, const char *b) {
     return a && b && strcasecmp(a, b) == 0;
 }
 
-/* Handle the same category operation. */
-static bool same_category(const char *a, const char *b) {
-    if (!a || !b)
-        return a == b;
-    return strcmp(a, b) == 0;
-}
-
 /* Start m3u series load. */
 static bool start_m3u_series_load(app_t *a, size_t channel_index) {
     if (!a || !m3u_series_root(a) || channel_index >= a->catalogs[CONTENT_SERIES].channels.len)
