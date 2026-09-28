@@ -34,6 +34,7 @@
 #include <jpeglib.h>
 #include <pthread.h>
 #include <setjmp.h>
+#include <spawn.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -1398,58 +1399,85 @@ static bool episode_card_meta(const app_t *a, const vip_channel_t *ch, char *buf
     return true;
 }
 
-/* Rebuild filter. */
-static void rebuild_filter(app_t *a) {
-    pthread_mutex_lock(&a->data_mutex);
-    size_t need = ACTIVE_CHANNELS(a).len;
-    if (need > a->filtered_cap) {
-        size_t cap = need ? need : 1;
-        size_t *p = realloc(a->filtered, cap * sizeof(*p));
-        if (p) {
-            a->filtered = p;
-            a->filtered_cap = cap;
-        }
-    }
-    a->filtered_len = 0;
-    const char *cat = NULL;
-    if (a->selected_category >= 0 && (size_t)a->selected_category < ACTIVE_CATEGORIES(a).len)
-        cat = ACTIVE_CATEGORIES(a).items[a->selected_category].id;
+/* Ensure the filtered-index buffer can hold all active channels. */
+static bool ensure_filtered_capacity(app_t *a, size_t need) {
+    if (need <= a->filtered_cap)
+        return true;
+    size_t cap = need ? need : 1u;
+    size_t *items = realloc(a->filtered, cap * sizeof(*items));
+    if (!items)
+        return false;
+    a->filtered = items;
+    a->filtered_cap = cap;
+    return true;
+}
 
-    bool group_series = m3u_series_root(a);
-    uint64_t *seen = NULL;
-    size_t seen_cap = 0u;
-    if (group_series && need > 0u) {
-        seen_cap = 16u;
-        while (seen_cap < need * 2u && seen_cap < (SIZE_MAX / 2u))
-            seen_cap <<= 1u;
-        seen = calloc(seen_cap, sizeof(*seen));
-    }
+/* Return the currently selected category id, or NULL for all categories. */
+static const char *selected_filter_category(const app_t *a) {
+    if (a->selected_category < 0 ||
+        (size_t)a->selected_category >= ACTIVE_CATEGORIES(a).len)
+        return NULL;
+    return ACTIVE_CATEGORIES(a).items[a->selected_category].id;
+}
 
-    if (a->filtered) {
-        for (size_t i = 0; i < ACTIVE_CHANNELS(a).len; ++i) {
-            vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[i];
-            if (cat && (!ch->category_id || strcmp(ch->category_id, cat) != 0))
-                continue;
-            if (a->favorites_only && (!a->favorite_flags || !a->favorite_flags[i]))
-                continue;
-            char grouped_name[256];
-            const char *name = m3u_series_display_name(a, ch, grouped_name, sizeof(grouped_name));
-            if (!contains_ascii_case(name, a->search))
-                continue;
-            if (group_series && seen && seen_cap > 0u) {
-                uint64_t hash = folded_name_hash(name);
-                size_t slot = (size_t)hash & (seen_cap - 1u);
-                while (seen[slot] != 0u && seen[slot] != hash)
-                    slot = (slot + 1u) & (seen_cap - 1u);
-                if (seen[slot] == hash)
-                    continue;
-                seen[slot] = hash;
-            }
-            a->filtered[a->filtered_len++] = i;
-        }
+/* Allocate the open-addressed hash table used to collapse M3U series rows. */
+static uint64_t *create_series_seen_table(size_t need, size_t *capacity) {
+    *capacity = 0u;
+    if (need == 0u)
+        return NULL;
+
+    size_t cap = 16u;
+    while (cap < need * 2u && cap < (SIZE_MAX / 2u))
+        cap <<= 1u;
+    uint64_t *seen = calloc(cap, sizeof(*seen));
+    if (!seen)
+        return NULL;
+    *capacity = cap;
+    return seen;
+}
+
+/* Return whether a channel passes category, favorites and text filters. */
+static bool channel_matches_filter(const app_t *a, const vip_channel_t *ch,
+                                   size_t index, const char *category,
+                                   const char *display_name) {
+    if (category && (!ch->category_id || strcmp(ch->category_id, category) != 0))
+        return false;
+    if (a->favorites_only && (!a->favorite_flags || !a->favorite_flags[index]))
+        return false;
+    return contains_ascii_case(display_name, a->search);
+}
+
+/* Record one grouped series name and return whether it was already present. */
+static bool grouped_series_seen(uint64_t *seen, size_t capacity, const char *name) {
+    if (!seen || capacity == 0u)
+        return false;
+    uint64_t hash = folded_name_hash(name);
+    size_t slot = (size_t)hash & (capacity - 1u);
+    while (seen[slot] != 0u && seen[slot] != hash)
+        slot = (slot + 1u) & (capacity - 1u);
+    if (seen[slot] == hash)
+        return true;
+    seen[slot] = hash;
+    return false;
+}
+
+/* Populate filtered indexes while data_mutex is held. */
+static void rebuild_filter_locked(app_t *a, const char *category,
+                                  uint64_t *seen, size_t seen_cap) {
+    for (size_t i = 0u; i < ACTIVE_CHANNELS(a).len; ++i) {
+        vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[i];
+        char grouped_name[256];
+        const char *name = m3u_series_display_name(a, ch, grouped_name, sizeof(grouped_name));
+        if (!channel_matches_filter(a, ch, i, category, name))
+            continue;
+        if (grouped_series_seen(seen, seen_cap, name))
+            continue;
+        a->filtered[a->filtered_len++] = i;
     }
-    free(seen);
-    pthread_mutex_unlock(&a->data_mutex);
+}
+
+/* Reset scroll, hover and focus after the filtered collection changes. */
+static void reset_filter_view_state(app_t *a) {
     a->grid_scroll = 0;
     a->grid_scroll_target = 0;
     a->grid_scroll_animating = false;
@@ -1460,6 +1488,25 @@ static void rebuild_filter(app_t *a) {
     vip_ui_motion_init(&a->control_motion, 0.0f, a->grid_scroll_last_ms);
     a->ui_motion_active = false;
     a->focused_filtered = 0;
+}
+
+/* Rebuild filter. */
+static void rebuild_filter(app_t *a) {
+    pthread_mutex_lock(&a->data_mutex);
+    size_t need = ACTIVE_CHANNELS(a).len;
+    a->filtered_len = 0u;
+
+    if (ensure_filtered_capacity(a, need)) {
+        const char *category = selected_filter_category(a);
+        size_t seen_cap = 0u;
+        uint64_t *seen = m3u_series_root(a) ?
+            create_series_seen_table(need, &seen_cap) : NULL;
+        rebuild_filter_locked(a, category, seen, seen_cap);
+        free(seen);
+    }
+
+    pthread_mutex_unlock(&a->data_mutex);
+    reset_filter_view_state(a);
 }
 
 /* Handle the recalc category counts operation. */
@@ -2809,23 +2856,31 @@ static void clear_details_view(app_t *a) {
     pthread_mutex_unlock(&a->data_mutex);
 }
 
-/* Start details load. */
-static void start_details_load(app_t *a, size_t channel_index) {
-    if (!a || atomic_load(&a->details_running) || a->details_thread_started ||
-        a->login_mode != LOGIN_XTREAM || a->series_episode_mode ||
-        (a->content_kind != CONTENT_VOD && a->content_kind != CONTENT_SERIES) ||
-        channel_index >= ACTIVE_CHANNELS(a).len)
-        return;
-    vip_channel_t *media = &ACTIVE_CHANNELS(a).items[channel_index];
-    if (!media->id || !media->provider_id || !media->id[0])
-        return;
-    const char *server = a->active_server_alt && a->server_alt[0] ? a->server_alt : a->server;
-    if (!server[0] || !a->username[0] || !a->password[0])
-        return;
+/* Return whether a details request may start for this catalog item. */
+static bool details_load_allowed(const app_t *a, size_t channel_index) {
+    if (!a || atomic_load(&a->details_running) || a->details_thread_started)
+        return false;
+    if (a->login_mode != LOGIN_XTREAM || a->series_episode_mode)
+        return false;
+    if (a->content_kind != CONTENT_VOD && a->content_kind != CONTENT_SERIES)
+        return false;
+    return channel_index < ACTIVE_CHANNELS(a).len;
+}
 
+/* Return the active Xtream server used by metadata requests. */
+static const char *details_active_server(const app_t *a) {
+    if (a->active_server_alt && a->server_alt[0])
+        return a->server_alt;
+    return a->server;
+}
+
+/* Allocate and copy all data needed by the background details worker. */
+static details_job_t *create_details_job(app_t *a, const vip_channel_t *media,
+                                         const char *server) {
     details_job_t *job = calloc(1, sizeof(*job));
     if (!job)
-        return;
+        return NULL;
+
     job->app = a;
     job->kind = a->content_kind;
     job->server = vip_strdup(server);
@@ -2834,12 +2889,16 @@ static void start_details_load(app_t *a, size_t channel_index) {
     job->provider_id = vip_strdup(media->provider_id);
     job->media_id = vip_strdup(media->id);
     job->title = vip_strdup(media->name);
-    if (!job->server || !job->username || !job->password || !job->provider_id || !job->media_id ||
-        !job->title) {
+    if (!job->server || !job->username || !job->password ||
+        !job->provider_id || !job->media_id || !job->title) {
         details_job_free(job);
-        return;
+        return NULL;
     }
+    return job;
+}
 
+/* Initialize the visible details state before launching the worker. */
+static void prepare_details_load(app_t *a, const vip_channel_t *media) {
     pthread_mutex_lock(&a->data_mutex);
     vip_media_metadata_clear(&a->details_metadata);
     snprintf(a->details_media_id, sizeof(a->details_media_id), "%s", media->id);
@@ -2849,15 +2908,43 @@ static void start_details_load(app_t *a, size_t channel_index) {
     atomic_store(&a->details_done, false);
     atomic_store(&a->details_success, false);
     atomic_store(&a->details_running, true);
-    if (pthread_create(&a->details_thread, NULL, details_worker, job) != 0) {
-        atomic_store(&a->details_running, false);
-        pthread_mutex_lock(&a->data_mutex);
-        snprintf(a->details_status, sizeof(a->details_status), "Falha ao iniciar carregamento de detalhes");
-        pthread_mutex_unlock(&a->data_mutex);
-        details_job_free(job);
-        return;
+}
+
+/* Launch the details worker and restore state if pthread_create fails. */
+static bool launch_details_worker(app_t *a, details_job_t *job) {
+    if (pthread_create(&a->details_thread, NULL, details_worker, job) == 0) {
+        a->details_thread_started = true;
+        return true;
     }
-    a->details_thread_started = true;
+
+    atomic_store(&a->details_running, false);
+    pthread_mutex_lock(&a->data_mutex);
+    snprintf(a->details_status, sizeof(a->details_status),
+             "Falha ao iniciar carregamento de detalhes");
+    pthread_mutex_unlock(&a->data_mutex);
+    details_job_free(job);
+    return false;
+}
+
+/* Start details load. */
+static void start_details_load(app_t *a, size_t channel_index) {
+    if (!details_load_allowed(a, channel_index))
+        return;
+
+    vip_channel_t *media = &ACTIVE_CHANNELS(a).items[channel_index];
+    if (!media->id || !media->provider_id || !media->id[0])
+        return;
+
+    const char *server = details_active_server(a);
+    if (!server[0] || !a->username[0] || !a->password[0])
+        return;
+
+    details_job_t *job = create_details_job(a, media, server);
+    if (!job)
+        return;
+
+    prepare_details_load(a, media);
+    (void)launch_details_worker(a, job);
 }
 
 /* Start details load in the maybe. */
@@ -2907,28 +2994,10 @@ static bool same_text_case(const char *a, const char *b) {
     return a && b && strcasecmp(a, b) == 0;
 }
 
-/* Handle the same category operation. */
-static bool same_category(const char *a, const char *b) {
-    if (!a || !b)
-        return a == b;
-    return strcmp(a, b) == 0;
-}
-
-/* Start m3u series load. */
-static bool start_m3u_series_load(app_t *a, size_t channel_index) {
-    if (!a || !m3u_series_root(a) || channel_index >= a->catalogs[CONTENT_SERIES].channels.len)
-        return false;
-    vip_channel_t *selected = &a->catalogs[CONTENT_SERIES].channels.items[channel_index];
-    char series_name[256];
-    int selected_season = 0, selected_episode = 0;
-    if (!vip_m3u_parse_episode_label(selected->name, series_name, sizeof(series_name), &selected_season,
-                                     &selected_episode))
-        return false;
-    (void)selected_season;
-    (void)selected_episode;
-
-    int seasons[256];
-    size_t season_count = 0u;
+/* Collect the distinct seasons belonging to one parsed M3U series. */
+static size_t collect_m3u_series_seasons(app_t *a, const char *series_name,
+                                         int *seasons, size_t capacity) {
+    size_t count = 0u;
     for (size_t i = 0u; i < a->catalogs[CONTENT_SERIES].channels.len; ++i) {
         vip_channel_t *ch = &a->catalogs[CONTENT_SERIES].channels.items[i];
         char candidate[256];
@@ -2936,18 +3005,23 @@ static bool start_m3u_series_load(app_t *a, size_t channel_index) {
         if (!vip_m3u_parse_episode_label(ch->name, candidate, sizeof(candidate), &season, &episode) ||
             !same_text_case(candidate, series_name))
             continue;
+
         bool exists = false;
-        for (size_t j = 0u; j < season_count; ++j)
+        for (size_t j = 0u; j < count; ++j) {
             if (seasons[j] == season) {
                 exists = true;
                 break;
             }
-        if (!exists && season_count < sizeof(seasons) / sizeof(seasons[0]))
-            seasons[season_count++] = season;
+        }
+        if (!exists && count < capacity)
+            seasons[count++] = season;
     }
-    if (season_count == 0u)
-        return false;
-    for (size_t i = 1u; i < season_count; ++i) {
+    return count;
+}
+
+/* Sort season numbers without allocating a temporary collection. */
+static void sort_m3u_seasons(int *seasons, size_t count) {
+    for (size_t i = 1u; i < count; ++i) {
         int value = seasons[i];
         size_t j = i;
         while (j > 0u && seasons[j - 1u] > value) {
@@ -2956,77 +3030,96 @@ static bool start_m3u_series_load(app_t *a, size_t channel_index) {
         }
         seasons[j] = value;
     }
+}
 
-    vip_category_list_t cats;
-    vip_category_list_init(&cats);
-    vip_channel_list_t episodes;
-    vip_channel_list_init(&episodes);
-    vip_channel_list_t cards;
-    vip_channel_list_init(&cards);
-    vip_error_t error = {0};
-    vip_status_t st = VIP_OK;
+/* Append the category/card and matching episodes for one M3U season. */
+static vip_status_t append_m3u_season(app_t *a, const vip_channel_t *selected,
+                                      const char *series_name, int season_number,
+                                      size_t season_position, uint64_t title_hash,
+                                      vip_category_list_t *cats, vip_channel_list_t *episodes,
+                                      vip_channel_list_t *cards, vip_error_t *error) {
+    char cat_id[96];
+    char cat_name[96];
+    char card_id[128];
+    snprintf(cat_id, sizeof(cat_id), "m3u-season:%016llx:%d",
+             (unsigned long long)title_hash, season_number);
+    snprintf(cat_name, sizeof(cat_name), season_number == 0 ? "Especiais" : "Temporada %d",
+             season_number);
+
+    vip_category_t cat = {
+        .provider_id = selected->provider_id,
+        .id = cat_id,
+        .name = cat_name,
+        .position = (int)season_position,
+    };
+    vip_status_t st = vip_category_list_push(cats, &cat, error);
+    if (st != VIP_OK)
+        return st;
+
+    snprintf(card_id, sizeof(card_id), "m3u-series-season:%016llx:%d",
+             (unsigned long long)title_hash, season_number);
+    vip_channel_t card = {
+        .provider_id = selected->provider_id,
+        .id = card_id,
+        .category_id = cat_id,
+        .name = cat_name,
+        .logo_url = selected->logo_url,
+        .stream_url = "series://season",
+        .epg_channel_id = NULL,
+        .position = (int)season_position,
+    };
+    st = vip_channel_list_push(cards, &card, error);
+    if (st != VIP_OK)
+        return st;
+
+    for (size_t i = 0u; i < a->catalogs[CONTENT_SERIES].channels.len; ++i) {
+        vip_channel_t *ch = &a->catalogs[CONTENT_SERIES].channels.items[i];
+        char candidate[256];
+        int season = 0, episode = 0;
+        if (!vip_m3u_parse_episode_label(ch->name, candidate, sizeof(candidate), &season, &episode) ||
+            season != season_number || !same_text_case(candidate, series_name))
+            continue;
+        vip_channel_t copy = *ch;
+        copy.category_id = cat_id;
+        copy.position = episode;
+        st = vip_channel_list_push(episodes, &copy, error);
+        if (st != VIP_OK)
+            return st;
+    }
+    return VIP_OK;
+}
+
+/* Build temporary season/category lists before swapping them into app state. */
+static vip_status_t build_m3u_series_lists(app_t *a, const vip_channel_t *selected,
+                                           const char *series_name, const int *seasons,
+                                           size_t season_count, vip_category_list_t *cats,
+                                           vip_channel_list_t *episodes, vip_channel_list_t *cards,
+                                           vip_error_t *error) {
     uint64_t title_hash = folded_name_hash(series_name);
-
-    for (size_t si = 0u; si < season_count && st == VIP_OK; ++si) {
-        char cat_id[96];
-        char cat_name[96];
-        char card_id[128];
-        snprintf(cat_id, sizeof(cat_id), "m3u-season:%016llx:%d", (unsigned long long)title_hash,
-                 seasons[si]);
-        snprintf(cat_name, sizeof(cat_name), seasons[si] == 0 ? "Especiais" : "Temporada %d", seasons[si]);
-        vip_category_t cat = {
-            .provider_id = selected->provider_id,
-            .id = cat_id,
-            .name = cat_name,
-            .position = (int)si,
-        };
-        st = vip_category_list_push(&cats, &cat, &error);
+    for (size_t i = 0u; i < season_count; ++i) {
+        vip_status_t st = append_m3u_season(
+            a, selected, series_name, seasons[i], i, title_hash,
+            cats, episodes, cards, error);
         if (st != VIP_OK)
-            break;
-        snprintf(card_id, sizeof(card_id), "m3u-series-season:%016llx:%d", (unsigned long long)title_hash,
-                 seasons[si]);
-        vip_channel_t card = {
-            .provider_id = selected->provider_id,
-            .id = card_id,
-            .category_id = cat_id,
-            .name = cat_name,
-            .logo_url = selected->logo_url,
-            .stream_url = "series://season",
-            .epg_channel_id = NULL,
-            .position = (int)si,
-        };
-        st = vip_channel_list_push(&cards, &card, &error);
-        if (st != VIP_OK)
-            break;
-
-        for (size_t i = 0u; i < a->catalogs[CONTENT_SERIES].channels.len && st == VIP_OK; ++i) {
-            vip_channel_t *ch = &a->catalogs[CONTENT_SERIES].channels.items[i];
-            char candidate[256];
-            int season = 0, episode = 0;
-            if (!vip_m3u_parse_episode_label(ch->name, candidate, sizeof(candidate), &season, &episode) ||
-                season != seasons[si] || !same_text_case(candidate, series_name))
-                continue;
-            vip_channel_t copy = *ch;
-            copy.category_id = cat_id;
-            copy.position = episode;
-            st = vip_channel_list_push(&episodes, &copy, &error);
-        }
+            return st;
     }
+    sort_episode_channels(episodes);
+    sort_season_channels(cards);
+    return VIP_OK;
+}
 
-    if (st == VIP_OK) {
-        sort_episode_channels(&episodes);
-        sort_season_channels(&cards);
-    }
+/* Release temporary M3U series lists after a failed build. */
+static void clear_m3u_series_lists(vip_category_list_t *cats, vip_channel_list_t *episodes,
+                                   vip_channel_list_t *cards) {
+    vip_category_list_clear(cats);
+    vip_channel_list_clear(episodes);
+    vip_channel_list_clear(cards);
+}
 
-    if (st != VIP_OK || cards.len == 0u || episodes.len == 0u) {
-        vip_category_list_clear(&cats);
-        vip_channel_list_clear(&episodes);
-        vip_channel_list_clear(&cards);
-        snprintf(a->status, sizeof(a->status), "Falha ao organizar série M3U: %s",
-                 error.message[0] ? error.message : "dados insuficientes");
-        return false;
-    }
-
+/* Swap a successful M3U series build into the current browse state. */
+static void activate_m3u_series_lists(app_t *a, const vip_channel_t *selected,
+                                      const char *series_name, vip_category_list_t cats,
+                                      vip_channel_list_t episodes, vip_channel_list_t cards) {
     vip_category_list_clear(&a->episode_categories);
     vip_channel_list_clear(&a->episode_channels);
     vip_channel_list_clear(&a->season_channels);
@@ -3043,11 +3136,55 @@ static bool start_m3u_series_load(app_t *a, size_t channel_index) {
     a->search[0] = '\0';
     browse_focus_grid(a);
     snprintf(a->series_title, sizeof(a->series_title), "%s", series_name);
-    snprintf(a->series_parent_id, sizeof(a->series_parent_id), "%s", selected->id ? selected->id : "");
-    snprintf(a->status, sizeof(a->status), "%zu temporadas • %zu episódios", cards.len, episodes.len);
+    snprintf(a->series_parent_id, sizeof(a->series_parent_id), "%s",
+             selected->id ? selected->id : "");
+    snprintf(a->status, sizeof(a->status), "%zu temporadas • %zu episódios",
+             cards.len, episodes.len);
     recalc_category_counts(a);
     load_media_state(a);
     rebuild_filter(a);
+}
+
+/* Start m3u series load. */
+static bool start_m3u_series_load(app_t *a, size_t channel_index) {
+    if (!a || !m3u_series_root(a) || channel_index >= a->catalogs[CONTENT_SERIES].channels.len)
+        return false;
+
+    vip_channel_t *selected = &a->catalogs[CONTENT_SERIES].channels.items[channel_index];
+    char series_name[256];
+    int selected_season = 0, selected_episode = 0;
+    if (!vip_m3u_parse_episode_label(selected->name, series_name, sizeof(series_name),
+                                     &selected_season, &selected_episode))
+        return false;
+    (void)selected_season;
+    (void)selected_episode;
+
+    int seasons[256];
+    size_t season_count = collect_m3u_series_seasons(
+        a, series_name, seasons, sizeof(seasons) / sizeof(seasons[0]));
+    if (season_count == 0u)
+        return false;
+    sort_m3u_seasons(seasons, season_count);
+
+    vip_category_list_t cats;
+    vip_channel_list_t episodes;
+    vip_channel_list_t cards;
+    vip_category_list_init(&cats);
+    vip_channel_list_init(&episodes);
+    vip_channel_list_init(&cards);
+    vip_error_t error = {0};
+
+    vip_status_t st = build_m3u_series_lists(
+        a, selected, series_name, seasons, season_count,
+        &cats, &episodes, &cards, &error);
+    if (st != VIP_OK || cards.len == 0u || episodes.len == 0u) {
+        clear_m3u_series_lists(&cats, &episodes, &cards);
+        snprintf(a->status, sizeof(a->status), "Falha ao organizar série M3U: %s",
+                 error.message[0] ? error.message : "dados insuficientes");
+        return false;
+    }
+
+    activate_m3u_series_lists(a, selected, series_name, cats, episodes, cards);
     return true;
 }
 
@@ -3192,6 +3329,40 @@ static bool write_all_fd(int fd, const char *data, size_t len) {
     return true;
 }
 
+extern char **environ;
+
+/* Spawn secret-tool directly with a fixed executable path and explicit file
+ * actions.  No shell is involved and no executable lookup uses PATH. */
+static bool spawn_secret_tool(const char *secret_tool, char *const argv[],
+                              int stdin_fd, int stdout_fd, pid_t *pid_out) {
+    if (!secret_tool || !secret_tool[0] || !argv || !pid_out)
+        return false;
+
+    posix_spawn_file_actions_t actions;
+    if (posix_spawn_file_actions_init(&actions) != 0)
+        return false;
+
+    int rc = 0;
+    if (stdin_fd >= 0)
+        rc = posix_spawn_file_actions_adddup2(&actions, stdin_fd, STDIN_FILENO);
+    if (rc == 0 && stdout_fd >= 0)
+        rc = posix_spawn_file_actions_adddup2(&actions, stdout_fd, STDOUT_FILENO);
+    if (rc == 0 && stdout_fd >= 0)
+        rc = posix_spawn_file_actions_addopen(
+            &actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+
+    pid_t pid = -1;
+    if (rc == 0)
+        rc = posix_spawn(&pid, secret_tool, &actions, NULL, argv, environ);
+
+    posix_spawn_file_actions_destroy(&actions);
+    if (rc != 0)
+        return false;
+
+    *pid_out = pid;
+    return true;
+}
+
 /* Password persistence is delegated to Secret Service via secret-tool.
  * SQLite stores only non-secret profile fields. */
 static bool keyring_store_password(const char *profile_id, const char *password) {
@@ -3199,29 +3370,28 @@ static bool keyring_store_password(const char *profile_id, const char *password)
     if (!keyring_profile_id_is_safe(profile_id) || !password || !password[0] ||
         !find_secret_tool(secret_tool, sizeof(secret_tool)))
         return false;
+
     int inpipe[2];
     if (pipe(inpipe) != 0)
         return false;
-    pid_t pid = fork();
-    if (pid == 0) {
-        dup2(inpipe[0], STDIN_FILENO);
-        close(inpipe[0]);
-        close(inpipe[1]);
-        char *const argv[] = {
-            "secret-tool", "store", "--label=Blazzing", "application", "visual-iptv",
-            "profile", (char *)profile_id, NULL
-        };
-        execv(secret_tool, argv);
-        _exit(127);
-    }
+
+    char *const argv[] = {
+        "secret-tool", "store", "--label=Blazzing", "application", "visual-iptv",
+        "profile", (char *)profile_id, NULL
+    };
+    pid_t pid = -1;
+    bool spawned = spawn_secret_tool(secret_tool, argv, inpipe[0], -1, &pid);
     close(inpipe[0]);
-    if (pid < 0) {
+    if (!spawned) {
         close(inpipe[1]);
         return false;
     }
+
     size_t len = strlen(password);
-    bool wrote = write_all_fd(inpipe[1], password, len) && write_all_fd(inpipe[1], "\n", 1u);
+    bool wrote = write_all_fd(inpipe[1], password, len) &&
+                 write_all_fd(inpipe[1], "\n", 1u);
     close(inpipe[1]);
+
     int status = 0;
     while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
     }
@@ -3233,37 +3403,31 @@ static bool keyring_lookup_password(const char *profile_id, char *out, size_t ca
     if (!out || cap == 0u)
         return false;
     out[0] = '\0';
+
     char secret_tool[256];
     if (!keyring_profile_id_is_safe(profile_id) ||
         !find_secret_tool(secret_tool, sizeof(secret_tool)))
         return false;
+
     int outpipe[2];
     if (pipe(outpipe) != 0)
         return false;
-    pid_t pid = fork();
-    if (pid == 0) {
-        dup2(outpipe[1], STDOUT_FILENO);
-        int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) {
-            dup2(devnull, STDERR_FILENO);
-            close(devnull);
-        }
-        close(outpipe[0]);
-        close(outpipe[1]);
-        char *const argv[] = {
-            "secret-tool", "lookup", "application", "visual-iptv",
-            "profile", (char *)profile_id, NULL
-        };
-        execv(secret_tool, argv);
-        _exit(127);
-    }
+
+    char *const argv[] = {
+        "secret-tool", "lookup", "application", "visual-iptv",
+        "profile", (char *)profile_id, NULL
+    };
+    pid_t pid = -1;
+    bool spawned = spawn_secret_tool(secret_tool, argv, -1, outpipe[1], &pid);
     close(outpipe[1]);
-    if (pid < 0) {
+    if (!spawned) {
         close(outpipe[0]);
         return false;
     }
+
     ssize_t n = read(outpipe[0], out, cap - 1u);
     close(outpipe[0]);
+
     int status = 0;
     while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
     }
@@ -3271,6 +3435,7 @@ static bool keyring_lookup_password(const char *profile_id, char *out, size_t ca
         out[0] = '\0';
         return false;
     }
+
     out[n] = '\0';
     while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r'))
         out[--n] = '\0';
@@ -3752,65 +3917,65 @@ static char *alternate_stream_url(app_t *a, const char *url) {
     return out;
 }
 
-/* Handle the maybe failover player operation. */
-static void maybe_failover_player(app_t *a) {
-    if (!a || a->screen != SCREEN_PLAYER || !a->player)
-        return;
-    if (vip_mpv_player_state(a->player) != VIP_PLAYER_ERROR)
-        return;
-    if (a->current_channel >= ACTIVE_CHANNELS(a).len)
-        return;
+/* Return whether a channel has a static fallback shard configured. */
+static bool channel_has_static_fallback(const vip_channel_t *channel) {
+    return channel && channel->fallback_id && channel->fallback_id[0] &&
+           channel->fallback_base && channel->fallback_base[0];
+}
 
-    vip_channel_t *channel = &ACTIVE_CHANNELS(a).items[a->current_channel];
+/* Load one resolved static fallback with the headers required by its source. */
+static vip_status_t load_static_fallback(app_t *a, const char *url,
+                                         const char *referer, const char *user_agent,
+                                         vip_error_t *error) {
+    bool plain_hls = a->player_item_live && stream_needs_forced_hls(url) &&
+                     (!referer || !referer[0]) && (!user_agent || !user_agent[0]);
+    if (plain_hls)
+        return vip_mpv_player_load_hls(a->player, url, error);
+    return vip_mpv_player_load_http(a->player, url, referer, user_agent, error);
+}
 
-    /*
-     * Lista static failover: fetch only the shard for this item, then try one
-     * direct source at a time. No playback proxy/Worker is involved.
-     */
-    if (channel->fallback_id && channel->fallback_id[0] &&
-        channel->fallback_base && channel->fallback_base[0]) {
-        char *url = NULL;
-        char *referer = NULL;
-        char *user_agent = NULL;
-        vip_error_t fallback_error = {0};
+/* Try the next direct source from the static-list fallback shard. */
+static bool try_static_player_fallback(app_t *a, vip_channel_t *channel) {
+    if (!channel_has_static_fallback(channel))
+        return false;
 
-        if (vip_m3u_fallback_variant(channel, a->player_fallback_attempt,
-                                     &url, &referer, &user_agent,
-                                     &fallback_error) == VIP_OK &&
-            url && url[0]) {
-            ++a->player_fallback_attempt;
-            fprintf(stderr, "[player] fonte falhou; tentando fallback estático %zu\n",
-                    a->player_fallback_attempt);
-            snprintf(a->player_status, sizeof(a->player_status),
-                     "Fonte indisponível; tentando alternativa %zu...",
-                     a->player_fallback_attempt);
-            a->player_open_ms = monotonic_ms();
-
-            vip_error_t error = {0};
-            vip_status_t st;
-            if (a->player_item_live && stream_needs_forced_hls(url) &&
-                (!referer || !referer[0]) && (!user_agent || !user_agent[0])) {
-                st = vip_mpv_player_load_hls(a->player, url, &error);
-            } else {
-                st = vip_mpv_player_load_http(a->player, url, referer, user_agent, &error);
-            }
-            if (st != VIP_OK)
-                snprintf(a->player_status, sizeof(a->player_status), "%s", error.message);
-
-            free(url);
-            free(referer);
-            free(user_agent);
-            return;
-        }
-
+    char *url = NULL;
+    char *referer = NULL;
+    char *user_agent = NULL;
+    vip_error_t fallback_error = {0};
+    vip_status_t resolved = vip_m3u_fallback_variant(
+        channel, a->player_fallback_attempt, &url, &referer, &user_agent, &fallback_error);
+    if (resolved != VIP_OK || !url || !url[0]) {
         free(url);
         free(referer);
         free(user_agent);
+        return false;
     }
 
-    /* Existing Xtream mirror fallback remains available for Xtream profiles. */
+    ++a->player_fallback_attempt;
+    fprintf(stderr, "[player] fonte falhou; tentando fallback estático %zu\n",
+            a->player_fallback_attempt);
+    snprintf(a->player_status, sizeof(a->player_status),
+             "Fonte indisponível; tentando alternativa %zu...",
+             a->player_fallback_attempt);
+    a->player_open_ms = monotonic_ms();
+
+    vip_error_t error = {0};
+    vip_status_t st = load_static_fallback(a, url, referer, user_agent, &error);
+    if (st != VIP_OK)
+        snprintf(a->player_status, sizeof(a->player_status), "%s", error.message);
+
+    free(url);
+    free(referer);
+    free(user_agent);
+    return true;
+}
+
+/* Try the configured Xtream mirror after direct source fallbacks are exhausted. */
+static void try_xtream_player_mirror(app_t *a, const vip_channel_t *channel) {
     if (a->player_xtream_alt_attempted)
         return;
+
     char *url = alternate_stream_url(a, channel->stream_url);
     a->player_xtream_alt_attempted = true;
     if (!url)
@@ -3824,6 +3989,21 @@ static void maybe_failover_player(app_t *a) {
     if (vip_mpv_player_load(a->player, url, &error) != VIP_OK)
         snprintf(a->player_status, sizeof(a->player_status), "%s", error.message);
     free(url);
+}
+
+/* Handle the maybe failover player operation. */
+static void maybe_failover_player(app_t *a) {
+    if (!a || a->screen != SCREEN_PLAYER || !a->player)
+        return;
+    if (vip_mpv_player_state(a->player) != VIP_PLAYER_ERROR)
+        return;
+    if (a->current_channel >= ACTIVE_CHANNELS(a).len)
+        return;
+
+    vip_channel_t *channel = &ACTIVE_CHANNELS(a).items[a->current_channel];
+    if (try_static_player_fallback(a, channel))
+        return;
+    try_xtream_player_mirror(a, channel);
 }
 
 /* Draw input. */
@@ -5308,6 +5488,432 @@ static bool is_activate_key(KeySym sym) {
     return sym == XK_Return || sym == XK_KP_Enter || sym == XK_Select;
 }
 
+/* Seek or zap from the player with one horizontal key. */
+static bool handle_player_horizontal_key(app_t *a, KeySym sym) {
+    if (sym != XK_Left && sym != XK_Right)
+        return false;
+    int delta = sym == XK_Left ? -1 : 1;
+    if (a->player_item_live)
+        switch_relative_channel(a, delta);
+    else if (a->player) {
+        vip_error_t e = {0};
+        (void)vip_mpv_player_seek_relative(a->player, (double)delta * 10.0, &e);
+    }
+    return true;
+}
+
+/* Adjust the current player volume and keep it in the UI range. */
+static void adjust_player_volume(app_t *a, double delta) {
+    if (!a->player)
+        return;
+    vip_mpv_player_snapshot_t sn = {0};
+    vip_mpv_player_snapshot(a->player, &sn);
+    vip_error_t e = {0};
+    double volume = sn.volume + delta;
+    if (volume < 0.0)
+        volume = 0.0;
+    if (volume > 100.0)
+        volume = 100.0;
+    (void)vip_mpv_player_set_volume(a->player, volume, &e);
+}
+
+/* Handle player key input. */
+static void handle_player_key(app_t *a, KeySym sym) {
+    show_player_hud(a);
+    if (is_navigation_back(sym) || sym == XK_BackSpace) {
+        leave_player(a);
+        return;
+    }
+    if (sym == XK_space && a->player) {
+        vip_mpv_player_set_paused(a->player, !vip_mpv_player_is_paused(a->player));
+        save_current_progress(a, true);
+        return;
+    }
+    if (handle_player_horizontal_key(a, sym))
+        return;
+    if (sym == XK_Up) {
+        adjust_player_volume(a, 5.0);
+        return;
+    }
+    if (sym == XK_Down)
+        adjust_player_volume(a, -5.0);
+}
+
+/* Handle Ctrl+1/2/3 content switching. */
+static bool handle_browse_content_shortcut(app_t *a, KeySym sym) {
+    switch (sym) {
+    case XK_1:
+        switch_content(a, CONTENT_LIVE);
+        browse_focus_top(a, BROWSE_TOP_TV);
+        return true;
+    case XK_2:
+        switch_content(a, CONTENT_VOD);
+        browse_focus_top(a, BROWSE_TOP_MOVIES);
+        return true;
+    case XK_3:
+        switch_content(a, CONTENT_SERIES);
+        browse_focus_top(a, BROWSE_TOP_SERIES);
+        return true;
+    default:
+        return false;
+    }
+}
+
+/* Handle non-content Ctrl shortcuts on the browse screen. */
+static bool handle_browse_command_shortcut(app_t *a, KeySym sym) {
+    if (sym == XK_l || sym == XK_L) {
+        if (a->thumbs)
+            vip_thumbnail_scheduler_cancel_pending(a->thumbs);
+        refresh_profiles(a);
+        a->screen = SCREEN_LOGIN;
+        a->input_focus = INPUT_MODE;
+        return true;
+    }
+    if (sym == XK_f || sym == XK_F) {
+        browse_focus_top(a, BROWSE_TOP_SEARCH);
+        return true;
+    }
+    if (sym != XK_d && sym != XK_D)
+        return false;
+    if (a->filtered_len == 0u)
+        return false;
+    if (a->focused_filtered >= a->filtered_len)
+        a->focused_filtered = a->filtered_len - 1u;
+    toggle_favorite(a, a->filtered[a->focused_filtered]);
+    return true;
+}
+
+/* Handle global browse shortcuts before focus-local navigation. */
+static bool handle_browse_shortcut(app_t *a, KeySym sym, bool ctrl) {
+    if (!ctrl)
+        return false;
+    if (handle_browse_content_shortcut(a, sym))
+        return true;
+    return handle_browse_command_shortcut(a, sym);
+}
+
+/* Handle top-bar browse focus. */
+static bool handle_browse_top_key(app_t *a, KeySym sym) {
+    if (sym == XK_Left) {
+        int next = a->browse_top_focus - 1;
+        if (next < BROWSE_TOP_TV)
+            next = BROWSE_TOP_LISTS;
+        browse_focus_top(a, next);
+        return true;
+    }
+    if (sym == XK_Right) {
+        int next = a->browse_top_focus + 1;
+        if (next > BROWSE_TOP_LISTS)
+            next = BROWSE_TOP_TV;
+        browse_focus_top(a, next);
+        return true;
+    }
+    if (sym == XK_Down) {
+        if (a->browse_top_focus <= BROWSE_TOP_SERIES)
+            browse_focus_sidebar(a, a->selected_category >= 0 ? a->selected_category : -1);
+        else
+            browse_focus_grid(a);
+        return true;
+    }
+    if (sym == XK_Up)
+        return true;
+    if (is_activate_key(sym)) {
+        browse_activate_top(a);
+        return true;
+    }
+    return false;
+}
+
+/* Handle sidebar browse focus. */
+static bool handle_browse_sidebar_key(app_t *a, KeySym sym) {
+    int min_item = a->series_episode_mode ? -2 : -1;
+    int max_item = ACTIVE_CATEGORIES(a).len > 0u ? (int)ACTIVE_CATEGORIES(a).len - 1 : -1;
+    if (sym == XK_Up) {
+        if (a->browse_sidebar_focus <= min_item)
+            browse_focus_top(a, (int)a->content_kind);
+        else
+            browse_focus_sidebar(a, a->browse_sidebar_focus - 1);
+        return true;
+    }
+    if (sym == XK_Down) {
+        if (a->browse_sidebar_focus < max_item)
+            browse_focus_sidebar(a, a->browse_sidebar_focus + 1);
+        return true;
+    }
+    if (sym == XK_Right) {
+        browse_focus_grid(a);
+        return true;
+    }
+    if (sym == XK_Left)
+        return true;
+    if (is_activate_key(sym)) {
+        browse_activate_sidebar(a);
+        return true;
+    }
+    return false;
+}
+
+/* Handle grid browse focus. */
+static bool handle_browse_grid_key(app_t *a, KeySym sym) {
+    int cols = browse_columns(a);
+    size_t row = cols > 0 ? a->focused_filtered / (size_t)cols : 0u;
+    size_t col = cols > 0 ? a->focused_filtered % (size_t)cols : 0u;
+
+    if (sym == XK_Left) {
+        if (col == 0u)
+            browse_focus_sidebar(a, a->selected_category >= 0 ? a->selected_category : -1);
+        else
+            move_grid_focus(a, -1, 0);
+        return true;
+    }
+    if (sym == XK_Right) {
+        move_grid_focus(a, 1, 0);
+        return true;
+    }
+    if (sym == XK_Up) {
+        if (row == 0u)
+            browse_focus_top(a, BROWSE_TOP_SEARCH);
+        else
+            move_grid_focus(a, 0, -1);
+        return true;
+    }
+    if (sym == XK_Down) {
+        move_grid_focus(a, 0, 1);
+        return true;
+    }
+    if (is_activate_key(sym) && a->filtered_len > 0u) {
+        if (a->focused_filtered >= a->filtered_len)
+            a->focused_filtered = a->filtered_len - 1u;
+        activate_item(a, a->filtered[a->focused_filtered]);
+        return true;
+    }
+    return false;
+}
+
+/* Dispatch navigation within the currently focused browse region. */
+static bool handle_browse_focus_key(app_t *a, KeySym sym) {
+    if (a->browse_focus == BROWSE_FOCUS_TOP)
+        return handle_browse_top_key(a, sym);
+    if (a->browse_focus == BROWSE_FOCUS_SIDEBAR)
+        return handle_browse_sidebar_key(a, sym);
+    return handle_browse_grid_key(a, sym);
+}
+
+/* Backspace the active browse search field when it contains text. */
+static bool handle_browse_search_backspace(app_t *a, KeySym sym) {
+    if (sym != XK_BackSpace || a->browse_focus != BROWSE_FOCUS_TOP ||
+        a->browse_top_focus != BROWSE_TOP_SEARCH || !a->search[0])
+        return false;
+    backspace_input(a);
+    return true;
+}
+
+/* Handle Back/Escape semantics on the browse screen. */
+static bool handle_browse_back_key(app_t *a, KeySym sym) {
+    if (!is_navigation_back(sym) && sym != XK_BackSpace)
+        return false;
+    if (a->series_episode_mode) {
+        return_from_episode_list(a);
+        browse_focus_grid(a);
+        return true;
+    }
+    if (a->search[0]) {
+        a->search[0] = '\0';
+        rebuild_filter(a);
+        browse_focus_top(a, BROWSE_TOP_SEARCH);
+        return true;
+    }
+    if (a->thumbs)
+        vip_thumbnail_scheduler_cancel_pending(a->thumbs);
+    refresh_profiles(a);
+    a->screen = SCREEN_LOGIN;
+    a->input_focus = INPUT_MODE;
+    snprintf(a->status, sizeof(a->status), "Escolha uma lista ou adicione outra");
+    return true;
+}
+
+/* Handle paste, tab and printable browse-search input. */
+static bool handle_browse_search_input(app_t *a, KeySym sym, bool ctrl, bool shift,
+                                       bool printable, const char *buf, int n) {
+    if (ctrl && (sym == XK_v || sym == XK_V)) {
+        browse_focus_top(a, BROWSE_TOP_SEARCH);
+        request_paste(a, a->clipboard);
+        return true;
+    }
+    if (shift && sym == XK_Insert) {
+        browse_focus_top(a, BROWSE_TOP_SEARCH);
+        request_paste(a, XA_PRIMARY);
+        return true;
+    }
+    if (sym == XK_Tab) {
+        browse_focus_top(a, BROWSE_TOP_SEARCH);
+        return true;
+    }
+    if (!printable)
+        return false;
+    browse_focus_top(a, BROWSE_TOP_SEARCH);
+    append_input(a, buf, (size_t)n);
+    return true;
+}
+
+/* Handle browse back/search/paste input after local focus navigation. */
+static bool handle_browse_text_key(app_t *a, KeySym sym, bool ctrl, bool shift,
+                                   bool printable, const char *buf, int n) {
+    if (handle_browse_search_backspace(a, sym))
+        return true;
+    if (handle_browse_back_key(a, sym))
+        return true;
+    return handle_browse_search_input(a, sym, ctrl, shift, printable, buf, n);
+}
+
+/* Handle browse-screen key input. */
+static void handle_browse_key(app_t *a, KeySym sym, bool ctrl, bool shift,
+                              bool printable, const char *buf, int n) {
+    if (handle_browse_shortcut(a, sym, ctrl))
+        return;
+    if (handle_browse_focus_key(a, sym))
+        return;
+    (void)handle_browse_text_key(a, sym, ctrl, shift, printable, buf, n);
+}
+
+/* Activate the selected saved profile. */
+static void activate_saved_profile(app_t *a) {
+    if (a->profiles.len == 0u)
+        return;
+    size_t index = (size_t)a->profile_focus;
+    if (index >= a->profiles.len)
+        index = a->profiles.len - 1u;
+    load_profile_into_form(a, index);
+    if (a->server[0] &&
+        (a->login_mode == LOGIN_M3U || (a->username[0] && a->password[0])))
+        start_login(a, false);
+}
+
+/* Handle movement within the saved-profile picker. */
+static bool handle_saved_profile_navigation(app_t *a, KeySym sym) {
+    if (is_navigation_back(sym) || sym == XK_BackSpace || sym == XK_Left) {
+        a->input_focus = INPUT_PROFILE_NAME;
+        return true;
+    }
+    if (sym == XK_Right)
+        return true;
+    if (sym == XK_Up) {
+        if (a->profile_focus > 0)
+            --a->profile_focus;
+        login_profile_ensure_visible(a);
+        return true;
+    }
+    if (sym == XK_Down) {
+        if ((size_t)(a->profile_focus + 1) < a->profiles.len)
+            ++a->profile_focus;
+        login_profile_ensure_visible(a);
+        return true;
+    }
+    return false;
+}
+
+/* Handle the saved-profile picker on the login screen. */
+static bool handle_saved_profile_key(app_t *a, KeySym sym) {
+    if (a->input_focus != INPUT_SAVED_PROFILE)
+        return false;
+    if (handle_saved_profile_navigation(a, sym))
+        return true;
+    if (is_activate_key(sym))
+        activate_saved_profile(a);
+    return true;
+}
+
+/* Handle pairing-specific login keys before ordinary field navigation. */
+static bool handle_login_pairing_key(app_t *a, KeySym sym) {
+    if (a->login_mode == LOGIN_M3U && sym == XK_F2) {
+        a->input_focus = INPUT_PHONE;
+        start_phone_pairing(a);
+        return true;
+    }
+    if (!a->pairing_relay || (!is_navigation_back(sym) && sym != XK_BackSpace))
+        return false;
+    stop_phone_pairing(a);
+    a->pairing_retry_ready = false;
+    snprintf(a->status, sizeof(a->status), "Pareamento cancelado");
+    a->input_focus = INPUT_PHONE;
+    return true;
+}
+
+/* Handle arrows and Back on ordinary login fields. */
+static bool handle_login_focus_key(app_t *a, KeySym sym) {
+    if (sym == XK_Up) {
+        login_move_focus(a, -1);
+        return true;
+    }
+    if (sym == XK_Down) {
+        login_move_focus(a, 1);
+        return true;
+    }
+    if (a->input_focus == INPUT_MODE && (sym == XK_Left || sym == XK_Right)) {
+        login_select_mode(a, a->login_mode == LOGIN_XTREAM ? LOGIN_M3U : LOGIN_XTREAM);
+        return true;
+    }
+    if (sym == XK_Right && a->profiles.len > 0u && !a->pairing_relay) {
+        login_focus_saved_profiles(a);
+        return true;
+    }
+    return is_navigation_back(sym);
+}
+
+/* Handle paste and tab navigation on the login form. */
+static bool handle_login_edit_shortcut(app_t *a, KeySym sym, bool ctrl, bool shift) {
+    if (ctrl && (sym == XK_v || sym == XK_V)) {
+        request_paste(a, a->clipboard);
+        return true;
+    }
+    if (shift && sym == XK_Insert) {
+        request_paste(a, XA_PRIMARY);
+        return true;
+    }
+    if (sym != XK_Tab)
+        return false;
+    login_move_focus(a, shift ? -1 : 1);
+    return true;
+}
+
+/* Activate the focused login control. */
+static bool handle_login_activate_key(app_t *a, KeySym sym) {
+    if (!is_activate_key(sym))
+        return false;
+    if (a->input_focus == INPUT_PHONE && a->login_mode == LOGIN_M3U)
+        start_phone_pairing(a);
+    else if (a->input_focus != INPUT_MODE)
+        start_login(a, true);
+    return true;
+}
+
+/* Handle direct text editing on the login form. */
+static void handle_login_text_key(app_t *a, KeySym sym, bool printable,
+                                  const char *buf, int n) {
+    if (sym == XK_BackSpace) {
+        backspace_input(a);
+        return;
+    }
+    if (printable)
+        append_input(a, buf, (size_t)n);
+}
+
+/* Handle login-screen key input. */
+static void handle_login_key(app_t *a, KeySym sym, bool ctrl, bool shift,
+                             bool printable, const char *buf, int n) {
+    if (handle_login_pairing_key(a, sym))
+        return;
+    if (handle_saved_profile_key(a, sym))
+        return;
+    if (handle_login_focus_key(a, sym))
+        return;
+    if (handle_login_edit_shortcut(a, sym, ctrl, shift))
+        return;
+    if (handle_login_activate_key(a, sym))
+        return;
+    handle_login_text_key(a, sym, printable, buf, n);
+}
+
 /* Handle key. */
 static void handle_key(app_t *a, XKeyEvent *kev) {
     KeySym sym = NoSymbol;
@@ -5328,310 +5934,15 @@ static void handle_key(app_t *a, XKeyEvent *kev) {
         show_player_hud(a);
         return;
     }
-
     if (a->screen == SCREEN_PLAYER) {
-        show_player_hud(a);
-        if (is_navigation_back(sym) || sym == XK_BackSpace) {
-            leave_player(a);
-            return;
-        }
-        if (sym == XK_space && a->player) {
-            vip_mpv_player_set_paused(a->player, !vip_mpv_player_is_paused(a->player));
-            save_current_progress(a, true);
-            return;
-        }
-        if (sym == XK_Left) {
-            if (a->player_item_live)
-                switch_relative_channel(a, -1);
-            else if (a->player) {
-                vip_error_t e = {0};
-                (void)vip_mpv_player_seek_relative(a->player, -10.0, &e);
-            }
-            return;
-        }
-        if (sym == XK_Right) {
-            if (a->player_item_live)
-                switch_relative_channel(a, 1);
-            else if (a->player) {
-                vip_error_t e = {0};
-                (void)vip_mpv_player_seek_relative(a->player, 10.0, &e);
-            }
-            return;
-        }
-        if ((sym == XK_Up || sym == XK_Down) && a->player) {
-            vip_mpv_player_snapshot_t sn = {0};
-            vip_mpv_player_snapshot(a->player, &sn);
-            vip_error_t e = {0};
-            double v = sn.volume + (sym == XK_Up ? 5.0 : -5.0);
-            if (v < 0.0)
-                v = 0.0;
-            if (v > 100.0)
-                v = 100.0;
-            (void)vip_mpv_player_set_volume(a->player, v, &e);
-            return;
-        }
+        handle_player_key(a, sym);
         return;
     }
-
     if (a->screen == SCREEN_BROWSE) {
-        if (ctrl && sym == XK_1) {
-            switch_content(a, CONTENT_LIVE);
-            browse_focus_top(a, BROWSE_TOP_TV);
-            return;
-        }
-        if (ctrl && sym == XK_2) {
-            switch_content(a, CONTENT_VOD);
-            browse_focus_top(a, BROWSE_TOP_MOVIES);
-            return;
-        }
-        if (ctrl && sym == XK_3) {
-            switch_content(a, CONTENT_SERIES);
-            browse_focus_top(a, BROWSE_TOP_SERIES);
-            return;
-        }
-        if (ctrl && (sym == XK_l || sym == XK_L)) {
-            if (a->thumbs)
-                vip_thumbnail_scheduler_cancel_pending(a->thumbs);
-            refresh_profiles(a);
-            a->screen = SCREEN_LOGIN;
-            a->input_focus = INPUT_MODE;
-            return;
-        }
-        if (ctrl && (sym == XK_f || sym == XK_F)) {
-            browse_focus_top(a, BROWSE_TOP_SEARCH);
-            return;
-        }
-        if (ctrl && (sym == XK_d || sym == XK_D) && a->filtered_len > 0u) {
-            if (a->focused_filtered >= a->filtered_len)
-                a->focused_filtered = a->filtered_len - 1u;
-            toggle_favorite(a, a->filtered[a->focused_filtered]);
-            return;
-        }
-
-        if (a->browse_focus == BROWSE_FOCUS_TOP) {
-            if (sym == XK_Left) {
-                int next = a->browse_top_focus - 1;
-                if (next < BROWSE_TOP_TV)
-                    next = BROWSE_TOP_LISTS;
-                browse_focus_top(a, next);
-                return;
-            }
-            if (sym == XK_Right) {
-                int next = a->browse_top_focus + 1;
-                if (next > BROWSE_TOP_LISTS)
-                    next = BROWSE_TOP_TV;
-                browse_focus_top(a, next);
-                return;
-            }
-            if (sym == XK_Down) {
-                if (a->browse_top_focus <= BROWSE_TOP_SERIES)
-                    browse_focus_sidebar(a, a->selected_category >= 0 ? a->selected_category : -1);
-                else
-                    browse_focus_grid(a);
-                return;
-            }
-            if (sym == XK_Up)
-                return;
-            if (is_activate_key(sym)) {
-                browse_activate_top(a);
-                return;
-            }
-        } else if (a->browse_focus == BROWSE_FOCUS_SIDEBAR) {
-            int min_item = a->series_episode_mode ? -2 : -1;
-            int max_item = ACTIVE_CATEGORIES(a).len > 0u ? (int)ACTIVE_CATEGORIES(a).len - 1 : -1;
-            if (sym == XK_Up) {
-                if (a->browse_sidebar_focus <= min_item)
-                    browse_focus_top(a, (int)a->content_kind);
-                else
-                    browse_focus_sidebar(a, a->browse_sidebar_focus - 1);
-                return;
-            }
-            if (sym == XK_Down) {
-                if (a->browse_sidebar_focus < max_item)
-                    browse_focus_sidebar(a, a->browse_sidebar_focus + 1);
-                return;
-            }
-            if (sym == XK_Right) {
-                browse_focus_grid(a);
-                return;
-            }
-            if (sym == XK_Left)
-                return;
-            if (is_activate_key(sym)) {
-                browse_activate_sidebar(a);
-                return;
-            }
-        } else {
-            int cols = browse_columns(a);
-            size_t row = cols > 0 ? a->focused_filtered / (size_t)cols : 0u;
-            size_t col = cols > 0 ? a->focused_filtered % (size_t)cols : 0u;
-            if (sym == XK_Left) {
-                if (col == 0u)
-                    browse_focus_sidebar(a, a->selected_category >= 0 ? a->selected_category : -1);
-                else
-                    move_grid_focus(a, -1, 0);
-                return;
-            }
-            if (sym == XK_Right) {
-                move_grid_focus(a, 1, 0);
-                return;
-            }
-            if (sym == XK_Up) {
-                if (row == 0u)
-                    browse_focus_top(a, BROWSE_TOP_SEARCH);
-                else
-                    move_grid_focus(a, 0, -1);
-                return;
-            }
-            if (sym == XK_Down) {
-                move_grid_focus(a, 0, 1);
-                return;
-            }
-            if (is_activate_key(sym) && a->filtered_len > 0u) {
-                if (a->focused_filtered >= a->filtered_len)
-                    a->focused_filtered = a->filtered_len - 1u;
-                activate_item(a, a->filtered[a->focused_filtered]);
-                return;
-            }
-        }
-
-        if (sym == XK_BackSpace && a->browse_focus == BROWSE_FOCUS_TOP &&
-            a->browse_top_focus == BROWSE_TOP_SEARCH && a->search[0]) {
-            backspace_input(a);
-            return;
-        }
-        if (is_navigation_back(sym) || sym == XK_BackSpace) {
-            if (a->series_episode_mode) {
-                return_from_episode_list(a);
-                browse_focus_grid(a);
-                return;
-            }
-            if (a->search[0]) {
-                a->search[0] = '\0';
-                rebuild_filter(a);
-                browse_focus_top(a, BROWSE_TOP_SEARCH);
-                return;
-            }
-            if (a->thumbs)
-                vip_thumbnail_scheduler_cancel_pending(a->thumbs);
-            refresh_profiles(a);
-            a->screen = SCREEN_LOGIN;
-            a->input_focus = INPUT_MODE;
-            snprintf(a->status, sizeof(a->status), "Escolha uma lista ou adicione outra");
-            return;
-        }
-        if (ctrl && (sym == XK_v || sym == XK_V)) {
-            browse_focus_top(a, BROWSE_TOP_SEARCH);
-            request_paste(a, a->clipboard);
-            return;
-        }
-        if (shift && sym == XK_Insert) {
-            browse_focus_top(a, BROWSE_TOP_SEARCH);
-            request_paste(a, XA_PRIMARY);
-            return;
-        }
-        if (sym == XK_Tab) {
-            browse_focus_top(a, BROWSE_TOP_SEARCH);
-            return;
-        }
-        if (printable) {
-            browse_focus_top(a, BROWSE_TOP_SEARCH);
-            append_input(a, buf, (size_t)n);
-            return;
-        }
+        handle_browse_key(a, sym, ctrl, shift, printable, buf, n);
         return;
     }
-
-    if (a->login_mode == LOGIN_M3U && sym == XK_F2) {
-        a->input_focus = INPUT_PHONE;
-        start_phone_pairing(a);
-        return;
-    }
-    if (a->pairing_relay && (is_navigation_back(sym) || sym == XK_BackSpace)) {
-        stop_phone_pairing(a);
-        a->pairing_retry_ready = false;
-        snprintf(a->status, sizeof(a->status), "Pareamento cancelado");
-        a->input_focus = INPUT_PHONE;
-        return;
-    }
-    if (a->input_focus == INPUT_SAVED_PROFILE) {
-        if (sym == XK_Up) {
-            if (a->profile_focus > 0)
-                --a->profile_focus;
-            login_profile_ensure_visible(a);
-            return;
-        }
-        if (sym == XK_Down) {
-            if ((size_t)(a->profile_focus + 1) < a->profiles.len)
-                ++a->profile_focus;
-            login_profile_ensure_visible(a);
-            return;
-        }
-        if (sym == XK_Left || is_navigation_back(sym) || sym == XK_BackSpace) {
-            a->input_focus = INPUT_PROFILE_NAME;
-            return;
-        }
-        if (sym == XK_Right)
-            return;
-        if (is_activate_key(sym)) {
-            if (a->profiles.len == 0u)
-                return;
-            size_t index = (size_t)a->profile_focus;
-            if (index >= a->profiles.len)
-                index = a->profiles.len - 1u;
-            load_profile_into_form(a, index);
-            if (a->server[0] &&
-                (a->login_mode == LOGIN_M3U || (a->username[0] && a->password[0])))
-                start_login(a, false);
-            return;
-        }
-        return;
-    }
-    if (sym == XK_Up) {
-        login_move_focus(a, -1);
-        return;
-    }
-    if (sym == XK_Down) {
-        login_move_focus(a, 1);
-        return;
-    }
-    if (a->input_focus == INPUT_MODE && (sym == XK_Left || sym == XK_Right)) {
-        login_select_mode(a, a->login_mode == LOGIN_XTREAM ? LOGIN_M3U : LOGIN_XTREAM);
-        return;
-    }
-    if (sym == XK_Right && a->profiles.len > 0u && !a->pairing_relay) {
-        login_focus_saved_profiles(a);
-        return;
-    }
-    if (is_navigation_back(sym))
-        return;
-    if (ctrl && (sym == XK_v || sym == XK_V)) {
-        request_paste(a, a->clipboard);
-        return;
-    }
-    if (shift && sym == XK_Insert) {
-        request_paste(a, XA_PRIMARY);
-        return;
-    }
-    if (sym == XK_Tab) {
-        login_move_focus(a, shift ? -1 : 1);
-        return;
-    }
-    if (is_activate_key(sym)) {
-        if (a->input_focus == INPUT_PHONE && a->login_mode == LOGIN_M3U)
-            start_phone_pairing(a);
-        else if (a->input_focus == INPUT_MODE)
-            return;
-        else
-            start_login(a, true);
-        return;
-    }
-    if (sym == XK_BackSpace) {
-        backspace_input(a);
-        return;
-    }
-    if (printable)
-        append_input(a, buf, (size_t)n);
+    handle_login_key(a, sym, ctrl, shift, printable, buf, n);
 }
 
 /* Handle selection. */
@@ -5655,6 +5966,141 @@ static void handle_selection(app_t *a, XSelectionEvent *sel) {
     }
 }
 
+/* Apply ConfigureNotify only for the top-level application window. */
+static void handle_configure_event(app_t *a, const XConfigureEvent *event) {
+    /*
+     * video_win also selects StructureNotifyMask and emits ConfigureNotify
+     * events (including its initial 1px geometry). Treating those as main
+     * window resizes collapses the player container to 1px high.
+     */
+    if (event->window != a->win)
+        return;
+    a->width = event->width;
+    a->height = event->height;
+    if (a->screen == SCREEN_PLAYER)
+        layout_video_window(a);
+}
+
+/* Synchronize fullscreen state after the WM changes _NET_WM_STATE. */
+static void handle_property_event(app_t *a, const XPropertyEvent *event) {
+    if (event->window != a->win ||
+        event->atom != XInternAtom(a->dpy, "_NET_WM_STATE", False))
+        return;
+    bool actual = wm_reports_fullscreen(a);
+    if (actual || !a->fullscreen_fallback)
+        a->fullscreen = actual || a->fullscreen_fallback;
+    if (a->fullscreen)
+        layout_video_window(a);
+}
+
+/* Seek while dragging the player timeline. */
+static void handle_timeline_motion(app_t *a, const XMotionEvent *event) {
+    if (!a->timeline_dragging || a->player_item_live || !a->player ||
+        event->window != a->win)
+        return;
+
+    int tx, ty, tw, th;
+    timeline_geometry(a, &tx, &ty, &tw, &th);
+    vip_mpv_player_snapshot_t sn = {0};
+    vip_mpv_player_snapshot(a->player, &sn);
+    if (sn.duration_seconds <= 0 || event->x < tx || event->x > tx + tw)
+        return;
+
+    double pos = ((double)(event->x - tx) / (double)tw) * sn.duration_seconds;
+    vip_error_t error = {0};
+    (void)vip_mpv_player_seek(a->player, pos, &error);
+}
+
+/* Handle pointer motion for browse hover or player HUD/timeline. */
+static void handle_motion_event(app_t *a, const XMotionEvent *event) {
+    if (a->screen == SCREEN_BROWSE && event->window == a->win) {
+        update_browse_hover(a, event->x, event->y);
+        return;
+    }
+    if (a->screen != SCREEN_PLAYER)
+        return;
+
+    show_player_hud(a);
+    if (getenv("VIPTV_MPV_DEBUG"))
+        fprintf(stderr, "[mpv-debug] input MotionNotify window=%lu\n",
+                (unsigned long)event->window);
+    handle_timeline_motion(a, event);
+}
+
+/* Clear browse hover state after the pointer leaves the window. */
+static void handle_leave_event(app_t *a) {
+    if (a->screen != SCREEN_BROWSE)
+        return;
+    a->mouse_inside = false;
+    if (a->hovered_card_valid)
+        vip_ui_motion_set_target(&a->hover_motion, 0.0f, monotonic_ms());
+    a->hovered_control = HOVER_NONE;
+    vip_ui_motion_init(&a->control_motion, 0.0f, monotonic_ms());
+    a->ui_motion_active = true;
+}
+
+/* Finish mouse interactions after releasing the primary button. */
+static void handle_button_release_event(app_t *a, const XButtonEvent *event) {
+    if (event->button != Button1)
+        return;
+    a->mouse_down = false;
+    if (a->screen != SCREEN_PLAYER)
+        return;
+    a->timeline_dragging = false;
+    save_current_progress(a, true);
+    show_player_hud(a);
+}
+
+/* Return whether a player-surface click was consumed before normal UI hit-testing. */
+static bool handle_player_surface_press(app_t *a, const XButtonEvent *event) {
+    if (a->screen != SCREEN_PLAYER ||
+        (event->window != a->video_win && event->window != a->player_input_win))
+        return false;
+    show_player_hud(a);
+    focus_player_input(a);
+    if (getenv("VIPTV_MPV_DEBUG"))
+        fprintf(stderr, "[mpv-debug] input ButtonPress window=%lu button=%u\n",
+                (unsigned long)event->window, event->button);
+    return true;
+}
+
+/* Dispatch a mouse button press after player-surface handling. */
+static void handle_button_press_event(app_t *a, const XButtonEvent *event) {
+    a->mouse_down = true;
+    if (handle_player_surface_press(a, event))
+        return;
+    if (event->button == Button1)
+        handle_click(a, event->x, event->y);
+    else if (event->button == Button4)
+        handle_wheel(a, event->x, event->y, -1);
+    else if (event->button == Button5)
+        handle_wheel(a, event->x, event->y, 1);
+    else if (event->button == Button2)
+        request_paste(a, XA_PRIMARY);
+}
+
+/* Log and dispatch an X11 key press. */
+static void handle_key_press_event(app_t *a, XKeyEvent *event) {
+    if (a->screen == SCREEN_PLAYER && getenv("VIPTV_MPV_DEBUG"))
+        fprintf(stderr, "[mpv-debug] input KeyPress window=%lu keycode=%u\n",
+                (unsigned long)event->window, event->keycode);
+    handle_key(a, event);
+}
+
+/* Diagnose focus changes and recover player input focus when necessary. */
+static void handle_focus_event(app_t *a, const XFocusChangeEvent *event, int type) {
+    if (a->screen == SCREEN_PLAYER && getenv("VIPTV_MPV_DEBUG")) {
+        Window focus = None;
+        int revert = 0;
+        XGetInputFocus(a->dpy, &focus, &revert);
+        fprintf(stderr, "[mpv-debug] input %s event-window=%lu current-focus=%lu\n",
+                type == FocusIn ? "FocusIn" : "FocusOut",
+                (unsigned long)event->window, (unsigned long)focus);
+    }
+    if (type == FocusOut && a->screen == SCREEN_PLAYER)
+        recover_player_focus_if_needed(a, event);
+}
+
 /* Single-threaded X11 event dispatch.  Background jobs communicate by
  * state/flags and are observed from the main loop rather than calling Xlib. */
 static void process_event(app_t *a, XEvent *e) {
@@ -5662,110 +6108,33 @@ static void process_event(app_t *a, XEvent *e) {
     case Expose:
         break;
     case ConfigureNotify:
-        /* Only the top-level application window owns the global layout size.
-           video_win also selects StructureNotifyMask and emits ConfigureNotify
-           events (including its initial 1px geometry). Treating those as main
-           window resizes collapses the player container to 1px high. */
-        if (e->xconfigure.window == a->win) {
-            a->width = e->xconfigure.width;
-            a->height = e->xconfigure.height;
-            if (a->screen == SCREEN_PLAYER)
-                layout_video_window(a);
-        }
+        handle_configure_event(a, &e->xconfigure);
         break;
     case ClientMessage:
         if ((Atom)e->xclient.data.l[0] == a->wm_delete)
             a->quit = true;
         break;
     case PropertyNotify:
-        if (e->xproperty.window == a->win &&
-            e->xproperty.atom == XInternAtom(a->dpy, "_NET_WM_STATE", False)) {
-            bool actual = wm_reports_fullscreen(a);
-            if (actual || !a->fullscreen_fallback)
-                a->fullscreen = actual || a->fullscreen_fallback;
-            if (a->fullscreen)
-                layout_video_window(a);
-        }
+        handle_property_event(a, &e->xproperty);
         break;
     case MotionNotify:
-        if (a->screen == SCREEN_BROWSE && e->xmotion.window == a->win) {
-            update_browse_hover(a, e->xmotion.x, e->xmotion.y);
-        } else if (a->screen == SCREEN_PLAYER) {
-            show_player_hud(a);
-            if (getenv("VIPTV_MPV_DEBUG"))
-                fprintf(stderr, "[mpv-debug] input MotionNotify window=%lu\n",
-                        (unsigned long)e->xmotion.window);
-            if (a->timeline_dragging && !a->player_item_live && a->player && e->xmotion.window == a->win) {
-                int tx, ty, tw, th;
-                timeline_geometry(a, &tx, &ty, &tw, &th);
-                vip_mpv_player_snapshot_t sn = {0};
-                vip_mpv_player_snapshot(a->player, &sn);
-                if (sn.duration_seconds > 0 && e->xmotion.x >= tx && e->xmotion.x <= tx + tw) {
-                    double pos = ((double)(e->xmotion.x - tx) / (double)tw) * sn.duration_seconds;
-                    vip_error_t er = {0};
-                    (void)vip_mpv_player_seek(a->player, pos, &er);
-                }
-            }
-        }
+        handle_motion_event(a, &e->xmotion);
         break;
     case LeaveNotify:
-        if (a->screen == SCREEN_BROWSE) {
-            a->mouse_inside = false;
-            if (a->hovered_card_valid)
-                vip_ui_motion_set_target(&a->hover_motion, 0.0f, monotonic_ms());
-            a->hovered_control = HOVER_NONE;
-            vip_ui_motion_init(&a->control_motion, 0.0f, monotonic_ms());
-            a->ui_motion_active = true;
-        }
+        handle_leave_event(a);
         break;
     case ButtonRelease:
-        if (e->xbutton.button == Button1) {
-            a->mouse_down = false;
-            if (a->screen == SCREEN_PLAYER) {
-                a->timeline_dragging = false;
-                save_current_progress(a, true);
-                show_player_hud(a);
-            }
-        }
+        handle_button_release_event(a, &e->xbutton);
         break;
     case ButtonPress:
-        a->mouse_down = true;
-        if (a->screen == SCREEN_PLAYER &&
-            (e->xbutton.window == a->video_win || e->xbutton.window == a->player_input_win)) {
-            show_player_hud(a);
-            focus_player_input(a);
-            if (getenv("VIPTV_MPV_DEBUG"))
-                fprintf(stderr, "[mpv-debug] input ButtonPress window=%lu button=%u\n",
-                        (unsigned long)e->xbutton.window, e->xbutton.button);
-            break;
-        }
-        if (e->xbutton.button == Button1)
-            handle_click(a, e->xbutton.x, e->xbutton.y);
-        else if (e->xbutton.button == Button4)
-            handle_wheel(a, e->xbutton.x, e->xbutton.y, -1);
-        else if (e->xbutton.button == Button5)
-            handle_wheel(a, e->xbutton.x, e->xbutton.y, 1);
-        else if (e->xbutton.button == Button2)
-            request_paste(a, XA_PRIMARY);
+        handle_button_press_event(a, &e->xbutton);
         break;
     case KeyPress:
-        if (a->screen == SCREEN_PLAYER && getenv("VIPTV_MPV_DEBUG"))
-            fprintf(stderr, "[mpv-debug] input KeyPress window=%lu keycode=%u\n",
-                    (unsigned long)e->xkey.window, e->xkey.keycode);
-        handle_key(a, &e->xkey);
+        handle_key_press_event(a, &e->xkey);
         break;
     case FocusIn:
     case FocusOut:
-        if (a->screen == SCREEN_PLAYER && getenv("VIPTV_MPV_DEBUG")) {
-            Window focus = None;
-            int revert = 0;
-            XGetInputFocus(a->dpy, &focus, &revert);
-            fprintf(stderr, "[mpv-debug] input %s event-window=%lu current-focus=%lu\n",
-                    e->type == FocusIn ? "FocusIn" : "FocusOut", (unsigned long)e->xfocus.window,
-                    (unsigned long)focus);
-        }
-        if (e->type == FocusOut && a->screen == SCREEN_PLAYER)
-            recover_player_focus_if_needed(a, &e->xfocus);
+        handle_focus_event(a, &e->xfocus, e->type);
         break;
     case SelectionNotify:
         handle_selection(a, &e->xselection);

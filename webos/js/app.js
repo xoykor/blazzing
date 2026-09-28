@@ -669,103 +669,124 @@
         searchTimer = setTimeout(applyFilters, 180);
     });
 
+    function categoryButtons() {
+        return byId("categories").querySelectorAll("[data-category-id]");
+    }
+
+    function eachCategoryButton(callback) {
+        Array.prototype.forEach.call(categoryButtons(), callback);
+    }
+
     function focusCategoryButton(id) {
-        var buttons = byId("categories").querySelectorAll("[data-category-id]");
-        var i;
-        for (i = 0; i < buttons.length; i += 1) {
-            if (buttons[i].getAttribute("data-category-id") === id) {
-                buttons[i].focus();
-                return;
+        var target = null;
+        eachCategoryButton(function (button) {
+            if (!target && button.getAttribute("data-category-id") === id) {
+                target = button;
             }
-        }
+        });
+        if (target) { target.focus(); }
     }
 
     function updateCategorySelection() {
-        var buttons = byId("categories").querySelectorAll("[data-category-id]");
-        var i;
-        for (i = 0; i < buttons.length; i += 1) {
-            buttons[i].classList.toggle(
+        eachCategoryButton(function (button) {
+            button.classList.toggle(
                 "active",
-                buttons[i].getAttribute("data-category-id") === state.category
+                button.getAttribute("data-category-id") === state.category
             );
-        }
+        });
+    }
+
+    function selectCategory(id) {
+        state.category = id;
+        updateCategorySelection();
+        applyFilters();
+        setTimeout(function () { focusCategoryButton(id); }, 0);
+    }
+
+    function categoryCounts() {
+        return state.catalog.items.reduce(function (counts, item) {
+            counts[item.categoryId] = (counts[item.categoryId] || 0) + 1;
+            return counts;
+        }, {});
+    }
+
+    function categoryButton(id, label, selected) {
+        var button = document.createElement("button");
+        button.textContent = label;
+        button.setAttribute("data-focusable", "true");
+        button.setAttribute("data-category-id", id);
+        button.className = selected ? "active" : "";
+        button.addEventListener("click", function () {
+            selectCategory(id);
+        });
+        return button;
     }
 
     function renderCategories() {
         var root = byId("categories");
-        var all = document.createElement("button");
-        var counts = {};
+        var counts = categoryCounts();
+        var fragment = document.createDocumentFragment();
 
-        state.catalog.items.forEach(function (item) {
-            counts[item.categoryId] = (counts[item.categoryId] || 0) + 1;
+        fragment.appendChild(categoryButton(
+            "all",
+            "Todos (" + state.catalog.items.length + ")",
+            state.category === "all"
+        ));
+
+        state.catalog.categories.forEach(function (category) {
+            var id = category.id;
+            var name = category.name || "Outros";
+            fragment.appendChild(categoryButton(
+                id,
+                name + " (" + (counts[id] || 0) + ")",
+                state.category === id
+            ));
         });
 
         root.innerHTML = "";
-
-        all.textContent = "Todos (" + state.catalog.items.length + ")";
-        all.setAttribute("data-focusable", "true");
-        all.setAttribute("data-category-id", "all");
-        all.className = state.category === "all" ? "active" : "";
-        all.addEventListener("click", function () {
-            state.category = "all";
-            updateCategorySelection();
-            applyFilters();
-            setTimeout(function () { focusCategoryButton("all"); }, 0);
-        });
-        root.appendChild(all);
-
-        state.catalog.categories.forEach(function (category) {
-            var button = document.createElement("button");
-            var count = counts[category.id] || 0;
-
-            button.textContent = (category.name || "Outros") + " (" + count + ")";
-            button.setAttribute("data-focusable", "true");
-            button.setAttribute("data-category-id", category.id);
-            button.className = state.category === category.id ? "active" : "";
-            button.addEventListener("click", function () {
-                state.category = category.id;
-                updateCategorySelection();
-                applyFilters();
-                setTimeout(function () {
-                    focusCategoryButton(category.id);
-                }, 0);
-            });
-            root.appendChild(button);
-        });
+        root.appendChild(fragment);
     }
 
     function searchableText(item, normalize) {
         if (!item._searchText) {
-            item._searchText = normalize(
-                String(item.name || "") + " " +
+            item._searchText = normalize([
+                String(item.name || ""),
                 String(item.categoryName || item.group || "")
-            );
+            ].join(" "));
         }
         return item._searchText;
     }
 
-    function applyFilters() {
-        var normalize = window.BlazzingProviders.normalizeWords || function (value) {
+    function catalogNormalizer() {
+        return window.BlazzingProviders.normalizeWords || function (value) {
             return String(value || "").toLowerCase();
         };
+    }
+
+    function itemPassesFilters(item, query, favorites, normalize) {
+        if (state.category !== "all" && item.categoryId !== state.category) {
+            return false;
+        }
+        if (query && searchableText(item, normalize).indexOf(query) === -1) {
+            return false;
+        }
+        return !state.favoritesOnly || !!favorites[item.uid];
+    }
+
+    function applyFilters() {
+        var normalize = catalogNormalizer();
         var query = normalize(byId("catalog-search").value);
         var favorites = window.BlazzingStorage.favorites();
 
         state.filtered = state.catalog.items.filter(function (item) {
-            var categoryOk = state.category === "all" ||
-                item.categoryId === state.category;
-            var queryOk = !query ||
-                searchableText(item, normalize).indexOf(query) !== -1;
-            var favoriteOk = !state.favoritesOnly || favorites[item.uid];
-
-            return categoryOk && queryOk && favoriteOk;
+            return itemPassesFilters(item, query, favorites, normalize);
         });
 
         renderGrid(true);
         byId("item-count").textContent = state.filtered.length + " itens";
     }
 
-    function renderCatalog() {
+    function updateSectionSelection() {
         Array.prototype.forEach.call(
             document.querySelectorAll("[data-section]"),
             function (button) {
@@ -775,21 +796,22 @@
                 );
             }
         );
+    }
 
+    function renderCatalog() {
+        updateSectionSelection();
         byId("content-title").textContent = sectionTitle(state.kind);
         byId("content-eyebrow").textContent = state.profile ?
             state.profile.name : "Catálogo";
         byId("catalog-search").value = "";
-
         renderCategories();
-        updateCategorySelection();
         applyFilters();
     }
 
     function safeImageUrl(url) {
-        url = String(url || "").replace(/^\s+|\s+$/g, "");
-        if (/^https?:\/\//i.test(url)) { return url; }
-        if (/^\/\//.test(url)) { return "https:" + url; }
+        var value = String(url || "").replace(/^\s+|\s+$/g, "");
+        if (/^https?:\/\//i.test(value)) { return value; }
+        if (/^\/\//.test(value)) { return "https:" + value; }
         return "";
     }
 
@@ -800,54 +822,50 @@
         return span;
     }
 
+    function imageTaskIsCurrent(task) {
+        return !!task.image && !!task.image.parentNode &&
+            task.generation === state.renderGeneration;
+    }
+
+    function finishImageTask(task, success) {
+        if (task.finished) { return; }
+        task.finished = true;
+
+        if (task.timeout) {
+            clearTimeout(task.timeout);
+            task.timeout = 0;
+        }
+        activeImageLoads = Math.max(0, activeImageLoads - 1);
+
+        if (imageTaskIsCurrent(task)) {
+            task.image.classList.toggle("loaded", !!success);
+            task.image.classList.toggle("failed", !success);
+            if (!success) {
+                try { task.image.parentNode.removeChild(task.image); }
+                catch (ignoreRemove) {}
+            }
+        }
+        setTimeout(pumpImageQueue, 0);
+    }
+
+    function startImageTask(task) {
+        if (!imageTaskIsCurrent(task)) { return; }
+
+        activeImageLoads += 1;
+        task.finished = false;
+        task.image.onload = function () { finishImageTask(task, true); };
+        task.image.onerror = function () { finishImageTask(task, false); };
+        task.timeout = setTimeout(function () {
+            if (task.finished) { return; }
+            try { task.image.src = ""; } catch (ignoreAbort) {}
+            finishImageTask(task, false);
+        }, 12000);
+        task.image.src = task.url;
+    }
+
     function pumpImageQueue() {
         while (activeImageLoads < MAX_IMAGE_LOADS && imageQueue.length) {
-            (function (task) {
-                var image = task.image;
-                var finished = false;
-
-                if (!image || !image.parentNode ||
-                        task.generation !== state.renderGeneration) {
-                    return;
-                }
-
-                activeImageLoads += 1;
-
-                function finishImageLoad(success) {
-                    if (finished) { return; }
-                    finished = true;
-                    if (task.timeout) {
-                        clearTimeout(task.timeout);
-                        task.timeout = 0;
-                    }
-                    activeImageLoads = Math.max(0, activeImageLoads - 1);
-
-                    if (image && image.parentNode &&
-                            task.generation === state.renderGeneration) {
-                        image.classList.toggle("loaded", !!success);
-                        image.classList.toggle("failed", !success);
-                        if (!success) {
-                            try { image.parentNode.removeChild(image); }
-                            catch (ignoreRemove) {}
-                        }
-                    }
-
-                    setTimeout(pumpImageQueue, 0);
-                }
-
-                image.onload = function () { finishImageLoad(true); };
-                image.onerror = function () { finishImageLoad(false); };
-
-                /* Avoid keeping broken remote image requests alive forever. */
-                task.timeout = setTimeout(function () {
-                    if (!finished) {
-                        try { image.src = ""; } catch (ignoreAbort) {}
-                        finishImageLoad(false);
-                    }
-                }, 12000);
-
-                image.src = task.url;
-            }(imageQueue.shift()));
+            startImageTask(imageQueue.shift());
         }
     }
 
@@ -860,19 +878,29 @@
             image: image,
             url: url,
             generation: state.renderGeneration,
-            timeout: 0
+            timeout: 0,
+            finished: false
         });
         pumpImageQueue();
     }
 
     function observeImage(image, url) {
         image.setAttribute("data-src", url);
-
         if (imageObserver) {
             imageObserver.observe(image);
-        } else {
-            enqueueImage(image, url);
+            return;
         }
+        enqueueImage(image, url);
+    }
+
+    function enqueueVisibleImages(entries) {
+        entries.forEach(function (entry) {
+            if (!entry.isIntersecting) { return; }
+            var image = entry.target;
+            var url = image.getAttribute("data-src") || "";
+            try { imageObserver.unobserve(image); } catch (ignoreUnobserve) {}
+            enqueueImage(image, url);
+        });
     }
 
     function resetImagePipeline() {
@@ -883,25 +911,12 @@
             try { imageObserver.disconnect(); } catch (ignoreDisconnect) {}
         }
 
-        if (window.IntersectionObserver) {
-            imageObserver = new IntersectionObserver(function (entries) {
-                entries.forEach(function (entry) {
-                    var image;
-                    var url;
-                    if (!entry.isIntersecting) { return; }
-                    image = entry.target;
-                    url = image.getAttribute("data-src") || "";
-                    try { imageObserver.unobserve(image); } catch (ignoreUnobserve) {}
-                    enqueueImage(image, url);
-                });
-            }, {
+        imageObserver = window.IntersectionObserver ?
+            new IntersectionObserver(enqueueVisibleImages, {
                 root: byId("catalog-grid").parentNode,
                 rootMargin: "650px 0px",
                 threshold: 0.01
-            });
-        } else {
-            imageObserver = null;
-        }
+            }) : null;
     }
 
     function makeCard(item, index) {

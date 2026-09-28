@@ -255,19 +255,28 @@
         return name === "Back" || keyCode === 10009 || keyCode === 27;
     }
 
-    function isPlaybackToggleKey(name, keyCode) {
-        return name === "MediaPlayPause" || name === "MediaPlay" ||
-            name === "MediaPause" || keyCode === 13 || keyCode === 32 ||
-            keyCode === 415 || keyCode === 19;
-    }
-
-    function playerItemIsLive() {
-        var item = window.BlazzingPlayer.item();
-        return !!item && item.kind === "live";
+    function playerKeyAction(name, keyCode) {
+        if (isBackKey(name, keyCode)) { return "back"; }
+        if (name === "MediaPlayPause" || name === "MediaPlay" ||
+                name === "MediaPause" || keyCode === 13 || keyCode === 32 ||
+                keyCode === 415 || keyCode === 19) {
+            return "toggle";
+        }
+        if (name === "MediaStop" || keyCode === 413) { return "stop"; }
+        if (keyCode === 37 || name === "MediaRewind" || keyCode === 412) {
+            return "rewind";
+        }
+        if (keyCode === 39 || name === "MediaFastForward" || keyCode === 417) {
+            return "forward";
+        }
+        if (keyCode === 38) { return "volume-up"; }
+        if (keyCode === 40) { return "volume-down"; }
+        return "";
     }
 
     function seekOrZap(seconds, liveDelta) {
-        if (playerItemIsLive()) {
+        var item = window.BlazzingPlayer.item();
+        if (item && item.kind === "live") {
             switchLive(liveDelta);
         } else {
             window.BlazzingPlayer.seek(seconds);
@@ -275,36 +284,32 @@
         showHud();
     }
 
-    function handlePlayerKey(name, keyCode) {
-        if (isBackKey(name, keyCode)) {
+    function runPlayerAction(action) {
+        if (action === "back") {
             goBack();
-            return true;
-        }
-        if (isPlaybackToggleKey(name, keyCode)) {
+        } else if (action === "toggle") {
             window.BlazzingPlayer.togglePause();
             showHud();
-            return true;
-        }
-        if (name === "MediaStop" || keyCode === 413) {
+        } else if (action === "stop") {
             closePlayer();
-            return true;
-        }
-        if (keyCode === 37 || name === "MediaRewind" || keyCode === 412) {
+        } else if (action === "rewind") {
             seekOrZap(-10, -1);
-            return true;
-        }
-        if (keyCode === 39 || name === "MediaFastForward" || keyCode === 417) {
+        } else if (action === "forward") {
             seekOrZap(10, 1);
-            return true;
-        }
-        if ((keyCode === 38 || keyCode === 40) &&
+        } else if ((action === "volume-up" || action === "volume-down") &&
                 window.BlazzingPlayer.adjustVolume) {
-            window.BlazzingPlayer.adjustVolume(keyCode === 38 ? 5 : -5);
+            window.BlazzingPlayer.adjustVolume(action === "volume-up" ? 5 : -5);
             showHud();
-            return true;
+        } else {
+            return false;
         }
-        showHud();
-        return false;
+        return true;
+    }
+
+    function handlePlayerKey(name, keyCode) {
+        var handled = runPlayerAction(playerKeyAction(name, keyCode));
+        if (!handled) { showHud(); }
+        return handled;
     }
 
     function focusedCatalogItem() {
@@ -411,38 +416,52 @@
         return true;
     }
 
+    function handleCatalogCommand(event, code, name) {
+        if (state.view !== "catalog" ||
+                (name !== "ColorF2Yellow" && code !== 405)) {
+            return false;
+        }
+        event.preventDefault();
+        toggleFocusedFavorite();
+        return true;
+    }
+
+    function handleActivationKey(event, code, active, isInput) {
+        if (code !== 13 || isInput) { return false; }
+        if (active && active.click) {
+            event.preventDefault();
+            active.click();
+        }
+        return true;
+    }
+
+    function directionForKey(code) {
+        if (code === 37) { return "left"; }
+        if (code === 38) { return "up"; }
+        if (code === 39) { return "right"; }
+        if (code === 40) { return "down"; }
+        return "";
+    }
+
+    function handleDirectionalKey(event, code, isInput) {
+        var direction;
+        if (isInput && (code === 37 || code === 39)) { return true; }
+        direction = directionForKey(code);
+        if (!direction) { return false; }
+        event.preventDefault();
+        geometricMove(direction);
+        return true;
+    }
+
     function handleNavigationKey(event, code, name, active, isInput) {
         if (isBackKey(name, code)) {
             event.preventDefault();
             goBack();
             return true;
         }
-        if (state.view === "catalog" &&
-                (name === "ColorF2Yellow" || code === 405)) {
-            event.preventDefault();
-            toggleFocusedFavorite();
-            return true;
-        }
-        if (code === 13 && !isInput) {
-            if (active && active.click) {
-                event.preventDefault();
-                active.click();
-            }
-            return true;
-        }
-        if (isInput && (code === 37 || code === 39)) {
-            return true;
-        }
-        if (code !== 37 && code !== 38 && code !== 39 && code !== 40) {
-            return false;
-        }
-        event.preventDefault();
-        geometricMove(
-            code === 37 ? "left" :
-            code === 38 ? "up" :
-            code === 39 ? "right" : "down"
-        );
-        return true;
+        return handleCatalogCommand(event, code, name) ||
+            handleActivationKey(event, code, active, isInput) ||
+            handleDirectionalKey(event, code, isInput);
     }
 
     document.addEventListener("keydown", function (event) {
@@ -477,19 +496,27 @@
         setMode("xtream");
     });
 
+    function clearPairingDisplay() {
+        byId("pairing-qr").innerHTML = "";
+        byId("pairing-url").textContent = "";
+    }
+
+    function setPairingVisible(visible) {
+        state.pairingActive = !!visible;
+        byId("pairing-modal").classList.toggle("hidden", !visible);
+    }
+
     function setPairingStatus(message, kind) {
         var target = byId("pairing-status");
         var retry = byId("pairing-retry");
         if (!target) { return; }
+
         target.textContent = message || "";
         target.setAttribute("data-state", kind || "");
+        if (retry) { retry.classList.toggle("hidden", kind !== "expired"); }
 
-        if (retry) {
-            retry.classList.toggle("hidden", kind !== "expired");
-        }
         if (kind === "expired") {
-            byId("pairing-qr").innerHTML = "";
-            byId("pairing-url").textContent = "";
+            clearPairingDisplay();
             setTimeout(function () {
                 if (state.pairingActive && retry) { retry.focus(); }
             }, 0);
@@ -497,28 +524,41 @@
     }
 
     function cancelPairing() {
-        if (window.BlazzingPairing) {
-            window.BlazzingPairing.stop();
-        }
-        state.pairingActive = false;
-        byId("pairing-modal").classList.add("hidden");
+        if (window.BlazzingPairing) { window.BlazzingPairing.stop(); }
+        setPairingVisible(false);
         setTimeout(focusFirst, 0);
     }
 
-    function acceptPairedPlaylist(profile) {
-        var normalized = {
+    function pairedProfile(profile) {
+        return {
             type: "m3u",
             name: profile.name || "Lista do celular",
             url: profile.url
         };
+    }
 
-        state.pairingActive = false;
-        byId("pairing-modal").classList.add("hidden");
+    function acceptPairedPlaylist(profile) {
+        var normalized = pairedProfile(profile);
+        setPairingVisible(false);
         setMode("m3u");
         byId("profile-name").value = normalized.name;
         byId("m3u-url").value = normalized.url;
         byId("save-profile").checked = true;
         connectM3u(normalized, false);
+    }
+
+    function showPairingSession(session) {
+        if (!state.pairingActive) { return; }
+        byId("pairing-qr").innerHTML = session.qrSvg;
+        byId("pairing-url").textContent = session.url;
+    }
+
+    function showPairingError(error) {
+        if (!state.pairingActive) { return; }
+        setPairingStatus(
+            error.message || "Não foi possível iniciar o pareamento.",
+            "error"
+        );
     }
 
     function startPairing() {
@@ -527,31 +567,15 @@
             return;
         }
 
-        state.pairingActive = true;
-        byId("pairing-modal").classList.remove("hidden");
-        byId("pairing-qr").innerHTML = "";
-        byId("pairing-url").textContent = "";
+        setPairingVisible(true);
+        clearPairingDisplay();
         setPairingStatus("Preparando sessão segura…", "creating");
         setTimeout(focusFirst, 0);
 
         window.BlazzingPairing.start(
             acceptPairedPlaylist,
             setPairingStatus
-        ).then(function (session) {
-            if (!state.pairingActive) {
-                return;
-            }
-            byId("pairing-qr").innerHTML = session.qrSvg;
-            byId("pairing-url").textContent = session.url;
-        }).catch(function (error) {
-            if (!state.pairingActive) {
-                return;
-            }
-            setPairingStatus(
-                error.message || "Não foi possível iniciar o pareamento.",
-                "error"
-            );
-        });
+        ).then(showPairingSession).catch(showPairingError);
     }
 
     byId("pair-button").addEventListener("click", startPairing);
@@ -660,42 +684,68 @@
         return { onlyKind: kind };
     }
 
+    function parseStoredM3uSection(profile, kind, options) {
+        var parser = window.BlazzingProviders.createM3uParser(
+            profile.url,
+            options
+        );
+        var summaryOnly = kind === "series" && !!options.seriesSummaryOnly;
+
+        return window.BlazzingStorage.streamCachedPlaylistSection(
+            profile.url,
+            kind,
+            summaryOnly,
+            function (chunk) {
+                parser.consumeTextChunk(chunk);
+            }
+        ).then(function (row) {
+            var catalogs;
+
+            if (!row) { return null; }
+            if (!parser.hasM3uMarker()) {
+                throw new Error("cache M3U inválido");
+            }
+
+            catalogs = parser.finish();
+            return catalogs[kind] || { items: [], categories: [] };
+        });
+    }
+
+    function reportPlaylistIndexProgress(readChars) {
+        var mib = Math.floor(readChars / (1024 * 1024));
+        setBusy(true, "Otimizando playlist… " + mib + " MiB");
+    }
+
+    function buildStoredM3uSectionCaches(profile) {
+        /*
+         * A primeira abertura após baixar/atualizar a M3U faz uma única
+         * varredura grande e cria arquivos menores para TV, Filmes e Séries.
+         * As trocas seguintes leem apenas a seção necessária.
+         */
+        setBusy(true, "Otimizando playlist para a TV…");
+        return window.BlazzingStorage.buildPlaylistSectionCaches(
+            profile.url,
+            window.BlazzingProviders.classifyM3uEntry,
+            reportPlaylistIndexProgress
+        );
+    }
+
+    function rebuildStoredM3uCatalog(profile, kind, options) {
+        return buildStoredM3uSectionCaches(profile).then(function () {
+            return parseStoredM3uSection(profile, kind, options);
+        }).then(function (catalog) {
+            if (!catalog) {
+                throw new Error("Falha ao criar índice da playlist.");
+            }
+            return catalog;
+        });
+    }
+
     function loadStoredM3uCatalog(profile, kind, options) {
         options = options || m3uParserOptions(kind);
 
-        function parseSectionCache() {
-            var parser = window.BlazzingProviders.createM3uParser(
-                profile.url,
-                options
-            );
-            var summaryOnly = kind === "series" && !!options.seriesSummaryOnly;
-
-            return window.BlazzingStorage.streamCachedPlaylistSection(
-                profile.url,
-                kind,
-                summaryOnly,
-                function (chunk) {
-                    parser.consumeTextChunk(chunk);
-                }
-            ).then(function (row) {
-                var catalogs;
-
-                if (!row) {
-                    return null;
-                }
-                if (!parser.hasM3uMarker()) {
-                    throw new Error("cache M3U inválido");
-                }
-
-                catalogs = parser.finish();
-                return catalogs[kind] || { items: [], categories: [] };
-            });
-        }
-
-        return parseSectionCache().then(function (catalog) {
-            if (catalog) {
-                return catalog;
-            }
+        return parseStoredM3uSection(profile, kind, options).then(function (catalog) {
+            if (catalog) { return catalog; }
 
             /*
              * Se nem o índice nem a playlist bruta existem, esta é uma
@@ -706,32 +756,8 @@
             return window.BlazzingStorage.cachedPlaylistExists(
                 profile.url
             ).then(function (exists) {
-                if (!exists) {
-                    return null;
-                }
-
-                /*
-                 * A primeira abertura após baixar/atualizar a M3U faz uma única
-                 * varredura grande e cria arquivos menores para TV, Filmes e
-                 * Séries. As trocas seguintes leem apenas a seção necessária.
-                 */
-                setBusy(true, "Otimizando playlist para a TV…");
-
-                return window.BlazzingStorage.buildPlaylistSectionCaches(
-                    profile.url,
-                    window.BlazzingProviders.classifyM3uEntry,
-                    function (readChars) {
-                        var mib = Math.floor(readChars / (1024 * 1024));
-                        setBusy(true, "Otimizando playlist… " + mib + " MiB");
-                    }
-                ).then(function () {
-                    return parseSectionCache();
-                }).then(function (indexedCatalog) {
-                    if (!indexedCatalog) {
-                        throw new Error("Falha ao criar índice da playlist.");
-                    }
-                    return indexedCatalog;
-                });
+                if (!exists) { return null; }
+                return rebuildStoredM3uCatalog(profile, kind, options);
             });
         });
     }
@@ -769,61 +795,73 @@
         });
     }
 
-    function downloadAndStoreM3u(profile, kind, refreshing) {
-        setBusy(true, refreshing ? "Atualizando playlist…" : "Baixando playlist pela primeira vez…");
+    function showM3uDownloadError(error) {
+        setBusy(false);
+        showToast(error.message || "Falha ao baixar ou armazenar a playlist.");
+    }
 
-        if (realTizenDevice()) {
-            /*
-             * O XMLHttpRequest mantém responseText inteiro na heap JavaScript.
-             * Em uma playlist de ~85 MiB isso pode derrubar o Web Runtime da TV.
-             * O Download API do Tizen grava direto no filesystem e mantém a
-             * playlist fora da heap durante a transferência.
-             */
-            window.BlazzingStorage.downloadPlaylistToCache(profile.url, {
-                timeout: 180000,
-                maxBytes: window.BlazzingNet.MAX_RESPONSE_BYTES,
-                onProgress: function (receivedSize, totalSize) {
-                    var receivedMiB = Math.floor(receivedSize / (1024 * 1024));
-                    var totalMiB = totalSize > 0 ?
-                        Math.floor(totalSize / (1024 * 1024)) : 0;
-                    setBusy(
-                        true,
-                        refreshing ?
-                            "Atualizando playlist… " + receivedMiB +
-                                (totalMiB ? "/" + totalMiB : "") + " MiB" :
-                            "Baixando playlist… " + receivedMiB +
-                                (totalMiB ? "/" + totalMiB : "") + " MiB"
-                    );
-                }
-            }).then(function () {
-                return openStoredM3u(profile, kind);
-            }).catch(function (error) {
-                setBusy(false);
-                showToast(error.message || "Falha ao baixar ou armazenar a playlist.");
-            });
-            return;
+    function playlistDownloadProgress(refreshing, receivedSize, totalSize) {
+        var receivedMiB = Math.floor(receivedSize / (1024 * 1024));
+        var totalMiB = totalSize > 0 ?
+            Math.floor(totalSize / (1024 * 1024)) : 0;
+        var prefix = refreshing ? "Atualizando playlist… " : "Baixando playlist… ";
+
+        setBusy(
+            true,
+            prefix + receivedMiB + (totalMiB ? "/" + totalMiB : "") + " MiB"
+        );
+    }
+
+    function downloadM3uToTizenCache(profile, kind, refreshing) {
+        /*
+         * O XMLHttpRequest mantém responseText inteiro na heap JavaScript.
+         * Em uma playlist de ~85 MiB isso pode derrubar o Web Runtime da TV.
+         * O Download API do Tizen grava direto no filesystem e mantém a
+         * playlist fora da heap durante a transferência.
+         */
+        return window.BlazzingStorage.downloadPlaylistToCache(profile.url, {
+            timeout: 180000,
+            maxBytes: window.BlazzingNet.MAX_RESPONSE_BYTES,
+            onProgress: function (receivedSize, totalSize) {
+                playlistDownloadProgress(refreshing, receivedSize, totalSize);
+            }
+        }).then(function () {
+            return openStoredM3u(profile, kind);
+        });
+    }
+
+    function cacheDownloadedM3u(profile, text) {
+        if (text.indexOf("#EXTM3U") === -1 &&
+                text.indexOf("#EXTINF:") === -1) {
+            throw new Error("O conteúdo recebido não parece ser uma playlist M3U.");
         }
+        return window.BlazzingStorage.saveCachedPlaylist(profile.url, text);
+    }
 
+    function downloadM3uInBrowser(profile, kind) {
         /*
          * Fallback para navegador/ambiente de desenvolvimento. Em TV real
          * nunca caímos neste XHR, pois materializar listas gigantes em
          * responseText é justamente o comportamento que queremos evitar.
          */
-        window.BlazzingNet.text(profile.url, {
+        return window.BlazzingNet.text(profile.url, {
             timeout: 60000,
             maxBytes: window.BlazzingNet.MAX_RESPONSE_BYTES
         }).then(function (text) {
-            if (text.indexOf("#EXTM3U") === -1 &&
-                    text.indexOf("#EXTINF:") === -1) {
-                throw new Error("O conteúdo recebido não parece ser uma playlist M3U.");
-            }
-            return window.BlazzingStorage.saveCachedPlaylist(profile.url, text);
+            return cacheDownloadedM3u(profile, text);
         }).then(function () {
             return openStoredM3u(profile, kind);
-        }).catch(function (error) {
-            setBusy(false);
-            showToast(error.message || "Falha ao baixar ou armazenar a playlist.");
         });
+    }
+
+    function downloadAndStoreM3u(profile, kind, refreshing) {
+        var download;
+
+        setBusy(true, refreshing ? "Atualizando playlist…" : "Baixando playlist pela primeira vez…");
+        download = realTizenDevice() ?
+            downloadM3uToTizenCache(profile, kind, refreshing) :
+            downloadM3uInBrowser(profile, kind);
+        download.catch(showM3uDownloadError);
     }
 
     function connectM3u(profile, forceReload, kind) {
@@ -1578,60 +1616,57 @@
         });
     }
 
-    function makeCard(item, index) {
-        var card = document.createElement("article");
-        var main = document.createElement("button");
+    function appendCardPosterImage(poster, item) {
+        var imageUrl = safeImageUrl(item.logo);
+        var image;
+
+        if (!imageUrl && !item.cardKey &&
+                item.kind !== "vod" && item.kind !== "series") {
+            return;
+        }
+
+        image = document.createElement("img");
+        image.alt = "";
+        image.className = "poster-image";
+        image.setAttribute("draggable", "false");
+        image.setAttribute("referrerpolicy", "no-referrer");
+        poster.appendChild(image);
+
+        if (imageUrl) {
+            observeImage(image, imageUrl);
+            return;
+        }
+
+        resolveCardLogo(item).then(function (resolvedUrl) {
+            resolvedUrl = safeImageUrl(resolvedUrl);
+            if (resolvedUrl) { observeImage(image, resolvedUrl); }
+        });
+    }
+
+    function makeCardPoster(item) {
         var poster = document.createElement("div");
+        poster.className = "poster";
+        poster.appendChild(posterFallback(item.name));
+        appendCardPosterImage(poster, item);
+        return poster;
+    }
+
+    function makeCardCopy(item) {
         var copy = document.createElement("div");
         var title = document.createElement("strong");
         var meta = document.createElement("small");
-        var favorite = document.createElement("span");
-        var imageUrl = safeImageUrl(item.logo);
-        var fallback = posterFallback(item.name);
-
-        card.className = "media-card kind-" + (item.kind || "item");
-        card.setAttribute("data-item-uid", item.uid);
-
-        main.className = "card-main";
-        main.setAttribute("data-focusable", "true");
-        main.setAttribute("data-item-uid", item.uid);
-        main.setAttribute("data-card-index", String(index));
-
-        poster.className = "poster";
-        poster.appendChild(fallback);
-
-        if (imageUrl || item.cardKey ||
-                item.kind === "vod" || item.kind === "series") {
-            var image = document.createElement("img");
-            image.alt = "";
-            image.className = "poster-image";
-            image.setAttribute("draggable", "false");
-            image.setAttribute("referrerpolicy", "no-referrer");
-            poster.appendChild(image);
-
-            if (imageUrl) {
-                observeImage(image, imageUrl);
-            } else {
-                resolveCardLogo(item).then(function (resolvedUrl) {
-                    resolvedUrl = safeImageUrl(resolvedUrl);
-                    if (resolvedUrl) {
-                        observeImage(image, resolvedUrl);
-                    }
-                });
-            }
-        }
 
         copy.className = "card-copy";
         title.textContent = item.name || "Item";
         meta.textContent = item.categoryName ||
             item.group ||
             sectionTitle(state.kind);
-
         copy.appendChild(title);
         copy.appendChild(meta);
-        main.appendChild(poster);
-        main.appendChild(copy);
+        return copy;
+    }
 
+    function bindCardMain(main, card, item) {
         main.addEventListener("click", function () {
             if (item.kind === "series") {
                 openSeries(item);
@@ -1639,7 +1674,6 @@
                 playItem(item);
             }
         });
-
         main.addEventListener("focus", function () {
             card.classList.add("focused");
             state.returnFocusUid = item.uid || "";
@@ -1648,7 +1682,10 @@
         main.addEventListener("blur", function () {
             card.classList.remove("focused");
         });
+    }
 
+    function makeFavoriteMarker(item) {
+        var favorite = document.createElement("span");
         favorite.className = "favorite" +
             (window.BlazzingStorage.isFavorite(item.uid) ? " on" : "");
         favorite.textContent = "★";
@@ -1660,9 +1697,24 @@
          * get trapped between the card and its favorite control. Favorites
          * are toggled with the yellow remote key instead.
          */
+        return favorite;
+    }
 
+    function makeCard(item, index) {
+        var card = document.createElement("article");
+        var main = document.createElement("button");
+
+        card.className = "media-card kind-" + (item.kind || "item");
+        card.setAttribute("data-item-uid", item.uid);
+        main.className = "card-main";
+        main.setAttribute("data-focusable", "true");
+        main.setAttribute("data-item-uid", item.uid);
+        main.setAttribute("data-card-index", String(index));
+        main.appendChild(makeCardPoster(item));
+        main.appendChild(makeCardCopy(item));
+        bindCardMain(main, card, item);
         card.appendChild(main);
-        card.appendChild(favorite);
+        card.appendChild(makeFavoriteMarker(item));
         return card;
     }
 
