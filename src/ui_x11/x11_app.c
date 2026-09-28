@@ -3405,86 +3405,207 @@ static void details_job_free(details_job_t *job) {
 }
 
 /* Run the details background worker. */
+static bool details_cache_fresh(int64_t updated_at) {
+    if (updated_at <= 0)
+        return false;
+    int64_t age = (int64_t)time(NULL) - updated_at;
+    return age >= 0 && age < 7LL * 24LL * 60LL * 60LL;
+}
+
+static bool load_details_cache(app_t *app,
+                               const details_job_t *job,
+                               vip_media_metadata_t *cached,
+                               bool *cache_found) {
+    *cache_found = false;
+    if (!app->db)
+        return false;
+
+    int64_t updated_at = 0;
+    vip_error_t error = {0};
+    if (vip_database_get_media_metadata(
+            app->db,
+            job->provider_id,
+            job->media_id,
+            cached,
+            &updated_at,
+            cache_found,
+            &error) != VIP_OK)
+        return false;
+
+    return *cache_found &&
+           metadata_has_content(cached) &&
+           details_cache_fresh(updated_at);
+}
+
+static void move_metadata(vip_media_metadata_t *destination,
+                          vip_media_metadata_t *source) {
+    vip_media_metadata_clear(destination);
+    *destination = *source;
+    memset(source, 0, sizeof(*source));
+}
+
+static vip_status_t fetch_details_remote(const details_job_t *job,
+                                         vip_media_metadata_t *metadata,
+                                         vip_error_t *error) {
+    vip_credentials_t credentials = {0};
+    vip_xtream_client_t *client = NULL;
+
+    vip_status_t status = vip_credentials_init(
+        &credentials,
+        job->server,
+        job->username,
+        job->password,
+        error
+    );
+    if (status == VIP_OK)
+        status = vip_xtream_client_create(&client, &credentials, error);
+
+    if (status == VIP_OK) {
+        if (job->kind == CONTENT_VOD) {
+            status = vip_xtream_vod_info(
+                client, job->media_id, metadata, error
+            );
+        } else {
+            status = vip_xtream_series_metadata(
+                client, job->media_id, metadata, error
+            );
+        }
+    }
+
+    if (client)
+        vip_xtream_client_destroy(client);
+    vip_credentials_clear(&credentials);
+    return status;
+}
+
+static void persist_details_metadata(app_t *app,
+                                     const details_job_t *job,
+                                     const vip_media_metadata_t *metadata) {
+    if (!app->db || !metadata_has_content(metadata))
+        return;
+
+    vip_error_t error = {0};
+    (void)vip_database_set_media_metadata(
+        app->db,
+        job->provider_id,
+        job->media_id,
+        metadata,
+        &error
+    );
+}
+
+static bool use_stale_details_cache(vip_status_t status,
+                                    bool cache_found,
+                                    vip_media_metadata_t *metadata,
+                                    vip_media_metadata_t *cached) {
+    if (status == VIP_OK ||
+        !cache_found ||
+        !metadata_has_content(cached))
+        return false;
+
+    move_metadata(metadata, cached);
+    return true;
+}
+
+static void publish_details_result(app_t *app,
+                                   const details_job_t *job,
+                                   vip_status_t status,
+                                   bool used_cache,
+                                   vip_media_metadata_t *metadata,
+                                   const vip_error_t *error,
+                                   bool *still_current_out) {
+    pthread_mutex_lock(&app->data_mutex);
+    bool still_current =
+        strcmp(app->details_media_id, job->media_id) == 0;
+
+    if (still_current) {
+        vip_media_metadata_clear(&app->details_metadata);
+        if (status == VIP_OK) {
+            app->details_metadata = *metadata;
+            memset(metadata, 0, sizeof(*metadata));
+            snprintf(
+                app->details_status,
+                sizeof(app->details_status),
+                "%s",
+                used_cache
+                    ? "Detalhes carregados do cache"
+                    : "Detalhes carregados"
+            );
+        } else {
+            char bounded_error[220];
+            bounded_text(
+                bounded_error,
+                sizeof(bounded_error),
+                error->message[0]
+                    ? error->message
+                    : "provider não retornou metadados",
+                90
+            );
+            snprintf(
+                app->details_status,
+                sizeof(app->details_status),
+                "Sem detalhes: %.220s",
+                bounded_error
+            );
+        }
+    }
+
+    pthread_mutex_unlock(&app->data_mutex);
+    *still_current_out = still_current;
+}
+
 static void *details_worker(void *userdata) {
     details_job_t *job = userdata;
-    app_t *a = job->app;
+    app_t *app = job->app;
+
     vip_media_metadata_t metadata;
     vip_media_metadata_init(&metadata);
     vip_media_metadata_t cached;
     vip_media_metadata_init(&cached);
+
     vip_error_t error = {0};
     bool cache_found = false;
-    int64_t cache_updated = 0;
-    bool used_cache = false;
-    vip_status_t st = VIP_ERR_NETWORK;
+    bool used_cache = load_details_cache(
+        app, job, &cached, &cache_found
+    );
 
-    if (a->db) {
-        vip_error_t cache_error = {0};
-        if (vip_database_get_media_metadata(a->db, job->provider_id, job->media_id, &cached, &cache_updated,
-                                            &cache_found, &cache_error) == VIP_OK &&
-            cache_found && metadata_has_content(&cached)) {
-            int64_t age = (int64_t)time(NULL) - cache_updated;
-            if (cache_updated > 0 && age >= 0 && age < 7LL * 24LL * 60LL * 60LL) {
-                metadata = cached;
-                memset(&cached, 0, sizeof(cached));
-                st = VIP_OK;
-                used_cache = true;
-            }
-        }
-    }
-
-    if (st != VIP_OK) {
-        vip_credentials_t credentials = {0};
-        vip_xtream_client_t *client = NULL;
-        st = vip_credentials_init(&credentials, job->server, job->username, job->password, &error);
-        if (st == VIP_OK)
-            st = vip_xtream_client_create(&client, &credentials, &error);
-        if (st == VIP_OK) {
-            if (job->kind == CONTENT_VOD)
-                st = vip_xtream_vod_info(client, job->media_id, &metadata, &error);
-            else
-                st = vip_xtream_series_metadata(client, job->media_id, &metadata, &error);
-        }
-        if (client)
-            vip_xtream_client_destroy(client);
-        vip_credentials_clear(&credentials);
-
-        if (st == VIP_OK && metadata_has_content(&metadata) && a->db) {
-            vip_error_t db_error = {0};
-            (void)vip_database_set_media_metadata(a->db, job->provider_id, job->media_id, &metadata,
-                                                  &db_error);
-        } else if (st != VIP_OK && cache_found && metadata_has_content(&cached)) {
-            vip_media_metadata_clear(&metadata);
-            metadata = cached;
-            memset(&cached, 0, sizeof(cached));
-            st = VIP_OK;
+    vip_status_t status = VIP_ERR_NETWORK;
+    if (used_cache) {
+        move_metadata(&metadata, &cached);
+        status = VIP_OK;
+    } else {
+        status = fetch_details_remote(job, &metadata, &error);
+        if (status == VIP_OK)
+            persist_details_metadata(app, job, &metadata);
+        else if (use_stale_details_cache(
+                     status,
+                     cache_found,
+                     &metadata,
+                     &cached)) {
+            status = VIP_OK;
             used_cache = true;
         }
     }
 
-    pthread_mutex_lock(&a->data_mutex);
-    bool still_current = strcmp(a->details_media_id, job->media_id) == 0;
-    if (still_current) {
-        vip_media_metadata_clear(&a->details_metadata);
-        if (st == VIP_OK) {
-            a->details_metadata = metadata;
-            memset(&metadata, 0, sizeof(metadata));
-            snprintf(a->details_status, sizeof(a->details_status), "%s",
-                     used_cache ? "Detalhes carregados do cache" : "Detalhes carregados");
-        } else {
-            char bounded_error[220];
-            bounded_text(bounded_error, sizeof(bounded_error),
-                         error.message[0] ? error.message : "provider não retornou metadados", 90);
-            snprintf(a->details_status, sizeof(a->details_status), "Sem detalhes: %.220s", bounded_error);
-        }
-    }
-    pthread_mutex_unlock(&a->data_mutex);
+    bool still_current = false;
+    publish_details_result(
+        app,
+        job,
+        status,
+        used_cache,
+        &metadata,
+        &error,
+        &still_current
+    );
 
     vip_media_metadata_clear(&metadata);
     vip_media_metadata_clear(&cached);
-    atomic_store(&a->details_success, still_current && st == VIP_OK);
-    atomic_store(&a->details_running, false);
-    atomic_store(&a->details_done, true);
+    atomic_store(
+        &app->details_success,
+        still_current && status == VIP_OK
+    );
+    atomic_store(&app->details_running, false);
+    atomic_store(&app->details_done, true);
     details_job_free(job);
     return NULL;
 }
