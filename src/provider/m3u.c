@@ -445,46 +445,61 @@ static char *resolve_url(const char *source, const char *stream) {
 
 
 /* Resolve one alternative URL from a static fallback shard. */
-vip_status_t vip_m3u_fallback_variant(const vip_channel_t *channel, size_t alternative_index,
-                                      char **url_out, char **referer_out, char **user_agent_out,
-                                      vip_error_t *error) {
+static void clear_fallback_outputs(char **url_out, char **referer_out, char **user_agent_out) {
     if (url_out)
         *url_out = NULL;
     if (referer_out)
         *referer_out = NULL;
     if (user_agent_out)
         *user_agent_out = NULL;
+}
 
-    if (!channel || !url_out || !channel->fallback_id || !channel->fallback_id[0] ||
-        !channel->fallback_base || !channel->fallback_base[0]) {
-        vip_error_set(error, VIP_ERR_INVALID_ARGUMENT, "item sem fallback estático");
-        return VIP_ERR_INVALID_ARGUMENT;
-    }
+static bool fallback_channel_valid(const vip_channel_t *channel, char **url_out) {
+    return channel && url_out &&
+           channel->fallback_id && channel->fallback_id[0] &&
+           channel->fallback_base && channel->fallback_base[0];
+}
 
+static int fallback_shard_length(const vip_channel_t *channel) {
     size_t id_len = strlen(channel->fallback_id);
     int shard_len = channel->fallback_shard_length;
     if (shard_len < 1 || shard_len > 4)
         shard_len = 2;
     if ((size_t)shard_len > id_len)
         shard_len = (int)id_len;
+    return shard_len;
+}
 
+static char *build_fallback_shard_url(const vip_channel_t *channel) {
+    int shard_len = fallback_shard_length(channel);
     size_t base_len = strlen(channel->fallback_base);
     bool slash = base_len > 0u && channel->fallback_base[base_len - 1u] == '/';
     size_t version_len = channel->fallback_version ? strlen(channel->fallback_version) : 0u;
     size_t need = base_len + (slash ? 0u : 1u) + (size_t)shard_len + 5u +
                   (version_len ? 3u + version_len : 0u) + 1u;
-    char *shard_url = malloc(need);
+
+    char *url = malloc(need);
+    if (!url)
+        return NULL;
+
+    if (version_len) {
+        snprintf(url, need, "%s%s%.*s.json?v=%s", channel->fallback_base,
+                 slash ? "" : "/", shard_len, channel->fallback_id,
+                 channel->fallback_version);
+    } else {
+        snprintf(url, need, "%s%s%.*s.json", channel->fallback_base,
+                 slash ? "" : "/", shard_len, channel->fallback_id);
+    }
+    return url;
+}
+
+static vip_status_t load_fallback_root(const vip_channel_t *channel,
+                                       struct json_object **root_out,
+                                       vip_error_t *error) {
+    char *shard_url = build_fallback_shard_url(channel);
     if (!shard_url) {
         vip_error_set(error, VIP_ERR_NOMEM, "sem memória para URL de fallback");
         return VIP_ERR_NOMEM;
-    }
-
-    if (version_len) {
-        snprintf(shard_url, need, "%s%s%.*s.json?v=%s", channel->fallback_base,
-                 slash ? "" : "/", shard_len, channel->fallback_id, channel->fallback_version);
-    } else {
-        snprintf(shard_url, need, "%s%s%.*s.json", channel->fallback_base,
-                 slash ? "" : "/", shard_len, channel->fallback_id);
     }
 
     char *body = NULL;
@@ -505,77 +520,136 @@ vip_status_t vip_m3u_fallback_variant(const vip_channel_t *channel, size_t alter
         return VIP_ERR_MALFORMED;
     }
 
+    *root_out = root;
+    return VIP_OK;
+}
+
+static struct json_object *fallback_rows_for_channel(struct json_object *root,
+                                                     const vip_channel_t *channel) {
     struct json_object *rows = NULL;
-    if (!json_object_object_get_ex(root, channel->fallback_id, &rows) ||
-        !rows || !json_object_is_type(rows, json_type_array)) {
+    if (!json_object_object_get_ex(root, channel->fallback_id, &rows))
+        return NULL;
+    if (!rows || !json_object_is_type(rows, json_type_array))
+        return NULL;
+    return rows;
+}
+
+static const char *fallback_row_url(struct json_object *row) {
+    if (!row || !json_object_is_type(row, json_type_array) ||
+        json_object_array_length(row) < 1u)
+        return NULL;
+
+    struct json_object *url_obj = json_object_array_get_idx(row, 0u);
+    if (!url_obj || !json_object_is_type(url_obj, json_type_string))
+        return NULL;
+
+    const char *url = json_object_get_string(url_obj);
+    if (!url)
+        return NULL;
+    if (strncmp(url, "http://", 7u) != 0 && strncmp(url, "https://", 8u) != 0)
+        return NULL;
+    return url;
+}
+
+static char *fallback_row_optional_string(struct json_object *row, size_t index) {
+    if (json_object_array_length(row) <= index)
+        return NULL;
+    struct json_object *value = json_object_array_get_idx(row, index);
+    if (!value || !json_object_is_type(value, json_type_string))
+        return NULL;
+    return vip_strdup_nullable(json_object_get_string(value));
+}
+
+static bool fallback_row_is_candidate(const vip_channel_t *channel,
+                                      struct json_object *row,
+                                      const char **url_out) {
+    const char *url = fallback_row_url(row);
+    if (!url)
+        return false;
+    if (channel->stream_url && strcmp(url, channel->stream_url) == 0)
+        return false;
+    *url_out = url;
+    return true;
+}
+
+static vip_status_t copy_fallback_row(struct json_object *row,
+                                      const char *url,
+                                      char **url_out,
+                                      char **referer_out,
+                                      char **user_agent_out,
+                                      vip_error_t *error) {
+    char *url_copy = vip_strdup(url);
+    if (!url_copy) {
+        vip_error_set(error, VIP_ERR_NOMEM, "sem memória para fallback");
+        return VIP_ERR_NOMEM;
+    }
+
+    char *referer_copy = fallback_row_optional_string(row, 2u);
+    char *user_agent_copy = fallback_row_optional_string(row, 3u);
+    *url_out = url_copy;
+
+    if (referer_out)
+        *referer_out = referer_copy;
+    else
+        free(referer_copy);
+
+    if (user_agent_out)
+        *user_agent_out = user_agent_copy;
+    else
+        free(user_agent_copy);
+
+    vip_error_clear(error);
+    return VIP_OK;
+}
+
+static vip_status_t select_fallback_variant(const vip_channel_t *channel,
+                                            struct json_object *rows,
+                                            size_t alternative_index,
+                                            char **url_out,
+                                            char **referer_out,
+                                            char **user_agent_out,
+                                            vip_error_t *error) {
+    size_t seen = 0u;
+    size_t count = json_object_array_length(rows);
+    for (size_t i = 0u; i < count; ++i) {
+        struct json_object *row = json_object_array_get_idx(rows, i);
+        const char *url = NULL;
+        if (!fallback_row_is_candidate(channel, row, &url))
+            continue;
+        if (seen++ != alternative_index)
+            continue;
+        return copy_fallback_row(row, url, url_out, referer_out, user_agent_out, error);
+    }
+
+    vip_error_set(error, VIP_ERR_MALFORMED, "nenhuma alternativa de fallback restante");
+    return VIP_ERR_MALFORMED;
+}
+
+vip_status_t vip_m3u_fallback_variant(const vip_channel_t *channel, size_t alternative_index,
+                                      char **url_out, char **referer_out, char **user_agent_out,
+                                      vip_error_t *error) {
+    clear_fallback_outputs(url_out, referer_out, user_agent_out);
+    if (!fallback_channel_valid(channel, url_out)) {
+        vip_error_set(error, VIP_ERR_INVALID_ARGUMENT, "item sem fallback estático");
+        return VIP_ERR_INVALID_ARGUMENT;
+    }
+
+    struct json_object *root = NULL;
+    vip_status_t st = load_fallback_root(channel, &root, error);
+    if (st != VIP_OK)
+        return st;
+
+    struct json_object *rows = fallback_rows_for_channel(root, channel);
+    if (!rows) {
         json_object_put(root);
         vip_error_set(error, VIP_ERR_MALFORMED, "fallback não encontrado no shard");
         return VIP_ERR_MALFORMED;
     }
 
-    size_t seen = 0u;
-    size_t count = json_object_array_length(rows);
-    for (size_t i = 0u; i < count; ++i) {
-        struct json_object *row = json_object_array_get_idx(rows, i);
-        if (!row || !json_object_is_type(row, json_type_array) ||
-            json_object_array_length(row) < 1u)
-            continue;
-
-        struct json_object *url_obj = json_object_array_get_idx(row, 0u);
-        if (!url_obj || !json_object_is_type(url_obj, json_type_string))
-            continue;
-        const char *url = json_object_get_string(url_obj);
-        if (!url || (strncmp(url, "http://", 7u) != 0 &&
-                     strncmp(url, "https://", 8u) != 0))
-            continue;
-        if (channel->stream_url && strcmp(url, channel->stream_url) == 0)
-            continue;
-
-        if (seen++ != alternative_index)
-            continue;
-
-        char *url_copy = vip_strdup(url);
-        char *referer_copy = NULL;
-        char *ua_copy = NULL;
-        if (!url_copy) {
-            json_object_put(root);
-            vip_error_set(error, VIP_ERR_NOMEM, "sem memória para fallback");
-            return VIP_ERR_NOMEM;
-        }
-
-        if (json_object_array_length(row) > 2u) {
-            struct json_object *ref_obj = json_object_array_get_idx(row, 2u);
-            if (ref_obj && json_object_is_type(ref_obj, json_type_string)) {
-                const char *ref = json_object_get_string(ref_obj);
-                referer_copy = vip_strdup_nullable(ref);
-            }
-        }
-        if (json_object_array_length(row) > 3u) {
-            struct json_object *ua_obj = json_object_array_get_idx(row, 3u);
-            if (ua_obj && json_object_is_type(ua_obj, json_type_string)) {
-                const char *ua = json_object_get_string(ua_obj);
-                ua_copy = vip_strdup_nullable(ua);
-            }
-        }
-
-        *url_out = url_copy;
-        if (referer_out)
-            *referer_out = referer_copy;
-        else
-            free(referer_copy);
-        if (user_agent_out)
-            *user_agent_out = ua_copy;
-        else
-            free(ua_copy);
-
-        json_object_put(root);
-        vip_error_clear(error);
-        return VIP_OK;
-    }
-
+    st = select_fallback_variant(channel, rows, alternative_index,
+                                 url_out, referer_out, user_agent_out, error);
     json_object_put(root);
-    vip_error_set(error, VIP_ERR_MALFORMED, "nenhuma alternativa de fallback restante");
-    return VIP_ERR_MALFORMED;
+    return st;
 }
 
 /* Load the requested state using the M3U provider. */
