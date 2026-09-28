@@ -137,70 +137,127 @@ static char *base64url_decode(const char *encoded, size_t *len_out, vip_error_t 
 }
 
 /* Decode payload in the server resolver. */
-vip_status_t vip_streamfire_decode_payload(const char *payload, const char *identity, char **json_out,
+static char *reverse_streamfire_payload(const char *payload, size_t length) {
+    char *reversed = malloc(length + 1u);
+    if (!reversed)
+        return NULL;
+    for (size_t i = 0u; i < length; ++i)
+        reversed[i] = payload[length - i - 1u];
+    reversed[length] = '\0';
+    return reversed;
+}
+
+static bool split_streamfire_payload(char *reversed,
+                                     const char **odd_out,
+                                     const char **even_out,
+                                     vip_error_t *error) {
+    char *dot = strchr(reversed, '.');
+    if (!dot || dot == reversed) {
+        vip_error_set(error, VIP_ERR_MALFORMED,
+                      "formato do payload do resolvedor inválido");
+        return false;
+    }
+
+    *dot = '\0';
+    *odd_out = reversed;
+    *even_out = dot + 1;
+    return true;
+}
+
+static char *interleave_streamfire_payload(const char *odd, const char *even) {
+    size_t odd_len = strlen(odd);
+    size_t even_len = strlen(even);
+    size_t total = odd_len + even_len;
+    char *combined = malloc(total + 1u);
+    if (!combined)
+        return NULL;
+
+    size_t odd_index = 0u;
+    size_t even_index = 0u;
+    size_t out_index = 0u;
+    for (size_t pos = 0u; pos < total; ++pos) {
+        if ((pos & 1u) == 0u) {
+            if (even_index < even_len)
+                combined[out_index++] = even[even_index++];
+        } else if (odd_index < odd_len) {
+            combined[out_index++] = odd[odd_index++];
+        }
+    }
+    combined[out_index] = '\0';
+    return combined;
+}
+
+static void decrypt_streamfire_bytes(char *raw,
+                                     size_t raw_len,
+                                     const char *identity) {
+    uint32_t state = crc32_identity(
+        (const unsigned char *)identity,
+        strlen(identity)
+    );
+    if (state == 0u)
+        state = UINT32_C(2784059165);
+
+    for (size_t i = 0u; i < raw_len; ++i) {
+        state = state * UINT32_C(1664525) + UINT32_C(1013904223);
+        raw[i] = (char)((unsigned char)raw[i] ^
+                        (unsigned char)(state & 0xffu));
+    }
+    raw[raw_len] = '\0';
+}
+
+static bool streamfire_json_valid(const char *raw) {
+    json_object *check = json_tokener_parse(raw);
+    if (!check)
+        return false;
+    json_object_put(check);
+    return true;
+}
+
+vip_status_t vip_streamfire_decode_payload(const char *payload,
+                                           const char *identity,
+                                           char **json_out,
                                            vip_error_t *error) {
     if (!payload || !identity || !json_out)
         return VIP_ERR_INVALID_ARGUMENT;
     *json_out = NULL;
-    size_t plen = strlen(payload);
-    if (plen < 3u) {
-        vip_error_set(error, VIP_ERR_MALFORMED, "payload do resolvedor inválido");
+
+    size_t payload_len = strlen(payload);
+    if (payload_len < 3u) {
+        vip_error_set(error, VIP_ERR_MALFORMED,
+                      "payload do resolvedor inválido");
         return VIP_ERR_MALFORMED;
     }
-    char *rev = malloc(plen + 1u);
-    if (!rev)
+
+    char *reversed = reverse_streamfire_payload(payload, payload_len);
+    if (!reversed)
         return VIP_ERR_NOMEM;
-    for (size_t i = 0; i < plen; ++i)
-        rev[i] = payload[plen - i - 1u];
-    rev[plen] = '\0';
-    char *dot = strchr(rev, '.');
-    if (!dot || dot == rev) {
-        free(rev);
-        vip_error_set(error, VIP_ERR_MALFORMED, "formato do payload do resolvedor inválido");
+
+    const char *odd = NULL;
+    const char *even = NULL;
+    if (!split_streamfire_payload(reversed, &odd, &even, error)) {
+        free(reversed);
         return VIP_ERR_MALFORMED;
     }
-    *dot = '\0';
-    const char *odd = rev;
-    const char *even = dot + 1;
-    size_t odd_len = strlen(odd), even_len = strlen(even);
-    size_t total = odd_len + even_len;
-    char *b64u = malloc(total + 1u);
-    if (!b64u) {
-        free(rev);
+
+    char *encoded = interleave_streamfire_payload(odd, even);
+    free(reversed);
+    if (!encoded)
         return VIP_ERR_NOMEM;
-    }
-    size_t oi = 0u, ei = 0u, outi = 0u;
-    for (size_t pos = 0; pos < total; ++pos) {
-        if ((pos & 1u) == 0u) {
-            if (ei < even_len)
-                b64u[outi++] = even[ei++];
-        } else if (oi < odd_len) {
-            b64u[outi++] = odd[oi++];
-        }
-    }
-    b64u[outi] = '\0';
+
     size_t raw_len = 0u;
-    char *raw = base64url_decode(b64u, &raw_len, error);
-    free(b64u);
-    free(rev);
+    char *raw = base64url_decode(encoded, &raw_len, error);
+    free(encoded);
     if (!raw)
         return error && error->code ? error->code : VIP_ERR_MALFORMED;
 
-    uint32_t state = crc32_identity((const unsigned char *)identity, strlen(identity));
-    if (state == 0u)
-        state = UINT32_C(2784059165);
-    for (size_t i = 0; i < raw_len; ++i) {
-        state = state * UINT32_C(1664525) + UINT32_C(1013904223);
-        raw[i] = (char)((unsigned char)raw[i] ^ (unsigned char)(state & 0xffu));
-    }
-    raw[raw_len] = '\0';
-    json_object *check = json_tokener_parse(raw);
-    if (!check) {
+    decrypt_streamfire_bytes(raw, raw_len, identity);
+    if (!streamfire_json_valid(raw)) {
         free(raw);
-        vip_error_set(error, VIP_ERR_MALFORMED, "resposta decodificada do resolvedor não é JSON");
+        vip_error_set(error, VIP_ERR_MALFORMED,
+                      "resposta decodificada do resolvedor não é JSON");
         return VIP_ERR_MALFORMED;
     }
-    json_object_put(check);
+
     *json_out = raw;
     vip_error_clear(error);
     return VIP_OK;
@@ -621,67 +678,133 @@ void vip_server_resolution_clear(vip_server_resolution_t *resolution) {
 }
 
 /* Resolve servers using the server resolver. */
-vip_status_t vip_streamfire_resolve_servers(const char *username, const char *password,
-                                            vip_server_resolution_t *out, vip_error_t *error) {
-    if (!username || !password || !out)
-        return VIP_ERR_INVALID_ARGUMENT;
-    memset(out, 0, sizeof(*out));
-    char identity[192] = {0};
-    vip_status_t st = load_identity(identity, error);
-    if (st != VIP_OK)
-        return st;
-    char **candidates = NULL;
-    size_t candidate_count = 0u;
-    for (size_t ai = 0; ai < sizeof(resolver_apis) / sizeof(resolver_apis[0]) && candidate_count == 0u;
-         ++ai) {
-        for (int profile = 0; profile < 3 && candidate_count == 0u; ++profile) {
-            char *body = NULL;
-            long http = 0;
-            vip_error_t net = {0};
-            if (resolver_post(resolver_apis[ai], profile, username, password, identity, &body, &http, &net) !=
-                VIP_OK) {
-                free(body);
-                continue;
-            }
-            if (http >= 500) {
-                free(body);
-                continue;
-            }
-            char *payload = NULL;
-            if (!response_payload(body, &payload)) {
-                free(body);
-                continue;
-            }
-            free(body);
-            char *decoded = NULL;
-            vip_error_t decode = {0};
-            if (vip_streamfire_decode_payload(payload, identity, &decoded, &decode) == VIP_OK)
-                (void)vip_streamfire_collect_bases(decoded, &candidates, &candidate_count, &decode);
-            free(payload);
-            free(decoded);
+static bool resolver_profile_candidates(const char *api,
+                                        int profile,
+                                        const char *username,
+                                        const char *password,
+                                        const char *identity,
+                                        char ***candidates,
+                                        size_t *candidate_count) {
+    char *body = NULL;
+    long http = 0;
+    vip_error_t net_error = {0};
+    if (resolver_post(api, profile, username, password, identity,
+                      &body, &http, &net_error) != VIP_OK) {
+        free(body);
+        return false;
+    }
+
+    if (http >= 500) {
+        free(body);
+        return false;
+    }
+
+    char *payload = NULL;
+    if (!response_payload(body, &payload)) {
+        free(body);
+        return false;
+    }
+    free(body);
+
+    char *decoded = NULL;
+    vip_error_t decode_error = {0};
+    if (vip_streamfire_decode_payload(payload, identity,
+                                      &decoded, &decode_error) == VIP_OK) {
+        (void)vip_streamfire_collect_bases(
+            decoded, candidates, candidate_count, &decode_error
+        );
+    }
+    free(payload);
+    free(decoded);
+    return *candidate_count > 0u;
+}
+
+static void collect_resolver_candidates(const char *username,
+                                        const char *password,
+                                        const char *identity,
+                                        char ***candidates,
+                                        size_t *candidate_count) {
+    size_t api_count = sizeof(resolver_apis) / sizeof(resolver_apis[0]);
+    for (size_t api_index = 0u;
+         api_index < api_count && *candidate_count == 0u;
+         ++api_index) {
+        for (int profile = 0;
+             profile < 3 && *candidate_count == 0u;
+             ++profile) {
+            (void)resolver_profile_candidates(
+                resolver_apis[api_index],
+                profile,
+                username,
+                password,
+                identity,
+                candidates,
+                candidate_count
+            );
         }
     }
-    if (candidate_count == 0u) {
-        vip_error_set(error, VIP_ERR_NETWORK, "resolvedor não retornou servidores utilizáveis");
-        return VIP_ERR_NETWORK;
-    }
-    for (size_t i = 0; i < candidate_count; ++i) {
+}
+
+static void select_verified_resolver_servers(char **candidates,
+                                             size_t candidate_count,
+                                             const char *username,
+                                             const char *password,
+                                             vip_server_resolution_t *out) {
+    for (size_t i = 0u; i < candidate_count; ++i) {
         if (!verify_xtream_base(candidates[i], username, password))
             continue;
-        if (!out->primary)
+
+        if (!out->primary) {
             out->primary = vip_strdup(candidates[i]);
-        else if (!out->alternate && strcmp(out->primary, candidates[i]) != 0) {
+            continue;
+        }
+
+        if (!out->alternate &&
+            strcmp(out->primary, candidates[i]) != 0) {
             out->alternate = vip_strdup(candidates[i]);
             break;
         }
     }
-    vip_streamfire_free_bases(candidates, candidate_count);
-    if (!out->primary) {
-        vip_server_resolution_clear(out);
+}
+
+vip_status_t vip_streamfire_resolve_servers(const char *username,
+                                            const char *password,
+                                            vip_server_resolution_t *out,
+                                            vip_error_t *error) {
+    if (!username || !password || !out)
+        return VIP_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+
+    char identity[192] = {0};
+    vip_status_t st = load_identity(identity, error);
+    if (st != VIP_OK)
+        return st;
+
+    char **candidates = NULL;
+    size_t candidate_count = 0u;
+    collect_resolver_candidates(
+        username, password, identity, &candidates, &candidate_count
+    );
+    if (candidate_count == 0u) {
         vip_error_set(error, VIP_ERR_NETWORK,
-                      "resolvedor respondeu, mas nenhum servidor Xtream foi confirmado");
+                      "resolvedor não retornou servidores utilizáveis");
         return VIP_ERR_NETWORK;
     }
+
+    select_verified_resolver_servers(
+        candidates, candidate_count, username, password, out
+    );
+    vip_streamfire_free_bases(candidates, candidate_count);
+
+    if (!out->primary) {
+        vip_server_resolution_clear(out);
+        vip_error_set(
+            error,
+            VIP_ERR_NETWORK,
+            "resolvedor respondeu, mas nenhum servidor Xtream foi confirmado"
+        );
+        return VIP_ERR_NETWORK;
+    }
+
     vip_error_clear(error);
     return VIP_OK;
 }
