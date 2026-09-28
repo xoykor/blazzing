@@ -4799,8 +4799,8 @@ static const char *browse_back_label(const app_t *a) {
     return a->series_season_select ? "< Séries" : "< Temporadas";
 }
 
-/* Draw browse. */
-static void draw_browse(app_t *a) {
+/* Draw the browse screen's fixed background surfaces. */
+static void draw_browse_background(app_t *a) {
     if (a->renderer.active) {
         vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, a->height, 0x090B11u, 0x0D1119u);
         vip_ui_render_linear_gradient(&a->renderer, 0, 0, a->width, TOPBAR_H, 0x171C28u, 0x111722u);
@@ -4812,10 +4812,14 @@ static void draw_browse(app_t *a) {
         fill_rect(a, 0, TOPBAR_H, SIDEBAR_W, (unsigned)(a->height - TOPBAR_H), a->colors.panel2);
     }
     fill_rect(a, SIDEBAR_W - 1, TOPBAR_H, 1, (unsigned)(a->height - TOPBAR_H), a->colors.border);
+}
 
+/* Draw the TV/Filmes/Séries tabs and their focus/hover feedback. */
+static void draw_browse_tabs(app_t *a) {
     const int tab_y = 12, tab_h = 46;
     const int tab_x[3] = {8, 88, 174};
     const int tab_w[3] = {74, 80, 88};
+
     for (int k = 0; k < 3; ++k) {
         bool selected = (int)a->content_kind == k;
         bool key_focused = a->browse_focus == BROWSE_FOCUS_TOP && a->browse_top_focus == k;
@@ -4841,18 +4845,23 @@ static void draw_browse(app_t *a) {
             draw_centered(a, tab_x[k], 42, tab_w[k], content_label((content_kind_t)k),
                           (selected || hovered || key_focused) ? a->colors.text : a->colors.muted);
     }
+}
 
+/* Draw search, favorites and list controls from left to right. */
+static void draw_browse_toolbar(app_t *a) {
     int list_w = 94, fav_w = 174;
     int list_x = a->width - list_w - 18;
     int fav_x = list_x - fav_w - 10;
     int search_w = fav_x - (SIDEBAR_W + 18) - 10;
     if (search_w < 180)
         search_w = 180;
+
     char search_hint[96];
     snprintf(search_hint, sizeof(search_hint), "Buscar %s...", content_plural(a));
     draw_input(a, SIDEBAR_W + 18, 12, search_w, 46, a->search, search_hint, INPUT_SEARCH, false);
     if (a->hovered_control == HOVER_SEARCH && a->input_focus != INPUT_SEARCH)
         stroke_round_rect(a, SIDEBAR_W + 18, 12, search_w, 46, 13, a->colors.accent);
+
     bool fav_focus = a->browse_focus == BROWSE_FOCUS_TOP && a->browse_top_focus == BROWSE_TOP_FAVORITES;
     bool fav_hover = a->hovered_control == HOVER_FAVORITES;
     fill_round_rect(a, fav_x, 12, fav_w, 46, 13,
@@ -4870,6 +4879,7 @@ static void draw_browse(app_t *a) {
     else
         draw_centered(a, fav_x, 42, fav_w, fav_label,
                       (a->favorites_only || fav_focus) ? a->colors.text : a->colors.muted);
+
     bool list_focus = a->browse_focus == BROWSE_FOCUS_TOP && a->browse_top_focus == BROWSE_TOP_LISTS;
     bool list_hover = a->hovered_control == HOVER_LISTS;
     fill_round_rect(a, list_x, 12, list_w, 46, 13,
@@ -4882,7 +4892,10 @@ static void draw_browse(app_t *a) {
     else
         draw_centered(a, list_x, 42, list_w, "Listas",
                       (list_hover || list_focus) ? a->colors.text : a->colors.muted);
+}
 
+/* Draw the optional back row plus the visible category rows. */
+static void draw_browse_sidebar(app_t *a) {
     int y = TOPBAR_H + 12;
     if (a->series_episode_mode) {
         bool back_focus = a->browse_focus == BROWSE_FOCUS_SIDEBAR && a->browse_sidebar_focus == -2;
@@ -4898,6 +4911,7 @@ static void draw_browse(app_t *a) {
             draw_text_font(a, a->font_heading, 18, y + 26, browse_back_label(a), a->colors.text);
         y += 48;
     }
+
     bool all_sel = a->selected_category < 0;
     bool all_focus = a->browse_focus == BROWSE_FOCUS_SIDEBAR && a->browse_sidebar_focus == -1;
     bool all_hover = a->hovered_control == HOVER_CATEGORY_ALL;
@@ -4906,17 +4920,18 @@ static void draw_browse(app_t *a) {
                             : ((all_hover || all_focus) ? a->colors.hover : a->colors.panel2));
     if (all_focus)
         stroke_round_rect(a, 8, y, SIDEBAR_W - 16, 36, 11, a->colors.text);
+
     char all_label[128];
     snprintf(all_label, sizeof(all_label), "%s (%zu)", all_content_label(a), ACTIVE_CHANNELS(a).len);
     if (a->renderer.active)
         vip_ui_render_text(&a->renderer, 18, y + 9, SIDEBAR_W - 36, all_label,
                            (all_sel || all_focus) ? "Sans Bold 9" : "Sans 9",
-                           (all_sel || all_hover || all_focus) ? 0xF6F7FBu : 0xAAB2C4u,
-                           1.0, false);
+                           (all_sel || all_hover || all_focus) ? 0xF6F7FBu : 0xAAB2C4u, 1.0, false);
     else
         draw_text(a, 18, y + 24, all_label,
                   (all_sel || all_hover || all_focus) ? a->colors.text : a->colors.muted);
     y += 42;
+
     int rows = category_visible_rows(a) - 1;
     for (int r = 0; r < rows; ++r) {
         int idx = a->category_scroll + r;
@@ -4930,6 +4945,7 @@ static void draw_browse(app_t *a) {
                                  : ((hovered || key_focused) ? a->colors.hover : a->colors.panel2));
         if (key_focused)
             stroke_round_rect(a, 8, y, SIDEBAR_W - 16, 36, 11, a->colors.text);
+
         char full_label[512];
         char label[256];
         size_t count = a->category_counts ? a->category_counts[idx] : 0;
@@ -4944,22 +4960,178 @@ static void draw_browse(app_t *a) {
                       (selected || hovered || key_focused) ? a->colors.text : a->colors.muted);
         y += 42;
     }
+}
 
-    card_layout_t layout = browse_layout(a);
-    int content_x = SIDEBAR_W + 20;
-    int content_y = TOPBAR_H + 18;
-    int avail_w = a->width - content_x - 18;
-    int first_row = a->grid_scroll / layout.row_step;
-    int y_offset = -(a->grid_scroll % layout.row_step);
-    int visible_rows = (a->height - content_y) / layout.row_step + 3;
+/* Draw artwork, card chrome and artwork-local overlays. */
+static void draw_browse_card_artwork(app_t *a, vip_channel_t *ch, size_t chidx, const card_layout_t *layout,
+                                     int cx, int cy, int rr, int col, bool active_card, bool hovered,
+                                     float hover_eased) {
+    if (a->renderer.active && active_card) {
+        vip_ui_render_round_rect(&a->renderer, cx + 5, cy + 8 + (int)(3.0f * hover_eased),
+                                 layout->card_w, layout->card_h, 18, 0x000000u, 0.62);
+        vip_ui_render_round_stroke(&a->renderer, cx - 3, cy - 3, layout->card_w + 6, layout->card_h + 6,
+                                   19, 0xFF5F2Eu, 0.80, 2.0);
+    } else {
+        fill_round_rect(a, cx + 4, cy + 6 + (int)(3.0f * hover_eased), layout->card_w, layout->card_h,
+                        16, a->colors.black);
+    }
 
-    if (a->filtered_len == 0) {
-        char empty[160];
-        snprintf(empty, sizeof(empty), "Nenhum %s nesta seleção", content_plural(a));
-        draw_text(a, content_x, content_y + 32, empty, a->colors.muted);
+    fill_round_rect(a, cx, cy, layout->card_w, layout->card_h, 16, a->colors.panel2);
+    if (active_card) {
+        stroke_round_rect(a, cx - 3, cy - 3, layout->card_w + 6, layout->card_h + 6, 18,
+                          a->colors.accent);
+        stroke_round_rect(a, cx - 1, cy - 1, layout->card_w + 2, layout->card_h + 2, 19,
+                          a->colors.text);
+    }
+    fill_round_rect(a, cx, cy, layout->card_w, layout->art_h, 18, a->colors.black);
+
+    vip_error_t error = {0};
+    char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
+    bool image_ok = path && draw_cached_image_contain(a, path, cx, cy, layout->card_w, layout->art_h);
+    bool can_load_image =
+        (ch->logo_url && ch->logo_url[0]) ||
+        strncmp(ch->stream_url ? ch->stream_url : "", "series://", 9u) != 0;
+    if (!image_ok) {
+        const char *placeholder = can_load_image ? "carregando imagem..." : "sem capa";
+        if (a->renderer.active)
+            vip_ui_render_text(&a->renderer, cx + 8, cy + layout->art_h / 2 - 7, layout->card_w - 16,
+                               placeholder, "Sans 9", 0xAAB2C4u, 1.0, true);
+        else
+            draw_centered(a, cx, cy + layout->art_h / 2 + 5, layout->card_w, placeholder, a->colors.muted);
+        if (can_load_image) {
+            int distance = rr >= 0 ? rr : -rr;
+            int64_t priority = 1000000LL - (int64_t)distance * 1000LL - col;
+            enqueue_thumbnail(a, ch, priority);
+        }
+    }
+    free(path);
+
+    stroke_round_rect(a, cx, cy, layout->card_w, layout->art_h, 18,
+                      active_card ? a->colors.accent : a->colors.border);
+    if (hovered && hover_eased > 0.30f) {
+        int open_w = 78, open_h = 30;
+        int open_x = cx + 8, open_y = cy + layout->art_h - open_h - 8;
+        fill_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent2);
+        stroke_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent);
+        if (a->renderer.active)
+            vip_ui_render_text(&a->renderer, open_x, open_y + 7, open_w, "ABRIR", "Sans Bold 8",
+                               0xF6F7FBu, 1.0, true);
+        else
+            draw_centered_font(a, a->font_small, open_x, open_y + 20, open_w, "ABRIR", a->colors.text);
+    }
+
+    bool favorite = a->favorite_flags && a->favorite_flags[chidx];
+    int card_fav_w = 58, card_fav_h = 28, card_fav_x = cx + layout->card_w - card_fav_w - 6,
+        card_fav_y = cy + 6;
+    fill_round_rect(a, card_fav_x, card_fav_y, card_fav_w, card_fav_h, 10,
+                    favorite ? a->colors.accent2 : a->colors.panel);
+    stroke_round_rect(a, card_fav_x, card_fav_y, card_fav_w, card_fav_h, 10,
+                      favorite ? a->colors.accent : a->colors.border);
+    draw_centered(a, card_fav_x, card_fav_y + 19, card_fav_w, favorite ? "SALVO" : "FAV",
+                  favorite ? a->colors.text : a->colors.muted);
+
+    const char *variant_label = media_variant_label(ch->name);
+    if (variant_label) {
+        int variant_w = strcmp(variant_label, "DUAL") == 0 ? 62 : 50;
+        int variant_x = cx + layout->card_w - variant_w - 6;
+        int variant_y = card_fav_y + card_fav_h + 6;
+        fill_round_rect(a, variant_x, variant_y, variant_w, 24, 9, a->colors.panel);
+        stroke_round_rect(a, variant_x, variant_y, variant_w, 24, 9, a->colors.accent);
+        draw_centered_font(a, a->font_small, variant_x, variant_y + 17, variant_w, variant_label,
+                           a->colors.text);
+    }
+}
+
+/* Draw persisted playback progress without coupling it to artwork loading. */
+static void draw_browse_card_progress(app_t *a, size_t chidx, const card_layout_t *layout, int cx, int cy) {
+    if (!a->progress_flags ||
+        (a->content_kind != CONTENT_VOD && (!a->series_episode_mode || a->series_season_select)))
+        return;
+
+    vip_watch_progress_t *pr = &a->progress_flags[chidx];
+    if (pr->duration_seconds <= 1.0 && !pr->completed)
+        return;
+
+    double ratio = pr->completed ? 1.0 : pr->position_seconds / pr->duration_seconds;
+    if (ratio < 0.0)
+        ratio = 0.0;
+    if (ratio > 1.0)
+        ratio = 1.0;
+
+    int progress_w = (int)((double)layout->card_w * ratio);
+    fill_rect(a, cx, cy + layout->art_h - 5, (unsigned)layout->card_w, 5, a->colors.panel2);
+    if (progress_w > 0)
+        fill_rect(a, cx, cy + layout->art_h - 5, (unsigned)progress_w, 5, a->colors.accent);
+
+    if (pr->completed) {
+        int badge_w = 92;
+        fill_rect(a, cx + 6, cy + 6, (unsigned)badge_w, 26, a->colors.accent2);
+        stroke_rect(a, cx + 6, cy + 6, (unsigned)badge_w, 26, a->colors.accent);
+        draw_centered(a, cx + 6, cy + 24, badge_w, "ASSISTIDO", a->colors.text);
+    } else if (pr->duration_seconds > 1.0 && pr->position_seconds > 3.0) {
+        int percent = (int)(ratio * 100.0 + 0.5);
+        char badge[32];
+        snprintf(badge, sizeof(badge), "%d%%", percent);
+        fill_rect(a, cx + 6, cy + 6, 54, 26, a->colors.panel2);
+        stroke_rect(a, cx + 6, cy + 6, 54, 26, a->colors.accent);
+        draw_centered(a, cx + 6, cy + 24, 54, badge, a->colors.text);
+    }
+}
+
+/* Draw the secondary line under a card title for the active browse mode. */
+static void draw_browse_card_metadata(app_t *a, vip_channel_t *ch, size_t chidx, const card_layout_t *layout,
+                                      int cx, int cy) {
+    char meta[80];
+
+    if (a->series_season_select) {
+        size_t season_count = 0u;
+        for (size_t ei = 0; ei < a->episode_channels.len; ++ei) {
+            const char *cid = a->episode_channels.items[ei].category_id;
+            if (cid && ch->category_id && strcmp(cid, ch->category_id) == 0)
+                ++season_count;
+        }
+        snprintf(meta, sizeof(meta), "%zu episódio%s", season_count, season_count == 1u ? "" : "s");
+    } else if (a->series_episode_mode) {
+        if (!episode_card_meta(a, ch, meta, sizeof(meta)))
+            return;
+    } else if (a->content_kind == CONTENT_SERIES && a->series_watched && a->series_total &&
+               a->series_total[chidx] > 0) {
+        snprintf(meta, sizeof(meta), "%d/%d episódios", a->series_watched[chidx], a->series_total[chidx]);
+    } else {
         return;
     }
 
+    if (a->renderer.active)
+        vip_ui_render_text(&a->renderer, cx + 9, cy + layout->art_h + 43, layout->card_w - 18, meta,
+                           "Sans 8", 0xAAB2C4u, 1.0, false);
+    else
+        draw_text_font(a, a->font_small, cx + 8, cy + layout->art_h + 56, meta, a->colors.muted);
+}
+
+/* Draw one visible card. All per-card state is derived here so the grid loop
+ * only decides which cards are visible and where they belong. */
+static void draw_browse_card(app_t *a, const card_layout_t *layout, int content_x, int row_y, int rr, int col,
+                             size_t fidx) {
+    size_t chidx = a->filtered[fidx];
+    vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
+    int cx = content_x + col * (layout->card_w + GRID_GAP);
+    bool focused = a->browse_focus == BROWSE_FOCUS_GRID && fidx == a->focused_filtered;
+    bool hovered = a->hovered_card_valid && fidx == a->hovered_filtered && a->hover_motion.value > 0.001f;
+    float hover_eased = hovered ? vip_ui_ease_out_cubic(a->hover_motion.value) : 0.0f;
+    int cy = row_y - (int)(8.0f * hover_eased + 0.5f);
+    bool active_card = focused || hovered;
+
+    draw_browse_card_artwork(a, ch, chidx, layout, cx, cy, rr, col, active_card, hovered, hover_eased);
+    draw_browse_card_progress(a, chidx, layout, cx, cy);
+
+    char grouped_title[256];
+    const char *display_title = m3u_series_display_name(a, ch, grouped_title, sizeof(grouped_title));
+    draw_card_title(a, cx + 9, cy + layout->art_h + 9, layout->card_w - 18, display_title, active_card);
+    draw_browse_card_metadata(a, ch, chidx, layout, cx, cy);
+}
+
+/* Draw the visible grid and keep the X11 clip limited to the content area. */
+static void draw_browse_grid(app_t *a, const card_layout_t *layout, int content_x, int content_y) {
     int grid_right = a->width - 18;
     if (details_panel_active(a)) {
         int px, py, pw, ph;
@@ -4969,6 +5141,7 @@ static void draw_browse(app_t *a) {
         (void)ph;
         grid_right = px - 12;
     }
+
     if (grid_right > content_x && a->height > content_y) {
         XRectangle grid_clip = {
             .x = (short)content_x,
@@ -4979,185 +5152,67 @@ static void draw_browse(app_t *a) {
         XSetClipRectangles(a->dpy, a->gc, 0, 0, &grid_clip, 1, Unsorted);
     }
 
+    int first_row = a->grid_scroll / layout->row_step;
+    int y_offset = -(a->grid_scroll % layout->row_step);
+    int visible_rows = (a->height - content_y) / layout->row_step + 3;
     for (int rr = 0; rr < visible_rows; ++rr) {
         int row = first_row + rr;
-        int cy = content_y + y_offset + rr * layout.row_step;
-        if (cy > a->height || cy + layout.card_h < content_y)
+        int row_y = content_y + y_offset + rr * layout->row_step;
+        if (row_y > a->height || row_y + layout->card_h < content_y)
             continue;
-        for (int col = 0; col < layout.cols; ++col) {
-            size_t fidx = (size_t)row * (size_t)layout.cols + (size_t)col;
+
+        for (int col = 0; col < layout->cols; ++col) {
+            size_t fidx = (size_t)row * (size_t)layout->cols + (size_t)col;
             if (fidx >= a->filtered_len)
                 break;
-            size_t chidx = a->filtered[fidx];
-            vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
-            int cx = content_x + col * (layout.card_w + GRID_GAP);
-            bool focused = a->browse_focus == BROWSE_FOCUS_GRID && fidx == a->focused_filtered;
-            bool hovered =
-                a->hovered_card_valid && fidx == a->hovered_filtered && a->hover_motion.value > 0.001f;
-            float hover_eased = hovered ? vip_ui_ease_out_cubic(a->hover_motion.value) : 0.0f;
-            int lift = (int)(8.0f * hover_eased + 0.5f);
-            int base_cy = cy;
-            cy = base_cy - lift;
-            bool active_card = focused || hovered;
-            if (a->renderer.active && active_card) {
-                vip_ui_render_round_rect(&a->renderer, cx + 5, cy + 8 + (int)(3.0f * hover_eased),
-                                         layout.card_w, layout.card_h, 18, 0x000000u, 0.62);
-                vip_ui_render_round_stroke(&a->renderer, cx - 3, cy - 3, layout.card_w + 6, layout.card_h + 6,
-                                           19, 0xFF5F2Eu, 0.80, 2.0);
-            } else {
-                fill_round_rect(a, cx + 4, cy + 6 + (int)(3.0f * hover_eased), layout.card_w, layout.card_h,
-                                16, a->colors.black);
-            }
-            fill_round_rect(a, cx, cy, layout.card_w, layout.card_h, 16, a->colors.panel2);
-            if (active_card) {
-                stroke_round_rect(a, cx - 3, cy - 3, layout.card_w + 6, layout.card_h + 6, 18,
-                                  a->colors.accent);
-                stroke_round_rect(a, cx - 1, cy - 1, layout.card_w + 2, layout.card_h + 2, 19,
-                                  a->colors.text);
-            }
-            fill_round_rect(a, cx, cy, layout.card_w, layout.art_h, 18, a->colors.black);
-            vip_error_t error = {0};
-            char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
-            bool image_ok = path && draw_cached_image_contain(a, path, cx, cy, layout.card_w, layout.art_h);
-            bool can_load_image =
-                (ch->logo_url && ch->logo_url[0]) ||
-                strncmp(ch->stream_url ? ch->stream_url : "", "series://", 9u) != 0;
-            if (!image_ok) {
-                const char *placeholder = can_load_image ? "carregando imagem..." : "sem capa";
-                if (a->renderer.active)
-                    vip_ui_render_text(&a->renderer, cx + 8, cy + layout.art_h / 2 - 7, layout.card_w - 16,
-                                       placeholder, "Sans 9", 0xAAB2C4u, 1.0, true);
-                else
-                    draw_centered(a, cx, cy + layout.art_h / 2 + 5, layout.card_w, placeholder,
-                                  a->colors.muted);
-                if (can_load_image) {
-                    int distance = rr >= 0 ? rr : -rr;
-                    int64_t priority = 1000000LL - (int64_t)distance * 1000LL - col;
-                    enqueue_thumbnail(a, ch, priority);
-                }
-            }
-            free(path);
-            stroke_round_rect(a, cx, cy, layout.card_w, layout.art_h, 18,
-                              active_card ? a->colors.accent : a->colors.border);
-            if (hovered && hover_eased > 0.30f) {
-                int open_w = 78, open_h = 30;
-                int open_x = cx + 8, open_y = cy + layout.art_h - open_h - 8;
-                fill_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent2);
-                stroke_round_rect(a, open_x, open_y, open_w, open_h, 11, a->colors.accent);
-                if (a->renderer.active)
-                    vip_ui_render_text(&a->renderer, open_x, open_y + 7, open_w, "ABRIR", "Sans Bold 8",
-                                       0xF6F7FBu, 1.0, true);
-                else
-                    draw_centered_font(a, a->font_small, open_x, open_y + 20, open_w, "ABRIR",
-                                       a->colors.text);
-            }
-            bool favorite = a->favorite_flags && a->favorite_flags[chidx];
-            int card_fav_w = 58, card_fav_h = 28, card_fav_x = cx + layout.card_w - card_fav_w - 6,
-                card_fav_y = cy + 6;
-            fill_round_rect(a, card_fav_x, card_fav_y, card_fav_w, card_fav_h, 10,
-                            favorite ? a->colors.accent2 : a->colors.panel);
-            stroke_round_rect(a, card_fav_x, card_fav_y, card_fav_w, card_fav_h, 10,
-                              favorite ? a->colors.accent : a->colors.border);
-            draw_centered(a, card_fav_x, card_fav_y + 19, card_fav_w, favorite ? "SALVO" : "FAV",
-                          favorite ? a->colors.text : a->colors.muted);
-            const char *variant_label = media_variant_label(ch->name);
-            if (variant_label) {
-                int variant_w = strcmp(variant_label, "DUAL") == 0 ? 62 : 50;
-                int variant_x = cx + layout.card_w - variant_w - 6;
-                int variant_y = card_fav_y + card_fav_h + 6;
-                fill_round_rect(a, variant_x, variant_y, variant_w, 24, 9, a->colors.panel);
-                stroke_round_rect(a, variant_x, variant_y, variant_w, 24, 9, a->colors.accent);
-                draw_centered_font(a, a->font_small, variant_x, variant_y + 17, variant_w, variant_label,
-                                   a->colors.text);
-            }
-            if (a->progress_flags &&
-                (a->content_kind == CONTENT_VOD || (a->series_episode_mode && !a->series_season_select))) {
-                vip_watch_progress_t *pr = &a->progress_flags[chidx];
-                if (pr->duration_seconds > 1.0 || pr->completed) {
-                    double ratio = pr->completed ? 1.0 : pr->position_seconds / pr->duration_seconds;
-                    if (ratio < 0.0)
-                        ratio = 0.0;
-                    if (ratio > 1.0)
-                        ratio = 1.0;
-                    int pw = (int)((double)layout.card_w * ratio);
-                    fill_rect(a, cx, cy + layout.art_h - 5, (unsigned)layout.card_w, 5, a->colors.panel2);
-                    if (pw > 0)
-                        fill_rect(a, cx, cy + layout.art_h - 5, (unsigned)pw, 5, a->colors.accent);
-                    if (pr->completed) {
-                        int badge_w = 92;
-                        fill_rect(a, cx + 6, cy + 6, (unsigned)badge_w, 26, a->colors.accent2);
-                        stroke_rect(a, cx + 6, cy + 6, (unsigned)badge_w, 26, a->colors.accent);
-                        draw_centered(a, cx + 6, cy + 24, badge_w, "ASSISTIDO", a->colors.text);
-                    } else if (pr->duration_seconds > 1.0 && pr->position_seconds > 3.0) {
-                        int percent = (int)(ratio * 100.0 + 0.5);
-                        char badge[32];
-                        snprintf(badge, sizeof(badge), "%d%%", percent);
-                        fill_rect(a, cx + 6, cy + 6, 54, 26, a->colors.panel2);
-                        stroke_rect(a, cx + 6, cy + 6, 54, 26, a->colors.accent);
-                        draw_centered(a, cx + 6, cy + 24, 54, badge, a->colors.text);
-                    }
-                }
-            }
-            char grouped_title[256];
-            const char *display_title = m3u_series_display_name(a, ch, grouped_title, sizeof(grouped_title));
-            draw_card_title(a, cx + 9, cy + layout.art_h + 9, layout.card_w - 18, display_title,
-                            active_card);
-            if (a->series_season_select) {
-                size_t season_count = 0u;
-                for (size_t ei = 0; ei < a->episode_channels.len; ++ei) {
-                    const char *cid = a->episode_channels.items[ei].category_id;
-                    if (cid && ch->category_id && strcmp(cid, ch->category_id) == 0)
-                        ++season_count;
-                }
-                char meta[72];
-                snprintf(meta, sizeof(meta), "%zu episódio%s", season_count, season_count == 1u ? "" : "s");
-                if (a->renderer.active)
-                    vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 43, layout.card_w - 18, meta,
-                                       "Sans 8", 0xAAB2C4u, 1.0, false);
-                else
-                    draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 56, meta, a->colors.muted);
-            } else if (a->series_episode_mode) {
-                char meta[72];
-                if (episode_card_meta(a, ch, meta, sizeof(meta))) {
-                    if (a->renderer.active)
-                        vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 43, layout.card_w - 18,
-                                           meta, "Sans 8", 0xAAB2C4u, 1.0, false);
-                    else
-                        draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 56, meta,
-                                       a->colors.muted);
-                }
-            } else if (a->content_kind == CONTENT_SERIES && !a->series_episode_mode && a->series_watched &&
-                       a->series_total && a->series_total[chidx] > 0) {
-                char progress[80];
-                snprintf(progress, sizeof(progress), "%d/%d episódios", a->series_watched[chidx],
-                         a->series_total[chidx]);
-                if (a->renderer.active)
-                    vip_ui_render_text(&a->renderer, cx + 9, cy + layout.art_h + 43, layout.card_w - 18,
-                                       progress, "Sans 8", 0xAAB2C4u, 1.0, false);
-                else
-                    draw_text_font(a, a->font_small, cx + 8, cy + layout.art_h + 56, progress,
-                                   a->colors.muted);
-            }
-            cy = base_cy;
+            draw_browse_card(a, layout, content_x, row_y, rr, col, fidx);
         }
     }
 
     XSetClipMask(a->dpy, a->gc, None);
-    draw_details_panel(a);
+}
 
-    if (atomic_load(&a->series_running)) {
-        char loading[512];
-        pthread_mutex_lock(&a->data_mutex);
-        snprintf(loading, sizeof(loading), "%s", a->status);
-        pthread_mutex_unlock(&a->data_mutex);
-        int box_w = avail_w > 680 ? 680 : avail_w;
-        int box_x = content_x + (avail_w - box_w) / 2;
-        int box_y = content_y + 20;
-        fill_round_rect(a, box_x + 3, box_y + 4, box_w, 56, 16, a->colors.black);
-        fill_round_rect(a, box_x, box_y, box_w, 56, 16, a->colors.panel2);
-        stroke_round_rect(a, box_x, box_y, box_w, 56, 16, a->colors.accent);
-        draw_centered(a, box_x, box_y + 35, box_w, loading, a->colors.text);
+/* Draw the non-blocking series loading notice above the grid. */
+static void draw_browse_loading(app_t *a, int content_x, int content_y, int avail_w) {
+    if (!atomic_load(&a->series_running))
+        return;
+
+    char loading[512];
+    pthread_mutex_lock(&a->data_mutex);
+    snprintf(loading, sizeof(loading), "%s", a->status);
+    pthread_mutex_unlock(&a->data_mutex);
+
+    int box_w = avail_w > 680 ? 680 : avail_w;
+    int box_x = content_x + (avail_w - box_w) / 2;
+    int box_y = content_y + 20;
+    fill_round_rect(a, box_x + 3, box_y + 4, box_w, 56, 16, a->colors.black);
+    fill_round_rect(a, box_x, box_y, box_w, 56, 16, a->colors.panel2);
+    stroke_round_rect(a, box_x, box_y, box_w, 56, 16, a->colors.accent);
+    draw_centered(a, box_x, box_y + 35, box_w, loading, a->colors.text);
+}
+
+/* Draw browse. */
+static void draw_browse(app_t *a) {
+    draw_browse_background(a);
+    draw_browse_tabs(a);
+    draw_browse_toolbar(a);
+    draw_browse_sidebar(a);
+
+    card_layout_t layout = browse_layout(a);
+    int content_x = SIDEBAR_W + 20;
+    int content_y = TOPBAR_H + 18;
+    int avail_w = a->width - content_x - 18;
+
+    if (a->filtered_len == 0) {
+        char empty[160];
+        snprintf(empty, sizeof(empty), "Nenhum %s nesta seleção", content_plural(a));
+        draw_text(a, content_x, content_y + 32, empty, a->colors.muted);
+        return;
     }
+
+    draw_browse_grid(a, &layout, content_x, content_y);
+    draw_details_panel(a);
+    draw_browse_loading(a, content_x, content_y, avail_w);
     draw_toast(a);
 }
 
