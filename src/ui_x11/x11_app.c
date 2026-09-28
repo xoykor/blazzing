@@ -2657,11 +2657,112 @@ static void draw_pairing_qr(app_t *a, int x, int y, int size) {
 }
 
 /* Run the series background worker. */
+static vip_status_t inherit_series_art(vip_channel_list_t *episodes, const char *series_art, vip_error_t *error) {
+    if (!series_art)
+        return VIP_OK;
+    for (size_t i = 0; i < episodes->len; ++i) {
+        char *inherited = vip_strdup(series_art);
+        if (!inherited) {
+            vip_error_set(error, VIP_ERR_NOMEM, "sem memória para capa dos episódios");
+            return VIP_ERR_NOMEM;
+        }
+        free(episodes->items[i].logo_url);
+        episodes->items[i].logo_url = inherited;
+    }
+    return VIP_OK;
+}
+
+static vip_status_t build_season_cards(const series_job_t *job, const vip_category_list_t *seasons,
+                                       const vip_channel_list_t *episodes, const vip_credentials_t *credentials,
+                                       const char *series_art, vip_channel_list_t *season_cards,
+                                       vip_error_t *error) {
+    const char *fallback_provider =
+        episodes->len > 0u ? episodes->items[0].provider_id : credentials->provider_id;
+    for (size_t i = 0; i < seasons->len; ++i) {
+        vip_category_t *season = &seasons->items[i];
+        char season_id[512];
+        snprintf(season_id, sizeof(season_id), "season:%s:%s", job->series_id,
+                 season->id ? season->id : "0");
+        vip_channel_t card = {
+            .provider_id = season->provider_id && season->provider_id[0] ? season->provider_id
+                                                                         : (char *)fallback_provider,
+            .id = season_id,
+            .category_id = season->id,
+            .name = season->name ? season->name : "Temporada",
+            .logo_url = (char *)series_art,
+            .stream_url = "series://season",
+            .epg_channel_id = NULL,
+            .position = (int)i,
+        };
+        vip_status_t st = vip_channel_list_push(season_cards, &card, error);
+        if (st != VIP_OK)
+            return st;
+    }
+    return VIP_OK;
+}
+
+static vip_status_t prepare_series_catalog(const series_job_t *job, vip_credentials_t *credentials,
+                                           vip_category_list_t *seasons, vip_channel_list_t *episodes,
+                                           vip_channel_list_t *season_cards,
+                                           vip_media_metadata_t *series_metadata, vip_error_t *error) {
+    vip_xtream_client_t *client = NULL;
+    vip_status_t st = vip_credentials_init(credentials, job->server, job->username, job->password, error);
+    if (st == VIP_OK)
+        st = vip_xtream_client_create(&client, credentials, error);
+    if (st == VIP_OK)
+        st = vip_xtream_series_info(client, job->series_id, series_metadata, seasons, episodes, error);
+    if (client)
+        vip_xtream_client_destroy(client);
+    if (st != VIP_OK)
+        return st;
+
+    const char *series_art = series_metadata->cover_url && series_metadata->cover_url[0]
+                                 ? series_metadata->cover_url
+                                 : (job->logo_url && job->logo_url[0] ? job->logo_url : NULL);
+    st = inherit_series_art(episodes, series_art, error);
+    if (st == VIP_OK)
+        st = build_season_cards(job, seasons, episodes, credentials, series_art, season_cards, error);
+    if (st == VIP_OK) {
+        sort_episode_channels(episodes);
+        sort_season_channels(season_cards);
+    }
+    return st;
+}
+
+static bool publish_series_catalog(app_t *a, const series_job_t *job, vip_category_list_t *seasons,
+                                   vip_channel_list_t *episodes, vip_channel_list_t *season_cards,
+                                   vip_status_t st, vip_error_t *error) {
+    if (st != VIP_OK || season_cards->len == 0u) {
+        if (st == VIP_OK)
+            vip_error_set(error, VIP_ERR_MALFORMED, "nenhuma temporada encontrada");
+        pthread_mutex_lock(&a->data_mutex);
+        snprintf(a->status, sizeof(a->status), "Falha ao carregar episódios: %s",
+                 error->message[0] ? error->message : "erro desconhecido");
+        pthread_mutex_unlock(&a->data_mutex);
+        return false;
+    }
+
+    pthread_mutex_lock(&a->data_mutex);
+    vip_category_list_clear(&a->episode_categories);
+    vip_channel_list_clear(&a->episode_channels);
+    vip_channel_list_clear(&a->season_channels);
+    a->episode_categories = *seasons;
+    memset(seasons, 0, sizeof(*seasons));
+    a->episode_channels = *episodes;
+    memset(episodes, 0, sizeof(*episodes));
+    a->season_channels = *season_cards;
+    memset(season_cards, 0, sizeof(*season_cards));
+    snprintf(a->series_title, sizeof(a->series_title), "%s", job->title ? job->title : "Série");
+    snprintf(a->status, sizeof(a->status), "%zu temporadas • %zu episódios", a->season_channels.len,
+             a->episode_channels.len);
+    pthread_mutex_unlock(&a->data_mutex);
+    return true;
+}
+
 static void *series_worker(void *userdata) {
     series_job_t *job = userdata;
     app_t *a = job->app;
     vip_credentials_t credentials = {0};
-    vip_xtream_client_t *client = NULL;
     vip_category_list_t seasons;
     vip_category_list_init(&seasons);
     vip_channel_list_t episodes;
@@ -2672,102 +2773,17 @@ static void *series_worker(void *userdata) {
     vip_media_metadata_init(&series_metadata);
     vip_error_t error = {0};
 
-    vip_status_t st = vip_credentials_init(&credentials, job->server, job->username, job->password, &error);
-    if (st == VIP_OK)
-        st = vip_xtream_client_create(&client, &credentials, &error);
-    if (st == VIP_OK)
-        st = vip_xtream_series_info(client, job->series_id, &series_metadata, &seasons, &episodes, &error);
+    vip_status_t st = prepare_series_catalog(job, &credentials, &seasons, &episodes, &season_cards,
+                                             &series_metadata, &error);
+    bool success = publish_series_catalog(a, job, &seasons, &episodes, &season_cards, st, &error);
+    atomic_store(&a->series_success, success);
 
-    if (st == VIP_OK) {
-        char *series_art = series_metadata.cover_url && series_metadata.cover_url[0]
-                               ? series_metadata.cover_url
-                               : (job->logo_url && job->logo_url[0] ? job->logo_url : NULL);
-        if (series_art) {
-            for (size_t i = 0; i < episodes.len; ++i) {
-                char *inherited = vip_strdup(series_art);
-                if (!inherited) {
-                    vip_error_set(&error, VIP_ERR_NOMEM, "sem memória para capa dos episódios");
-                    st = VIP_ERR_NOMEM;
-                    break;
-                }
-                free(episodes.items[i].logo_url);
-                episodes.items[i].logo_url = inherited;
-            }
-        }
-        const char *fallback_provider =
-            episodes.len > 0u ? episodes.items[0].provider_id : credentials.provider_id;
-        for (size_t i = 0; i < seasons.len; ++i) {
-            vip_category_t *season = &seasons.items[i];
-            char season_id[512];
-            snprintf(season_id, sizeof(season_id), "season:%s:%s", job->series_id,
-                     season->id ? season->id : "0");
-            vip_channel_t card = {
-                .provider_id = season->provider_id && season->provider_id[0] ? season->provider_id
-                                                                             : (char *)fallback_provider,
-                .id = season_id,
-                .category_id = season->id,
-                .name = season->name ? season->name : "Temporada",
-                .logo_url = series_art,
-                .stream_url = "series://season",
-                .epg_channel_id = NULL,
-                .position = (int)i,
-            };
-            st = vip_channel_list_push(&season_cards, &card, &error);
-            if (st != VIP_OK)
-                break;
-        }
-        if (st == VIP_OK) {
-            sort_episode_channels(&episodes);
-            sort_season_channels(&season_cards);
-        }
-    }
-
-    if (st == VIP_OK && season_cards.len > 0u) {
-        pthread_mutex_lock(&a->data_mutex);
-        vip_category_list_clear(&a->episode_categories);
-        vip_channel_list_clear(&a->episode_channels);
-        vip_channel_list_clear(&a->season_channels);
-        a->episode_categories = seasons;
-        memset(&seasons, 0, sizeof(seasons));
-        a->episode_channels = episodes;
-        memset(&episodes, 0, sizeof(episodes));
-        a->season_channels = season_cards;
-        memset(&season_cards, 0, sizeof(season_cards));
-        snprintf(a->series_title, sizeof(a->series_title), "%s", job->title ? job->title : "Série");
-        snprintf(a->status, sizeof(a->status), "%zu temporadas • %zu episódios", a->season_channels.len,
-                 a->episode_channels.len);
-        pthread_mutex_unlock(&a->data_mutex);
-        atomic_store(&a->series_success, true);
-    } else {
-        if (st == VIP_OK)
-            vip_error_set(&error, VIP_ERR_MALFORMED, "nenhuma temporada encontrada");
-        pthread_mutex_lock(&a->data_mutex);
-        snprintf(a->status, sizeof(a->status), "Falha ao carregar episódios: %s",
-                 error.message[0] ? error.message : "erro desconhecido");
-        pthread_mutex_unlock(&a->data_mutex);
-        atomic_store(&a->series_success, false);
-    }
-
-    if (client)
-        vip_xtream_client_destroy(client);
     vip_credentials_clear(&credentials);
     vip_category_list_clear(&seasons);
     vip_channel_list_clear(&episodes);
     vip_channel_list_clear(&season_cards);
     vip_media_metadata_clear(&series_metadata);
-    if (job->password) {
-        volatile char *wipe = job->password;
-        size_t n = strlen(job->password);
-        while (n-- > 0u)
-            *wipe++ = 0;
-    }
-    free(job->server);
-    free(job->username);
-    free(job->password);
-    free(job->series_id);
-    free(job->title);
-    free(job->logo_url);
-    free(job);
+    free_series_job(job);
     atomic_store(&a->series_running, false);
     atomic_store(&a->series_done, true);
     return NULL;
@@ -6752,25 +6768,87 @@ static void handle_async(app_t *a) {
 }
 
 /* Initialize test env. */
-static void init_test_env(app_t *a) {
-    const char *server = getenv("VIPTV_TEST_SERVER"), *alt = getenv("VIPTV_TEST_ALT_SERVER"),
-               *user = getenv("VIPTV_TEST_USERNAME"), *pass = getenv("VIPTV_TEST_PASSWORD");
-    if (server && user && pass) {
-        fprintf(stderr, "[test] autoconnect habilitado\n");
-        snprintf(a->server, sizeof(a->server), "%s", server);
-        if (alt)
-            snprintf(a->server_alt, sizeof(a->server_alt), "%s", alt);
-        snprintf(a->username, sizeof(a->username), "%s", user);
-        snprintf(a->password, sizeof(a->password), "%s", pass);
-        a->test_autoplay = getenv("VIPTV_TEST_AUTOPLAY") != NULL;
-        a->test_series = getenv("VIPTV_TEST_SERIES") != NULL;
-        const char *back_ms = getenv("VIPTV_TEST_AUTOBACK_MS");
-        if (back_ms)
-            a->test_autoback_delay_ms = (int)strtol(back_ms, NULL, 10);
-        const char *exit_ms = getenv("VIPTV_TEST_EXIT_MS");
-        if (exit_ms)
-            a->test_exit_at_ms = monotonic_ms() + strtoll(exit_ms, NULL, 10);
-        start_login(a, true);
+static void init_app_state(app_t *a) {
+    memset(a, 0, sizeof(*a));
+    pthread_mutex_init(&a->data_mutex, NULL);
+    for (int i = 0; i < 3; ++i) {
+        vip_category_list_init(&a->catalogs[i].categories);
+        vip_channel_list_init(&a->catalogs[i].channels);
+    }
+    vip_category_list_init(&a->episode_categories);
+    vip_channel_list_init(&a->episode_channels);
+    vip_channel_list_init(&a->season_channels);
+    vip_profile_list_init(&a->profiles);
+    atomic_init(&a->login_running, false);
+    atomic_init(&a->login_done, false);
+    atomic_init(&a->login_success, false);
+    atomic_init(&a->pairing_submission, false);
+    atomic_init(&a->series_running, false);
+    atomic_init(&a->series_done, false);
+    atomic_init(&a->series_success, false);
+    atomic_init(&a->details_running, false);
+    atomic_init(&a->details_done, false);
+    atomic_init(&a->details_success, false);
+    atomic_init(&a->thumbs_dirty, false);
+    vip_media_metadata_init(&a->details_metadata);
+    a->content_kind = CONTENT_LIVE;
+    a->login_mode = LOGIN_XTREAM;
+    a->screen = SCREEN_LOGIN;
+    a->input_focus = INPUT_MODE;
+    a->selected_category = -1;
+    snprintf(a->status, sizeof(a->status), "Cole as credenciais Xtream e conecte");
+}
+
+static void process_pending_events(app_t *a) {
+    while (XPending(a->dpy)) {
+        XEvent event;
+        XNextEvent(a->dpy, &event);
+        process_event(a, &event);
+    }
+}
+
+static void handle_test_runtime(app_t *a, int64_t now) {
+    if (a->screen == SCREEN_PLAYER && a->test_autoback_delay_ms > 0 && !a->test_autoback_done &&
+        now - a->player_open_ms >= a->test_autoback_delay_ms) {
+        leave_player(a);
+        a->test_autoback_done = true;
+        fprintf(stderr, "[test] voltar do player OK\n");
+    }
+    if (a->test_exit_at_ms > 0 && now >= a->test_exit_at_ms)
+        a->quit = true;
+}
+
+static void wait_for_x11_activity(int xfd) {
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(xfd, &rfds);
+    struct timeval tv = {.tv_sec = 0, .tv_usec = 16000};
+    (void)select(xfd + 1, &rfds, NULL, NULL, &tv);
+}
+
+static void run_app_loop(app_t *a) {
+    int xfd = ConnectionNumber(a->dpy);
+    int64_t next_draw = 0;
+    while (!a->quit) {
+        process_pending_events(a);
+        handle_async(a);
+        maybe_start_details_load(a);
+        prefetch_thumbnail_batch(a);
+        maybe_failover_player(a);
+        maybe_enforce_fullscreen(a);
+        sync_video_window(a);
+
+        int64_t now = monotonic_ms();
+        bool ui_animating = step_browse_animations(a, now);
+        if (a->screen == SCREEN_PLAYER)
+            save_current_progress(a, false);
+        handle_test_runtime(a, now);
+
+        if (now >= next_draw || ui_animating) {
+            redraw(a);
+            next_draw = now + (a->screen == SCREEN_PLAYER ? 33 : (ui_animating ? 16 : 100));
+        }
+        wait_for_x11_activity(xfd);
     }
 }
 
@@ -6778,80 +6856,20 @@ static void init_test_env(app_t *a) {
 int vip_x11_app_run(void) {
     setlocale(LC_ALL, "");
     curl_global_init(CURL_GLOBAL_DEFAULT);
-    app_t a;
-    memset(&a, 0, sizeof(a));
-    pthread_mutex_init(&a.data_mutex, NULL);
-    for (int i = 0; i < 3; ++i) {
-        vip_category_list_init(&a.catalogs[i].categories);
-        vip_channel_list_init(&a.catalogs[i].channels);
-    }
-    vip_category_list_init(&a.episode_categories);
-    vip_channel_list_init(&a.episode_channels);
-    vip_channel_list_init(&a.season_channels);
-    vip_profile_list_init(&a.profiles);
-    atomic_init(&a.login_running, false);
-    atomic_init(&a.login_done, false);
-    atomic_init(&a.login_success, false);
-    atomic_init(&a.pairing_submission, false);
-    atomic_init(&a.series_running, false);
-    atomic_init(&a.series_done, false);
-    atomic_init(&a.series_success, false);
-    atomic_init(&a.details_running, false);
-    atomic_init(&a.details_done, false);
-    atomic_init(&a.details_success, false);
-    atomic_init(&a.thumbs_dirty, false);
-    vip_media_metadata_init(&a.details_metadata);
-    a.content_kind = CONTENT_LIVE;
-    a.login_mode = LOGIN_XTREAM;
-    a.screen = SCREEN_LOGIN;
-    a.input_focus = INPUT_MODE;
-    a.selected_category = -1;
-    snprintf(a.status, sizeof(a.status), "Cole as credenciais Xtream e conecte");
+
+    app_t app;
+    init_app_state(&app);
+
     vip_error_t error = {0};
-    if (!init_x11(&a, &error)) {
+    if (!init_x11(&app, &error)) {
         fprintf(stderr, "ERRO: %s\n", error.message);
-        destroy_app(&a);
+        destroy_app(&app);
         return 1;
     }
-    init_runtime(&a);
-    init_test_env(&a);
 
-    int xfd = ConnectionNumber(a.dpy);
-    int64_t next_draw = 0;
-    while (!a.quit) {
-        while (XPending(a.dpy)) {
-            XEvent e;
-            XNextEvent(a.dpy, &e);
-            process_event(&a, &e);
-        }
-        handle_async(&a);
-        maybe_start_details_load(&a);
-        prefetch_thumbnail_batch(&a);
-        maybe_failover_player(&a);
-        maybe_enforce_fullscreen(&a);
-        sync_video_window(&a);
-        int64_t now = monotonic_ms();
-        bool ui_animating = step_browse_animations(&a, now);
-        if (a.screen == SCREEN_PLAYER)
-            save_current_progress(&a, false);
-        if (a.screen == SCREEN_PLAYER && a.test_autoback_delay_ms > 0 && !a.test_autoback_done &&
-            now - a.player_open_ms >= a.test_autoback_delay_ms) {
-            leave_player(&a);
-            a.test_autoback_done = true;
-            fprintf(stderr, "[test] voltar do player OK\n");
-        }
-        if (a.test_exit_at_ms > 0 && now >= a.test_exit_at_ms)
-            a.quit = true;
-        if (now >= next_draw || ui_animating) {
-            redraw(&a);
-            next_draw = now + (a.screen == SCREEN_PLAYER ? 33 : (ui_animating ? 16 : 100));
-        }
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(xfd, &rfds);
-        struct timeval tv = {.tv_sec = 0, .tv_usec = 16000};
-        (void)select(xfd + 1, &rfds, NULL, NULL, &tv);
-    }
-    destroy_app(&a);
+    init_runtime(&app);
+    init_test_env(&app);
+    run_app_loop(&app);
+    destroy_app(&app);
     return 0;
 }
