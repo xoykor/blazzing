@@ -636,6 +636,212 @@ static void set_last_event_locked(vip_mpv_player_t *player, const char *event) {
 
 /* IPC is event-driven.  Property observations update a mutex-protected
  * snapshot that the X11 thread can read without parsing JSON itself. */
+typedef struct {
+    bool debug;
+    bool has_video;
+    int width;
+    int height;
+    char last_event[64];
+    char codec[64];
+    char vo[64];
+    char hwdec[64];
+} mpv_debug_snapshot_t;
+
+static const char *json_object_string_field(json_object *root, const char *field) {
+    json_object *value = NULL;
+    if (!json_object_object_get_ex(root, field, &value) || !value)
+        return NULL;
+    return json_object_get_string(value);
+}
+
+static bool json_value_present(json_object *value) {
+    return value && json_object_get_type(value) != json_type_null;
+}
+
+static void handle_start_file_locked(vip_mpv_player_t *player) {
+    if (player->pending_load_starts > 0u)
+        --player->pending_load_starts;
+    if (player->stop_requested)
+        return;
+
+    player->media_running = true;
+    touch_state_locked(player, VIP_PLAYER_OPENING);
+}
+
+static double handle_file_loaded_locked(vip_mpv_player_t *player) {
+    if (player->stop_requested)
+        return 0.0;
+
+    player->media_running = true;
+    double deferred_seek = player->pending_start_seconds;
+    player->pending_start_seconds = 0.0;
+    update_state_from_flags_locked(player);
+    ++player->serial;
+    return deferred_seek;
+}
+
+static void set_end_file_error_locked(vip_mpv_player_t *player, const char *reason) {
+    trim_text(player->recent_log);
+    if (player->recent_log[0])
+        snprintf(player->last_error, sizeof(player->last_error), "%.511s", player->recent_log);
+    else if (reason)
+        snprintf(player->last_error, sizeof(player->last_error),
+                 "mpv encerrou o arquivo: %s", reason);
+    else
+        snprintf(player->last_error, sizeof(player->last_error),
+                 "mpv não conseguiu abrir a mídia");
+    touch_state_locked(player, VIP_PLAYER_ERROR);
+}
+
+static void handle_end_file_locked(vip_mpv_player_t *player, json_object *root) {
+    const char *reason = json_object_string_field(root, "reason");
+
+    /*
+     * loadfile replace emits end-file for the item being replaced before
+     * start-file for the queued item. Ignore that stale end-file while a new
+     * load is pending.
+     */
+    if (player->pending_load_starts != 0u)
+        return;
+
+    player->media_running = false;
+    player->buffering = false;
+    player->paused = false;
+
+    if (reason && strcmp(reason, "eof") == 0) {
+        player->natural_end = true;
+        touch_state_locked(player, VIP_PLAYER_STOPPED);
+        return;
+    }
+    if (reason && (strcmp(reason, "stop") == 0 || strcmp(reason, "quit") == 0)) {
+        touch_state_locked(player, VIP_PLAYER_STOPPED);
+        return;
+    }
+    set_end_file_error_locked(player, reason);
+}
+
+static void update_video_presence_locked(vip_mpv_player_t *player, json_object *data) {
+    if (!json_value_present(data))
+        return;
+    if (json_object_get_type(data) == json_type_int) {
+        player->has_video = json_object_get_int64(data) > 0;
+        return;
+    }
+
+    const char *value = json_object_get_string(data);
+    player->has_video = value && strcmp(value, "no") != 0 && strcmp(value, "false") != 0;
+}
+
+static void apply_property_change_locked(vip_mpv_player_t *player,
+                                         const char *name,
+                                         json_object *data) {
+    if (strcmp(name, "pause") == 0 && json_value_present(data))
+        player->paused = json_object_get_boolean(data) != 0;
+    else if (strcmp(name, "time-pos") == 0 && json_value_present(data))
+        player->position_seconds = json_object_get_double(data);
+    else if (strcmp(name, "duration") == 0 && json_value_present(data))
+        player->duration_seconds = json_object_get_double(data);
+    else if (strcmp(name, "percent-pos") == 0 && json_value_present(data))
+        player->percent_pos = json_object_get_double(data);
+    else if (strcmp(name, "paused-for-cache") == 0 && json_value_present(data))
+        player->buffering = json_object_get_boolean(data) != 0;
+    else if (strcmp(name, "seekable") == 0 && json_value_present(data))
+        player->seekable = json_object_get_boolean(data) != 0;
+    else if (strcmp(name, "volume") == 0 && json_value_present(data))
+        player->volume = json_object_get_double(data);
+    else if (strcmp(name, "demuxer-cache-duration") == 0 && json_value_present(data))
+        player->cache_duration_seconds = json_object_get_double(data);
+    else if (strcmp(name, "vid") == 0)
+        update_video_presence_locked(player, data);
+    else if (strcmp(name, "video-codec") == 0)
+        copy_json_string(player->video_codec, sizeof(player->video_codec), data);
+    else if (strcmp(name, "width") == 0 && json_value_present(data))
+        player->video_width = json_object_get_int(data);
+    else if (strcmp(name, "height") == 0 && json_value_present(data))
+        player->video_height = json_object_get_int(data);
+    else if (strcmp(name, "current-vo") == 0)
+        copy_json_string(player->vo, sizeof(player->vo), data);
+    else if (strcmp(name, "hwdec-current") == 0)
+        copy_json_string(player->hwdec, sizeof(player->hwdec), data);
+}
+
+static void handle_property_change_locked(vip_mpv_player_t *player, json_object *root) {
+    json_object *name_obj = NULL;
+    json_object *data = NULL;
+    const char *name = json_object_object_get_ex(root, "name", &name_obj) && name_obj
+                           ? json_object_get_string(name_obj)
+                           : NULL;
+    (void)json_object_object_get_ex(root, "data", &data);
+    if (!name)
+        return;
+
+    apply_property_change_locked(player, name, data);
+    ++player->serial;
+    update_state_from_flags_locked(player);
+}
+
+static double handle_player_event_locked(vip_mpv_player_t *player,
+                                         const char *event,
+                                         json_object *root) {
+    if (!event)
+        return 0.0;
+    if (strcmp(event, "start-file") == 0) {
+        handle_start_file_locked(player);
+        return 0.0;
+    }
+    if (strcmp(event, "file-loaded") == 0)
+        return handle_file_loaded_locked(player);
+    if (strcmp(event, "playback-restart") == 0) {
+        update_state_from_flags_locked(player);
+        ++player->serial;
+        return 0.0;
+    }
+    if (strcmp(event, "end-file") == 0) {
+        handle_end_file_locked(player, root);
+        return 0.0;
+    }
+    if (strcmp(event, "property-change") == 0)
+        handle_property_change_locked(player, root);
+    return 0.0;
+}
+
+static void capture_mpv_debug_snapshot_locked(vip_mpv_player_t *player,
+                                              mpv_debug_snapshot_t *snapshot) {
+    snapshot->debug = player->debug;
+    snapshot->has_video = player->has_video;
+    snapshot->width = player->video_width;
+    snapshot->height = player->video_height;
+    snprintf(snapshot->last_event, sizeof(snapshot->last_event), "%s", player->last_event);
+    snprintf(snapshot->codec, sizeof(snapshot->codec), "%s", player->video_codec);
+    snprintf(snapshot->vo, sizeof(snapshot->vo), "%s", player->vo);
+    snprintf(snapshot->hwdec, sizeof(snapshot->hwdec), "%s", player->hwdec);
+}
+
+static bool mpv_event_needs_debug_log(const char *event) {
+    return event &&
+           (strcmp(event, "start-file") == 0 ||
+            strcmp(event, "file-loaded") == 0 ||
+            strcmp(event, "video-reconfig") == 0 ||
+            strcmp(event, "playback-restart") == 0 ||
+            strcmp(event, "end-file") == 0);
+}
+
+static void log_mpv_event_snapshot(vip_mpv_player_t *player,
+                                   const char *event,
+                                   const mpv_debug_snapshot_t *snapshot) {
+    if (!snapshot->debug || !mpv_event_needs_debug_log(event))
+        return;
+
+    debug_log(player, "event=%s video=%s codec=%s size=%dx%d vo=%s hwdec=%s",
+              snapshot->last_event,
+              snapshot->has_video ? "yes" : "no",
+              snapshot->codec[0] ? snapshot->codec : "?",
+              snapshot->width,
+              snapshot->height,
+              snapshot->vo[0] ? snapshot->vo : "?",
+              snapshot->hwdec[0] ? snapshot->hwdec : "no/unknown");
+}
+
 static void handle_ipc_line(vip_mpv_player_t *player, const char *line) {
     json_object *root = json_tokener_parse(line);
     if (!root || json_object_get_type(root) != json_type_object) {
@@ -643,137 +849,22 @@ static void handle_ipc_line(vip_mpv_player_t *player, const char *line) {
             json_object_put(root);
         return;
     }
-    json_object *event_obj = NULL;
-    const char *event = json_object_object_get_ex(root, "event", &event_obj) && event_obj
-                            ? json_object_get_string(event_obj)
-                            : NULL;
-    double deferred_seek = 0.0;
+
+    const char *event = json_object_string_field(root, "event");
+    mpv_debug_snapshot_t snapshot = {0};
 
     pthread_mutex_lock(&player->mutex);
     if (event)
         set_last_event_locked(player, event);
-    if (event && strcmp(event, "start-file") == 0) {
-        if (player->pending_load_starts > 0u)
-            --player->pending_load_starts;
-        if (!player->stop_requested) {
-            player->media_running = true;
-            touch_state_locked(player, VIP_PLAYER_OPENING);
-        }
-    } else if (event && strcmp(event, "file-loaded") == 0) {
-        if (!player->stop_requested) {
-            player->media_running = true;
-            deferred_seek = player->pending_start_seconds;
-            player->pending_start_seconds = 0.0;
-            update_state_from_flags_locked(player);
-            ++player->serial;
-        }
-    } else if (event && strcmp(event, "playback-restart") == 0) {
-        update_state_from_flags_locked(player);
-        ++player->serial;
-    } else if (event && strcmp(event, "end-file") == 0) {
-        json_object *reason_obj = NULL;
-        const char *reason = json_object_object_get_ex(root, "reason", &reason_obj) && reason_obj
-                                 ? json_object_get_string(reason_obj)
-                                 : NULL;
-
-        /*
-         * loadfile replace emits end-file for the item being replaced before
-         * start-file for the queued item. The public load call already moved
-         * the snapshot to the newly requested item, so applying that stale
-         * end-file here would incorrectly clear pause/running state.
-         *
-         * A real failure for the new item is still handled normally because
-         * mpv emits start-file first, which consumes pending_load_starts.
-         */
-        if (player->pending_load_starts == 0u) {
-            player->media_running = false;
-            player->buffering = false;
-            player->paused = false;
-            if (reason && strcmp(reason, "eof") == 0) {
-                player->natural_end = true;
-                touch_state_locked(player, VIP_PLAYER_STOPPED);
-            } else if (reason && (strcmp(reason, "stop") == 0 || strcmp(reason, "quit") == 0)) {
-                touch_state_locked(player, VIP_PLAYER_STOPPED);
-            } else {
-                trim_text(player->recent_log);
-                if (player->recent_log[0])
-                    snprintf(player->last_error, sizeof(player->last_error), "%.511s", player->recent_log);
-                else if (reason)
-                    snprintf(player->last_error, sizeof(player->last_error), "mpv encerrou o arquivo: %s",
-                             reason);
-                else
-                    snprintf(player->last_error, sizeof(player->last_error), "mpv não conseguiu abrir a mídia");
-                touch_state_locked(player, VIP_PLAYER_ERROR);
-            }
-        }
-    } else if (event && strcmp(event, "property-change") == 0) {
-        json_object *name_obj = NULL, *data = NULL;
-        const char *name = json_object_object_get_ex(root, "name", &name_obj) && name_obj
-                               ? json_object_get_string(name_obj)
-                               : NULL;
-        (void)json_object_object_get_ex(root, "data", &data);
-        if (name) {
-            if (strcmp(name, "pause") == 0 && data && json_object_get_type(data) != json_type_null)
-                player->paused = json_object_get_boolean(data) != 0;
-            else if (strcmp(name, "time-pos") == 0 && data && json_object_get_type(data) != json_type_null)
-                player->position_seconds = json_object_get_double(data);
-            else if (strcmp(name, "duration") == 0 && data && json_object_get_type(data) != json_type_null)
-                player->duration_seconds = json_object_get_double(data);
-            else if (strcmp(name, "percent-pos") == 0 && data && json_object_get_type(data) != json_type_null)
-                player->percent_pos = json_object_get_double(data);
-            else if (strcmp(name, "paused-for-cache") == 0 && data &&
-                     json_object_get_type(data) != json_type_null)
-                player->buffering = json_object_get_boolean(data) != 0;
-            else if (strcmp(name, "seekable") == 0 && data && json_object_get_type(data) != json_type_null)
-                player->seekable = json_object_get_boolean(data) != 0;
-            else if (strcmp(name, "volume") == 0 && data && json_object_get_type(data) != json_type_null)
-                player->volume = json_object_get_double(data);
-            else if (strcmp(name, "demuxer-cache-duration") == 0 && data &&
-                     json_object_get_type(data) != json_type_null)
-                player->cache_duration_seconds = json_object_get_double(data);
-            else if (strcmp(name, "vid") == 0 && data && json_object_get_type(data) != json_type_null) {
-                if (json_object_get_type(data) == json_type_int)
-                    player->has_video = json_object_get_int64(data) > 0;
-                else {
-                    const char *vid = json_object_get_string(data);
-                    player->has_video = vid && strcmp(vid, "no") != 0 && strcmp(vid, "false") != 0;
-                }
-            } else if (strcmp(name, "video-codec") == 0)
-                copy_json_string(player->video_codec, sizeof(player->video_codec), data);
-            else if (strcmp(name, "width") == 0 && data && json_object_get_type(data) != json_type_null)
-                player->video_width = json_object_get_int(data);
-            else if (strcmp(name, "height") == 0 && data && json_object_get_type(data) != json_type_null)
-                player->video_height = json_object_get_int(data);
-            else if (strcmp(name, "current-vo") == 0)
-                copy_json_string(player->vo, sizeof(player->vo), data);
-            else if (strcmp(name, "hwdec-current") == 0)
-                copy_json_string(player->hwdec, sizeof(player->hwdec), data);
-            ++player->serial;
-            update_state_from_flags_locked(player);
-        }
-    }
-
-    bool debug = player->debug;
-    char last_event[64], codec[64], vo[64], hwdec[64];
-    int width = player->video_width, height = player->video_height;
-    bool has_video = player->has_video;
-    snprintf(last_event, sizeof(last_event), "%s", player->last_event);
-    snprintf(codec, sizeof(codec), "%s", player->video_codec);
-    snprintf(vo, sizeof(vo), "%s", player->vo);
-    snprintf(hwdec, sizeof(hwdec), "%s", player->hwdec);
+    double deferred_seek = handle_player_event_locked(player, event, root);
+    capture_mpv_debug_snapshot_locked(player, &snapshot);
     pthread_mutex_unlock(&player->mutex);
 
     if (deferred_seek > 0.0) {
         debug_log(player, "retomada via IPC seek=%.3f", deferred_seek);
         (void)send_seek(player, deferred_seek, false);
     }
-    if (debug && event &&
-        (!strcmp(event, "start-file") || !strcmp(event, "file-loaded") || !strcmp(event, "video-reconfig") ||
-         !strcmp(event, "playback-restart") || !strcmp(event, "end-file"))) {
-        debug_log(player, "event=%s video=%s codec=%s size=%dx%d vo=%s hwdec=%s", last_event,
-                  has_video ? "yes" : "no", codec[0] ? codec : "?", width, height, vo[0] ? vo : "?",
-                  hwdec[0] ? hwdec : "no/unknown");
-    }
+    log_mpv_event_snapshot(player, event, &snapshot);
     json_object_put(root);
 }
 
