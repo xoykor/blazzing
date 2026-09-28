@@ -3139,26 +3139,41 @@ static void backspace_input(app_t *a) {
         rebuild_filter(a);
 }
 
-/* Handle the executable in path operation. */
-static bool executable_in_path(const char *name) {
-    const char *path = getenv("PATH");
-    if (!name || !name[0] || !path)
+/* Resolve secret-tool without invoking a shell or trusting a mutable PATH. */
+static bool find_secret_tool(char *out, size_t cap) {
+    static const char *const candidates[] = {
+        "/usr/bin/secret-tool",
+        "/bin/secret-tool",
+        "/usr/local/bin/secret-tool",
+    };
+    if (!out || cap == 0u)
         return false;
-    char *copy = vip_strdup(path);
-    if (!copy)
-        return false;
-    bool found = false;
-    char *save = NULL;
-    for (char *dir = strtok_r(copy, ":", &save); dir; dir = strtok_r(NULL, ":", &save)) {
-        char full[1024];
-        int n = snprintf(full, sizeof(full), "%s/%s", dir[0] ? dir : ".", name);
-        if (n > 0 && (size_t)n < sizeof(full) && access(full, X_OK) == 0) {
-            found = true;
-            break;
-        }
+    out[0] = '\0';
+    for (size_t i = 0u; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
+        if (access(candidates[i], X_OK) != 0)
+            continue;
+        int n = snprintf(out, cap, "%s", candidates[i]);
+        if (n > 0 && (size_t)n < cap)
+            return true;
     }
-    free(copy);
-    return found;
+    out[0] = '\0';
+    return false;
+}
+
+/* Secret Service attributes are passed directly to execv, but keep the
+ * profile identifier deliberately narrow as an extra boundary check. */
+static bool keyring_profile_id_is_safe(const char *profile_id) {
+    if (!profile_id || !profile_id[0])
+        return false;
+    size_t len = strlen(profile_id);
+    if (len > 128u)
+        return false;
+    for (size_t i = 0u; i < len; ++i) {
+        unsigned char c = (unsigned char)profile_id[i];
+        if (!(isalnum(c) || c == '-' || c == '_' || c == '.' || c == ':'))
+            return false;
+    }
+    return true;
 }
 
 /* Write all fd. */
@@ -3180,7 +3195,9 @@ static bool write_all_fd(int fd, const char *data, size_t len) {
 /* Password persistence is delegated to Secret Service via secret-tool.
  * SQLite stores only non-secret profile fields. */
 static bool keyring_store_password(const char *profile_id, const char *password) {
-    if (!profile_id || !profile_id[0] || !password || !password[0] || !executable_in_path("secret-tool"))
+    char secret_tool[256];
+    if (!keyring_profile_id_is_safe(profile_id) || !password || !password[0] ||
+        !find_secret_tool(secret_tool, sizeof(secret_tool)))
         return false;
     int inpipe[2];
     if (pipe(inpipe) != 0)
@@ -3190,8 +3207,11 @@ static bool keyring_store_password(const char *profile_id, const char *password)
         dup2(inpipe[0], STDIN_FILENO);
         close(inpipe[0]);
         close(inpipe[1]);
-        execlp("secret-tool", "secret-tool", "store", "--label=Blazzing", "application", "visual-iptv",
-               "profile", profile_id, (char *)NULL);
+        char *const argv[] = {
+            "secret-tool", "store", "--label=Blazzing", "application", "visual-iptv",
+            "profile", (char *)profile_id, NULL
+        };
+        execv(secret_tool, argv);
         _exit(127);
     }
     close(inpipe[0]);
@@ -3213,7 +3233,9 @@ static bool keyring_lookup_password(const char *profile_id, char *out, size_t ca
     if (!out || cap == 0u)
         return false;
     out[0] = '\0';
-    if (!profile_id || !profile_id[0] || !executable_in_path("secret-tool"))
+    char secret_tool[256];
+    if (!keyring_profile_id_is_safe(profile_id) ||
+        !find_secret_tool(secret_tool, sizeof(secret_tool)))
         return false;
     int outpipe[2];
     if (pipe(outpipe) != 0)
@@ -3228,8 +3250,11 @@ static bool keyring_lookup_password(const char *profile_id, char *out, size_t ca
         }
         close(outpipe[0]);
         close(outpipe[1]);
-        execlp("secret-tool", "secret-tool", "lookup", "application", "visual-iptv", "profile", profile_id,
-               (char *)NULL);
+        char *const argv[] = {
+            "secret-tool", "lookup", "application", "visual-iptv",
+            "profile", (char *)profile_id, NULL
+        };
+        execv(secret_tool, argv);
         _exit(127);
     }
     close(outpipe[1]);
