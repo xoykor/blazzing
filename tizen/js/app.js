@@ -684,42 +684,68 @@
         return { onlyKind: kind };
     }
 
+    function parseStoredM3uSection(profile, kind, options) {
+        var parser = window.BlazzingProviders.createM3uParser(
+            profile.url,
+            options
+        );
+        var summaryOnly = kind === "series" && !!options.seriesSummaryOnly;
+
+        return window.BlazzingStorage.streamCachedPlaylistSection(
+            profile.url,
+            kind,
+            summaryOnly,
+            function (chunk) {
+                parser.consumeTextChunk(chunk);
+            }
+        ).then(function (row) {
+            var catalogs;
+
+            if (!row) { return null; }
+            if (!parser.hasM3uMarker()) {
+                throw new Error("cache M3U inválido");
+            }
+
+            catalogs = parser.finish();
+            return catalogs[kind] || { items: [], categories: [] };
+        });
+    }
+
+    function reportPlaylistIndexProgress(readChars) {
+        var mib = Math.floor(readChars / (1024 * 1024));
+        setBusy(true, "Otimizando playlist… " + mib + " MiB");
+    }
+
+    function buildStoredM3uSectionCaches(profile) {
+        /*
+         * A primeira abertura após baixar/atualizar a M3U faz uma única
+         * varredura grande e cria arquivos menores para TV, Filmes e Séries.
+         * As trocas seguintes leem apenas a seção necessária.
+         */
+        setBusy(true, "Otimizando playlist para a TV…");
+        return window.BlazzingStorage.buildPlaylistSectionCaches(
+            profile.url,
+            window.BlazzingProviders.classifyM3uEntry,
+            reportPlaylistIndexProgress
+        );
+    }
+
+    function rebuildStoredM3uCatalog(profile, kind, options) {
+        return buildStoredM3uSectionCaches(profile).then(function () {
+            return parseStoredM3uSection(profile, kind, options);
+        }).then(function (catalog) {
+            if (!catalog) {
+                throw new Error("Falha ao criar índice da playlist.");
+            }
+            return catalog;
+        });
+    }
+
     function loadStoredM3uCatalog(profile, kind, options) {
         options = options || m3uParserOptions(kind);
 
-        function parseSectionCache() {
-            var parser = window.BlazzingProviders.createM3uParser(
-                profile.url,
-                options
-            );
-            var summaryOnly = kind === "series" && !!options.seriesSummaryOnly;
-
-            return window.BlazzingStorage.streamCachedPlaylistSection(
-                profile.url,
-                kind,
-                summaryOnly,
-                function (chunk) {
-                    parser.consumeTextChunk(chunk);
-                }
-            ).then(function (row) {
-                var catalogs;
-
-                if (!row) {
-                    return null;
-                }
-                if (!parser.hasM3uMarker()) {
-                    throw new Error("cache M3U inválido");
-                }
-
-                catalogs = parser.finish();
-                return catalogs[kind] || { items: [], categories: [] };
-            });
-        }
-
-        return parseSectionCache().then(function (catalog) {
-            if (catalog) {
-                return catalog;
-            }
+        return parseStoredM3uSection(profile, kind, options).then(function (catalog) {
+            if (catalog) { return catalog; }
 
             /*
              * Se nem o índice nem a playlist bruta existem, esta é uma
@@ -730,32 +756,8 @@
             return window.BlazzingStorage.cachedPlaylistExists(
                 profile.url
             ).then(function (exists) {
-                if (!exists) {
-                    return null;
-                }
-
-                /*
-                 * A primeira abertura após baixar/atualizar a M3U faz uma única
-                 * varredura grande e cria arquivos menores para TV, Filmes e
-                 * Séries. As trocas seguintes leem apenas a seção necessária.
-                 */
-                setBusy(true, "Otimizando playlist para a TV…");
-
-                return window.BlazzingStorage.buildPlaylistSectionCaches(
-                    profile.url,
-                    window.BlazzingProviders.classifyM3uEntry,
-                    function (readChars) {
-                        var mib = Math.floor(readChars / (1024 * 1024));
-                        setBusy(true, "Otimizando playlist… " + mib + " MiB");
-                    }
-                ).then(function () {
-                    return parseSectionCache();
-                }).then(function (indexedCatalog) {
-                    if (!indexedCatalog) {
-                        throw new Error("Falha ao criar índice da playlist.");
-                    }
-                    return indexedCatalog;
-                });
+                if (!exists) { return null; }
+                return rebuildStoredM3uCatalog(profile, kind, options);
             });
         });
     }
