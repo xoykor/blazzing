@@ -815,14 +815,21 @@ vip_status_t vip_database_get_series_progress(vip_database_t *db, const char *pr
 }
 
 /* Set media metadata in the database. */
-vip_status_t vip_database_set_media_metadata(vip_database_t *db, const char *provider_id,
-                                             const char *media_id, const vip_media_metadata_t *metadata,
-                                             vip_error_t *error) {
-    if (!db || !provider_id || !provider_id[0] || !media_id || !media_id[0] || !metadata)
-        return VIP_ERR_INVALID_ARGUMENT;
-    pthread_mutex_lock(&db->mutex);
-    sqlite3_stmt *stmt = NULL;
-    const char *sql =
+static bool media_metadata_arguments_valid(vip_database_t *db,
+                                           const char *provider_id,
+                                           const char *media_id,
+                                           const vip_media_metadata_t *metadata) {
+    if (!db)
+        return false;
+    if (!provider_id || !provider_id[0])
+        return false;
+    if (!media_id || !media_id[0])
+        return false;
+    return metadata != NULL;
+}
+
+static const char *media_metadata_upsert_sql(void) {
+    return
         "INSERT INTO "
         "media_metadata(provider_id,media_id,plot,cover_url,backdrop_url,genre,release_date,rating,duration,["
         "cast],director,youtube_trailer,updated_at)"
@@ -832,10 +839,12 @@ vip_status_t vip_database_set_media_metadata(vip_database_t *db, const char *pro
         " rating=excluded.rating,duration=excluded.duration,[cast]=excluded.[cast],director=excluded."
         "director,"
         " youtube_trailer=excluded.youtube_trailer,updated_at=unixepoch()";
-    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK) {
-        pthread_mutex_unlock(&db->mutex);
-        return db_error(db, error, "falha ao preparar cache de metadados");
-    }
+}
+
+static void bind_media_metadata_statement(sqlite3_stmt *stmt,
+                                          const char *provider_id,
+                                          const char *media_id,
+                                          const vip_media_metadata_t *metadata) {
     sqlite3_bind_text(stmt, 1, provider_id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, media_id, -1, SQLITE_TRANSIENT);
     bind_nullable(stmt, 3, metadata->plot);
@@ -848,13 +857,41 @@ vip_status_t vip_database_set_media_metadata(vip_database_t *db, const char *pro
     bind_nullable(stmt, 10, metadata->cast);
     bind_nullable(stmt, 11, metadata->director);
     bind_nullable(stmt, 12, metadata->youtube_trailer);
+}
+
+static vip_status_t execute_media_metadata_upsert(vip_database_t *db,
+                                                  const char *provider_id,
+                                                  const char *media_id,
+                                                  const vip_media_metadata_t *metadata,
+                                                  vip_error_t *error) {
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db->conn, media_metadata_upsert_sql(),
+                           -1, &stmt, NULL) != SQLITE_OK)
+        return db_error(db, error, "falha ao preparar cache de metadados");
+
+    bind_media_metadata_statement(stmt, provider_id, media_id, metadata);
     int rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    pthread_mutex_unlock(&db->mutex);
     if (rc != SQLITE_DONE)
         return db_error(db, error, "falha ao salvar cache de metadados");
-    vip_error_clear(error);
     return VIP_OK;
+}
+
+vip_status_t vip_database_set_media_metadata(vip_database_t *db, const char *provider_id,
+                                             const char *media_id, const vip_media_metadata_t *metadata,
+                                             vip_error_t *error) {
+    if (!media_metadata_arguments_valid(db, provider_id, media_id, metadata))
+        return VIP_ERR_INVALID_ARGUMENT;
+
+    pthread_mutex_lock(&db->mutex);
+    vip_status_t st = execute_media_metadata_upsert(
+        db, provider_id, media_id, metadata, error
+    );
+    pthread_mutex_unlock(&db->mutex);
+
+    if (st == VIP_OK)
+        vip_error_clear(error);
+    return st;
 }
 
 /* Handle the column strdup operation. */
