@@ -74,45 +74,88 @@
         setTimeout(focusFirst, 0);
     }
 
-    function focusables() {
-        var root = state.pairingActive ? byId("pairing-modal") : byId(state.view + "-view");
-        var all;
 
-        if (!root) {
-            return [];
+    function focusRoot() {
+        return state.pairingActive ?
+            byId("pairing-modal") : byId(state.view + "-view");
+    }
+
+    function activeCatalogCardIndex() {
+        var active = document.activeElement;
+        var index;
+
+        if (state.view !== "catalog" || !active ||
+                !active.hasAttribute("data-card-index")) {
+            return -1;
         }
 
+        index = parseInt(active.getAttribute("data-card-index"), 10);
+        return isNaN(index) ? -1 : index;
+    }
+
+    function focusableIsRelevant(element, activeIndex) {
+        var cardIndex;
+        var rect;
+
+        if (element.disabled) { return false; }
+
+        if (state.view === "catalog" &&
+                element.hasAttribute("data-card-index") &&
+                activeIndex >= 0) {
+            cardIndex = parseInt(element.getAttribute("data-card-index"), 10);
+            if (!isNaN(cardIndex) && Math.abs(cardIndex - activeIndex) > 24) {
+                return false;
+            }
+        }
+
+        rect = element.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 &&
+            rect.bottom >= -500 && rect.top <= 1580;
+    }
+
+    function rectCenter(rect) {
+        return {
+            x: rect.left + rect.width / 2,
+            y: rect.top + rect.height / 2
+        };
+    }
+
+    function directionAllows(direction, dx, dy) {
+        if (direction === "left") { return dx < -4; }
+        if (direction === "right") { return dx > 4; }
+        if (direction === "up") { return dy < -4; }
+        return direction === "down" && dy > 4;
+    }
+
+    function navigationScore(direction, dx, dy) {
+        var horizontal = direction === "left" || direction === "right";
+        var primary = horizontal ? Math.abs(dx) : Math.abs(dy);
+        var secondary = horizontal ? Math.abs(dy) : Math.abs(dx);
+        return primary + secondary * 2.4;
+    }
+
+    function focusNavigationTarget(target) {
+        if (!target) { return; }
+        target.focus();
+        try { target.scrollIntoView(false); } catch (ignoreScroll) {}
+        maybeAppendCards(target);
+    }
+
+
+    function focusables() {
+        var root = focusRoot();
+        var activeIndex;
+        var all;
+
+        if (!root) { return []; }
+
+        activeIndex = activeCatalogCardIndex();
         all = Array.prototype.slice.call(
             root.querySelectorAll('[data-focusable="true"]:not(.hidden)')
         );
 
-        var activeIndex = -1;
-        var active = document.activeElement;
-        if (state.view === "catalog" && active &&
-                active.hasAttribute("data-card-index")) {
-            activeIndex = parseInt(active.getAttribute("data-card-index"), 10);
-        }
-
         return all.filter(function (element) {
-            var cardIndex;
-            var rect;
-
-            if (element.disabled) {
-                return false;
-            }
-
-            if (state.view === "catalog" &&
-                    element.hasAttribute("data-card-index") &&
-                    activeIndex >= 0) {
-                cardIndex = parseInt(element.getAttribute("data-card-index"), 10);
-                if (!isNaN(cardIndex) && Math.abs(cardIndex - activeIndex) > 24) {
-                    return false;
-                }
-            }
-
-            rect = element.getBoundingClientRect();
-            return rect.width > 0 && rect.height > 0 &&
-                rect.bottom >= -500 && rect.top <= 1580;
+            return focusableIsRelevant(element, activeIndex);
         });
     }
 
@@ -123,12 +166,11 @@
         }
     }
 
+
     function geometricMove(direction) {
         var current = document.activeElement;
         var items = focusables();
-        var currentRect;
-        var cx;
-        var cy;
+        var origin;
         var best = null;
         var bestScore = Infinity;
 
@@ -137,52 +179,28 @@
             return;
         }
 
-        currentRect = current.getBoundingClientRect();
-        cx = currentRect.left + currentRect.width / 2;
-        cy = currentRect.top + currentRect.height / 2;
-
+        origin = rectCenter(current.getBoundingClientRect());
         items.forEach(function (candidate) {
-            var rect;
-            var x;
-            var y;
+            var point;
             var dx;
             var dy;
-            var primary;
-            var secondary;
             var score;
 
-            if (candidate === current) {
-                return;
-            }
+            if (candidate === current) { return; }
 
-            rect = candidate.getBoundingClientRect();
-            x = rect.left + rect.width / 2;
-            y = rect.top + rect.height / 2;
-            dx = x - cx;
-            dy = y - cy;
+            point = rectCenter(candidate.getBoundingClientRect());
+            dx = point.x - origin.x;
+            dy = point.y - origin.y;
+            if (!directionAllows(direction, dx, dy)) { return; }
 
-            if (direction === "left" && dx >= -4) { return; }
-            if (direction === "right" && dx <= 4) { return; }
-            if (direction === "up" && dy >= -4) { return; }
-            if (direction === "down" && dy <= 4) { return; }
-
-            primary = (direction === "left" || direction === "right") ?
-                Math.abs(dx) : Math.abs(dy);
-            secondary = (direction === "left" || direction === "right") ?
-                Math.abs(dy) : Math.abs(dx);
-            score = primary + secondary * 2.4;
-
+            score = navigationScore(direction, dx, dy);
             if (score < bestScore) {
-                bestScore = score;
                 best = candidate;
+                bestScore = score;
             }
         });
 
-        if (best) {
-            best.focus();
-            try { best.scrollIntoView(false); } catch (ignoreScroll) {}
-            maybeAppendCards(best);
-        }
+        focusNavigationTarget(best);
     }
 
     function registerRemoteKeys() {
@@ -968,6 +986,59 @@
         connectXtream(profile);
     }
 
+
+    function savedProfileMeta(profile) {
+        return profile.type === "m3u" ?
+            "M3U / M3U8 · armazenada na TV" : "Xtream Codes";
+    }
+
+    function makeSavedProfileInfo(profile) {
+        var info = document.createElement("div");
+        var name = document.createElement("strong");
+        var meta = document.createElement("small");
+
+        name.textContent = profile.name || "Perfil";
+        meta.textContent = savedProfileMeta(profile);
+        info.appendChild(name);
+        info.appendChild(meta);
+        return info;
+    }
+
+    function makeSavedProfileAction(label, action) {
+        var button = document.createElement("button");
+        button.textContent = label;
+        button.setAttribute("data-focusable", "true");
+        button.addEventListener("click", action);
+        return button;
+    }
+
+    function makeSavedProfileCard(profile) {
+        var card = document.createElement("div");
+        var actions = document.createElement("div");
+        var open;
+        var remove;
+
+        card.className = "saved-card";
+        actions.className = "saved-actions";
+
+        open = makeSavedProfileAction(
+            sameM3uSession(profile) ? "Continuar" : "Abrir",
+            function () { loadProfile(profile); }
+        );
+        remove = makeSavedProfileAction("Excluir", function () {
+            window.BlazzingStorage.removeProfile(profile.id);
+            renderSavedProfiles();
+            focusFirst();
+        });
+
+        actions.appendChild(open);
+        actions.appendChild(remove);
+        card.appendChild(makeSavedProfileInfo(profile));
+        card.appendChild(actions);
+        return card;
+    }
+
+
     function renderSavedProfiles() {
         var profiles = window.BlazzingStorage.profiles();
         var root = byId("saved-profiles");
@@ -984,43 +1055,7 @@
         }
 
         profiles.forEach(function (profile) {
-            var card = document.createElement("div");
-            var info = document.createElement("div");
-            var name = document.createElement("strong");
-            var meta = document.createElement("small");
-            var actions = document.createElement("div");
-            var open = document.createElement("button");
-            var remove = document.createElement("button");
-
-            card.className = "saved-card";
-            name.textContent = profile.name || "Perfil";
-            meta.textContent = profile.type === "m3u" ?
-                "M3U / M3U8 · armazenada na TV" : "Xtream Codes";
-
-            info.appendChild(name);
-            info.appendChild(meta);
-
-            actions.className = "saved-actions";
-
-            open.textContent = sameM3uSession(profile) ? "Continuar" : "Abrir";
-            open.setAttribute("data-focusable", "true");
-            open.addEventListener("click", function () {
-                loadProfile(profile);
-            });
-
-            remove.textContent = "Excluir";
-            remove.setAttribute("data-focusable", "true");
-            remove.addEventListener("click", function () {
-                window.BlazzingStorage.removeProfile(profile.id);
-                renderSavedProfiles();
-                focusFirst();
-            });
-
-            actions.appendChild(open);
-            actions.appendChild(remove);
-            card.appendChild(info);
-            card.appendChild(actions);
-            root.appendChild(card);
+            root.appendChild(makeSavedProfileCard(profile));
         });
     }
 
@@ -1030,55 +1065,61 @@
         return "TV ao vivo";
     }
 
+
+    function catalogLoadMessage(kind) {
+        return "Carregando " + sectionTitle(kind).toLowerCase() + "…";
+    }
+
+    function finishCatalogLoad(catalog) {
+        state.catalog = catalog;
+        setBusy(false);
+        return catalog;
+    }
+
+    function failCatalogLoad(error) {
+        setBusy(false);
+        throw error;
+    }
+
+    function loadM3uCatalogSection(kind) {
+        state.catalog = { items: [], categories: [] };
+        state.filtered = [];
+        state.m3uCatalogs = {};
+        setBusy(true, catalogLoadMessage(kind));
+
+        return loadStoredM3uCatalog(state.profile, kind).then(function (catalog) {
+            if (!catalog) {
+                throw new Error("A playlist salva não foi encontrada.");
+            }
+            state.m3uCatalogs[kind] = catalog;
+            return finishCatalogLoad(catalog);
+        }).catch(failCatalogLoad);
+    }
+
+    function loadXtreamCatalogSection(kind) {
+        if (!state.xtream) {
+            return Promise.reject(new Error("Nenhum provider carregado."));
+        }
+
+        setBusy(true, catalogLoadMessage(kind));
+        return state.xtream.load(kind).then(finishCatalogLoad).catch(failCatalogLoad);
+    }
+
+
     function loadCatalog(kind) {
         state.kind = kind;
         state.category = "all";
         state.favoritesOnly = false;
         byId("favorites-button").classList.remove("active");
 
-        if (state.m3uCatalogs) {
-            if (state.m3uCatalogs[kind]) {
-                state.catalog = state.m3uCatalogs[kind];
-                return Promise.resolve(state.catalog);
-            }
-
-            /*
-             * Libere a seção anterior antes de percorrer outra vez uma M3U
-             * enorme. Mantemos em RAM apenas a seção que o usuário está vendo.
-             */
-            state.catalog = { items: [], categories: [] };
-            state.filtered = [];
-            state.m3uCatalogs = {};
-            setBusy(true, "Carregando " + sectionTitle(kind).toLowerCase() + "…");
-
-            return loadStoredM3uCatalog(state.profile, kind).then(function (catalog) {
-                if (!catalog) {
-                    throw new Error("A playlist salva não foi encontrada.");
-                }
-                state.m3uCatalogs[kind] = catalog;
-                state.catalog = catalog;
-                setBusy(false);
-                return catalog;
-            }).catch(function (error) {
-                setBusy(false);
-                throw error;
-            });
+        if (!state.m3uCatalogs) {
+            return loadXtreamCatalogSection(kind);
         }
-
-        if (!state.xtream) {
-            return Promise.reject(new Error("Nenhum provider carregado."));
+        if (state.m3uCatalogs[kind]) {
+            state.catalog = state.m3uCatalogs[kind];
+            return Promise.resolve(state.catalog);
         }
-
-        setBusy(true, "Carregando " + sectionTitle(kind).toLowerCase() + "…");
-
-        return state.xtream.load(kind).then(function (catalog) {
-            state.catalog = catalog;
-            setBusy(false);
-            return catalog;
-        }).catch(function (error) {
-            setBusy(false);
-            throw error;
-        });
+        return loadM3uCatalogSection(kind);
     }
 
     function openCatalog(kind) {
@@ -1148,46 +1189,49 @@
         }
     }
 
-    function renderCategories() {
-        var root = byId("categories");
-        var all = document.createElement("button");
-        var counts = {};
 
+    function catalogCategoryCounts() {
+        var counts = {};
         state.catalog.items.forEach(function (item) {
             counts[item.categoryId] = (counts[item.categoryId] || 0) + 1;
         });
+        return counts;
+    }
+
+    function chooseCategory(id) {
+        state.category = id;
+        updateCategorySelection();
+        applyFilters();
+        setTimeout(function () { focusCategoryButton(id); }, 0);
+    }
+
+    function makeCategoryButton(id, label) {
+        var button = document.createElement("button");
+        button.textContent = label;
+        button.setAttribute("data-focusable", "true");
+        button.setAttribute("data-category-id", id);
+        button.className = state.category === id ? "active" : "";
+        button.addEventListener("click", function () { chooseCategory(id); });
+        return button;
+    }
+
+
+    function renderCategories() {
+        var root = byId("categories");
+        var counts = catalogCategoryCounts();
 
         root.innerHTML = "";
-
-        all.textContent = "Todos (" + state.catalog.items.length + ")";
-        all.setAttribute("data-focusable", "true");
-        all.setAttribute("data-category-id", "all");
-        all.className = state.category === "all" ? "active" : "";
-        all.addEventListener("click", function () {
-            state.category = "all";
-            updateCategorySelection();
-            applyFilters();
-            setTimeout(function () { focusCategoryButton("all"); }, 0);
-        });
-        root.appendChild(all);
+        root.appendChild(makeCategoryButton(
+            "all",
+            "Todos (" + state.catalog.items.length + ")"
+        ));
 
         state.catalog.categories.forEach(function (category) {
-            var button = document.createElement("button");
             var count = counts[category.id] || 0;
-
-            button.textContent = (category.name || "Outros") + " (" + count + ")";
-            button.setAttribute("data-focusable", "true");
-            button.setAttribute("data-category-id", category.id);
-            button.className = state.category === category.id ? "active" : "";
-            button.addEventListener("click", function () {
-                state.category = category.id;
-                updateCategorySelection();
-                applyFilters();
-                setTimeout(function () {
-                    focusCategoryButton(category.id);
-                }, 0);
-            });
-            root.appendChild(button);
+            root.appendChild(makeCategoryButton(
+                category.id,
+                (category.name || "Outros") + " (" + count + ")"
+            ));
         });
     }
 
@@ -1718,82 +1762,112 @@
         return card;
     }
 
-    function appendGridBatch() {
-        var grid = byId("catalog-grid");
+
+    function catalogGrid() {
+        return byId("catalog-grid");
+    }
+
+    function catalogViewport() {
+        return catalogGrid().parentNode;
+    }
+
+    function nextGridRange() {
         var start = state.visibleCount;
-        var end = Math.min(state.filtered.length, start + state.batchSize);
-        var fragment;
+        return {
+            start: start,
+            end: Math.min(state.filtered.length, start + state.batchSize)
+        };
+    }
+
+    function appendCardRange(grid, range) {
+        var fragment = document.createDocumentFragment();
         var i;
 
-        if (start >= end) { return; }
-
-        fragment = document.createDocumentFragment();
-        for (i = start; i < end; i += 1) {
+        for (i = range.start; i < range.end; i += 1) {
             fragment.appendChild(makeCard(state.filtered[i], i));
         }
-
         grid.appendChild(fragment);
-        state.visibleCount = end;
     }
 
-    function ensureGridFilled() {
-        var content = byId("catalog-grid").parentNode;
-        var guard = 0;
-
-        while (state.visibleCount < state.filtered.length &&
-                content.scrollHeight <= content.clientHeight + 500 &&
-                guard < 3) {
-            appendGridBatch();
-            guard += 1;
-        }
+    function gridNeedsFill(content) {
+        return state.visibleCount < state.filtered.length &&
+            content.scrollHeight <= content.clientHeight + 500;
     }
 
-    function scheduleGridAppend() {
-        if (gridAppendScheduled) { return; }
-        gridAppendScheduled = true;
-
-        (window.requestAnimationFrame || window.setTimeout)(function () {
-            var content = byId("catalog-grid").parentNode;
-            gridAppendScheduled = false;
-
-            if (state.view !== "catalog") { return; }
-
-            if (content.scrollTop + content.clientHeight >=
-                    content.scrollHeight - 900) {
-                appendGridBatch();
-            }
-        }, 16);
+    function gridNearEnd(content) {
+        return content.scrollTop + content.clientHeight >=
+            content.scrollHeight - 900;
     }
 
-    function renderGrid(reset) {
-        var grid = byId("catalog-grid");
+    function resetGridState(grid) {
+        state.renderGeneration += 1;
+        grid.innerHTML = "";
+        state.visibleCount = 0;
+        resetImagePipeline();
+    }
 
-        if (reset) {
-            state.renderGeneration += 1;
-            grid.innerHTML = "";
-            state.visibleCount = 0;
-            resetImagePipeline();
-        }
-
-        appendGridBatch();
-        setTimeout(ensureGridFilled, 0);
-
+    function updateGridEmptyState() {
         byId("catalog-empty").classList.toggle(
             "hidden",
             state.filtered.length !== 0
         );
     }
 
-    function maybeAppendCards(element) {
-        var index = parseInt(element.getAttribute("data-card-index"), 10);
 
-        if (!isNaN(index) &&
-                state.visibleCount < state.filtered.length &&
-                index >= state.visibleCount - 10) {
+    function appendGridBatch() {
+        var grid = catalogGrid();
+        var range = nextGridRange();
+
+        if (range.start >= range.end) { return; }
+
+        appendCardRange(grid, range);
+        state.visibleCount = range.end;
+    }
+
+
+    function ensureGridFilled() {
+        var content = catalogViewport();
+        var guard = 0;
+
+        while (gridNeedsFill(content) && guard < 3) {
             appendGridBatch();
+            guard += 1;
         }
     }
 
+
+    function scheduleGridAppend() {
+        if (gridAppendScheduled) { return; }
+        gridAppendScheduled = true;
+
+        (window.requestAnimationFrame || window.setTimeout)(function () {
+            gridAppendScheduled = false;
+            if (state.view === "catalog" && gridNearEnd(catalogViewport())) {
+                appendGridBatch();
+            }
+        }, 16);
+    }
+
+
+    function renderGrid(reset) {
+        var grid = catalogGrid();
+
+        if (reset) { resetGridState(grid); }
+
+        appendGridBatch();
+        setTimeout(ensureGridFilled, 0);
+        updateGridEmptyState();
+    }
+
+
+    function maybeAppendCards(element) {
+        var index = parseInt(element.getAttribute("data-card-index"), 10);
+        var nearTail = !isNaN(index) && index >= state.visibleCount - 10;
+
+        if (nearTail && state.visibleCount < state.filtered.length) {
+            appendGridBatch();
+        }
+    }
 
     function openSeries(series) {
         setBusy(true, "Carregando episódios…");
@@ -1826,100 +1900,108 @@
         });
     }
 
-    function showSeries(details) {
+
+    function activateSeries(details) {
         state.series = details;
         state.currentSeason = "all";
         byId("series-title").textContent = details.title || "Série";
         setView("series");
+    }
+
+    function episodeSeasonValue(episode) {
+        return parseInt(String(episode.season || 0), 10) || 0;
+    }
+
+    function setSeriesSeason(season) {
+        state.currentSeason = season;
         renderSeasons();
         renderEpisodes();
     }
+
+    function makeSeasonButton(season, label) {
+        var value = String(season);
+        var button = document.createElement("button");
+
+        button.textContent = label;
+        button.setAttribute("data-focusable", "true");
+        button.className =
+            String(state.currentSeason) === value ? "active" : "";
+        button.addEventListener("click", function () {
+            setSeriesSeason(value);
+        });
+        return button;
+    }
+
+    function visibleSeriesEpisodes() {
+        return (state.series.episodes || []).filter(function (episode) {
+            return state.currentSeason === "all" ||
+                String(episode.season) === String(state.currentSeason);
+        });
+    }
+
+    function makeEpisodeButton(episode) {
+        var button = document.createElement("button");
+        var title = document.createElement("strong");
+        var meta = document.createElement("small");
+
+        button.className = "episode-card";
+        button.setAttribute("data-focusable", "true");
+        button.setAttribute("data-item-uid", episode.uid);
+        title.textContent = episode.name || ("Episódio " + episode.episode);
+        meta.textContent = "T" + episode.season + " · E" + episode.episode;
+        button.appendChild(title);
+        button.appendChild(meta);
+        button.addEventListener("click", function () { playItem(episode); });
+        return button;
+    }
+
+
+    function showSeries(details) {
+        activateSeries(details);
+        renderSeasons();
+        renderEpisodes();
+    }
+
 
     function seriesSeasons() {
         var seen = {};
         var seasons = [];
 
         (state.series.episodes || []).forEach(function (episode) {
-            var value = String(episode.season || 0);
-            if (!seen[value]) {
-                seen[value] = true;
-                seasons.push(parseInt(value, 10) || 0);
-            }
+            var season = episodeSeasonValue(episode);
+            var key = String(season);
+            if (seen[key]) { return; }
+            seen[key] = true;
+            seasons.push(season);
         });
 
         seasons.sort(function (a, b) { return a - b; });
         return seasons;
     }
 
+
     function renderSeasons() {
         var root = byId("season-list");
-        var all = document.createElement("button");
 
         root.innerHTML = "";
-
-        all.textContent = "Todos";
-        all.setAttribute("data-focusable", "true");
-        all.className = state.currentSeason === "all" ? "active" : "";
-        all.addEventListener("click", function () {
-            state.currentSeason = "all";
-            renderSeasons();
-            renderEpisodes();
-        });
-        root.appendChild(all);
-
+        root.appendChild(makeSeasonButton("all", "Todos"));
         seriesSeasons().forEach(function (season) {
-            var button = document.createElement("button");
-            button.textContent = "Temporada " + season;
-            button.setAttribute("data-focusable", "true");
-            button.className =
-                String(state.currentSeason) === String(season) ?
-                    "active" : "";
-
-            button.addEventListener("click", function () {
-                state.currentSeason = String(season);
-                renderSeasons();
-                renderEpisodes();
-            });
-
-            root.appendChild(button);
+            root.appendChild(makeSeasonButton(
+                season,
+                "Temporada " + season
+            ));
         });
     }
 
+
     function renderEpisodes() {
         var root = byId("episode-grid");
-        var episodes = (state.series.episodes || []).filter(function (episode) {
-            return state.currentSeason === "all" ||
-                String(episode.season) === String(state.currentSeason);
-        });
+        var episodes = visibleSeriesEpisodes();
 
         root.innerHTML = "";
-        byId("episodes-empty").classList.toggle(
-            "hidden",
-            episodes.length !== 0
-        );
-
+        byId("episodes-empty").classList.toggle("hidden", episodes.length !== 0);
         episodes.forEach(function (episode) {
-            var button = document.createElement("button");
-            var title = document.createElement("strong");
-            var meta = document.createElement("small");
-
-            button.className = "episode-card";
-            button.setAttribute("data-focusable", "true");
-            button.setAttribute("data-item-uid", episode.uid);
-
-            title.textContent = episode.name ||
-                ("Episódio " + episode.episode);
-            meta.textContent =
-                "T" + episode.season + " · E" + episode.episode;
-
-            button.appendChild(title);
-            button.appendChild(meta);
-
-            button.addEventListener("click", function () {
-                playItem(episode);
-            });
-
-            root.appendChild(button);
+            root.appendChild(makeEpisodeButton(episode));
         });
     }
 
@@ -1927,106 +2009,70 @@
         setView("catalog");
     });
 
-    function playItem(item) {
-        var resume = item.kind === "live" ?
-            0 : window.BlazzingStorage.getProgress(item.uid);
 
+    function resumePosition(item) {
+        return item.kind === "live" ?
+            0 : window.BlazzingStorage.getProgress(item.uid);
+    }
+
+    function rememberPlayerOrigin(item) {
         state.playerReturnView =
             state.view === "series" ? "series" : "catalog";
         state.currentPlaylistIndex = state.filtered.indexOf(item);
         state.returnFocusUid = item.uid || "";
 
         if (state.view === "catalog") {
-            state.catalogScrollTop = byId("catalog-grid").parentNode.scrollTop || 0;
+            state.catalogScrollTop = catalogViewport().scrollTop || 0;
         }
-
-        byId("player-title").textContent = item.name || "Reproduzindo";
-        byId("player-status").textContent = "Preparando…";
-
-        setView("player");
-        window.BlazzingPlayer.open(item, resume);
-        showHud();
     }
 
-    function restorePlayerReturnFocus() {
-        var root;
-        var candidates;
+    function setPlayerHeader(title, status) {
+        byId("player-title").textContent = title;
+        byId("player-status").textContent = status;
+    }
+
+    function catalogReturnTarget() {
+        var candidates = catalogGrid().querySelectorAll("[data-item-uid]");
         var i;
-
-        if (state.playerReturnView !== "catalog") {
-            return;
-        }
-
-        try {
-            byId("catalog-grid").parentNode.scrollTop = state.catalogScrollTop || 0;
-        } catch (ignoreScroll) {}
-
-        root = byId("catalog-grid");
-        candidates = root.querySelectorAll("[data-item-uid]");
         for (i = 0; i < candidates.length; i += 1) {
             if (candidates[i].getAttribute("data-item-uid") === state.returnFocusUid &&
                     candidates[i].classList.contains("card-main")) {
-                candidates[i].focus();
-                try { candidates[i].scrollIntoView(false); } catch (ignoreFocusScroll) {}
-                return;
+                return candidates[i];
             }
         }
+        return null;
     }
 
-    function closePlayer() {
+    function saveCurrentProgress() {
         var item = window.BlazzingPlayer.item();
-
         if (item && item.kind !== "live") {
             window.BlazzingStorage.setProgress(
                 item.uid,
                 window.BlazzingPlayer.currentTime()
             );
         }
-
-        window.BlazzingPlayer.stop();
-        setView(state.playerReturnView || "catalog");
-        setTimeout(restorePlayerReturnFocus, 40);
     }
 
-    function switchLive(delta) {
-        var item;
-        var list;
-        var index;
-        var now = Date.now();
+    function currentLiveIndex(list, item) {
+        var index = list.indexOf(item);
+        if (index >= 0) { return index; }
+        return state.currentPlaylistIndex >= 0 ?
+            state.currentPlaylistIndex : 0;
+    }
 
-        if (state.kind !== "live" || !state.filtered.length) {
-            return;
-        }
-
-        if (now - state.lastZapAt < 280) {
-            return;
-        }
-        state.lastZapAt = now;
-
-        item = window.BlazzingPlayer.item();
-        list = state.filtered;
-        index = list.indexOf(item);
-
-        if (index < 0) {
-            index = state.currentPlaylistIndex >= 0 ?
-                state.currentPlaylistIndex : 0;
-        }
-
-        index = (index + delta + list.length) % list.length;
+    function openLiveAt(index) {
+        var item = state.filtered[index];
         state.currentPlaylistIndex = index;
-        item = list[index];
-
-        byId("player-title").textContent = item.name || "Canal";
-        byId("player-status").textContent =
-            "Canal " + (index + 1) + " de " + list.length + " · Preparando…";
         state.returnFocusUid = item.uid || state.returnFocusUid;
+        setPlayerHeader(
+            item.name || "Canal",
+            "Canal " + (index + 1) + " de " +
+                state.filtered.length + " · Preparando…"
+        );
         window.BlazzingPlayer.open(item, 0);
     }
 
-    function showHud() {
-        clearTimeout(hudTimer);
-        byId("player-hud").classList.remove("dim");
-
+    function dimPlayerHudLater() {
         hudTimer = setTimeout(function () {
             if (state.view === "player") {
                 byId("player-hud").classList.add("dim");
@@ -2034,22 +2080,84 @@
         }, 4500);
     }
 
+    function persistPlaybackTick(milliseconds) {
+        var item = window.BlazzingPlayer.item();
+        var now = Date.now();
+
+        if (!item || item.kind === "live" ||
+                now - state.lastProgressWrite <= 10000) {
+            return;
+        }
+        state.lastProgressWrite = now;
+        window.BlazzingStorage.setProgress(item.uid, milliseconds);
+    }
+
+
+    function playItem(item) {
+        var resume = resumePosition(item);
+
+        rememberPlayerOrigin(item);
+        setPlayerHeader(item.name || "Reproduzindo", "Preparando…");
+        setView("player");
+        window.BlazzingPlayer.open(item, resume);
+        showHud();
+    }
+
+
+    function restorePlayerReturnFocus() {
+        var target;
+
+        if (state.playerReturnView !== "catalog") { return; }
+
+        try {
+            catalogViewport().scrollTop = state.catalogScrollTop || 0;
+        } catch (ignoreScroll) {}
+
+        target = catalogReturnTarget();
+        if (!target) { return; }
+
+        target.focus();
+        try { target.scrollIntoView(false); } catch (ignoreFocusScroll) {}
+    }
+
+
+    function closePlayer() {
+        saveCurrentProgress();
+        window.BlazzingPlayer.stop();
+        setView(state.playerReturnView || "catalog");
+        setTimeout(restorePlayerReturnFocus, 40);
+    }
+
+
+    function switchLive(delta) {
+        var list = state.filtered;
+        var index;
+        var now = Date.now();
+
+        if (state.kind !== "live" || !list.length ||
+                now - state.lastZapAt < 280) {
+            return;
+        }
+
+        state.lastZapAt = now;
+        index = currentLiveIndex(list, window.BlazzingPlayer.item());
+        index = (index + delta + list.length) % list.length;
+        openLiveAt(index);
+    }
+
+
+    function showHud() {
+        clearTimeout(hudTimer);
+        byId("player-hud").classList.remove("dim");
+        dimPlayerHudLater();
+    }
+
     window.BlazzingPlayer.setStateListener(function (text) {
         byId("player-status").textContent = text;
         showHud();
     });
 
-    window.BlazzingPlayer.setTimeListener(function (milliseconds) {
-        var item = window.BlazzingPlayer.item();
-        var now = Date.now();
-
-        if (item &&
-                item.kind !== "live" &&
-                now - state.lastProgressWrite > 10000) {
-            state.lastProgressWrite = now;
-            window.BlazzingStorage.setProgress(item.uid, milliseconds);
-        }
-    });
+    window.BlazzingPlayer.setTimeListener(persistPlaybackTick);
 
     byId("catalog-grid").parentNode.addEventListener("scroll", scheduleGridAppend);
 
