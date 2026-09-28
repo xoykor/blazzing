@@ -283,6 +283,93 @@ static bool metadata_assign(char **dst, const char *value) {
     return *dst != NULL;
 }
 
+typedef struct {
+    const char *plot;
+    const char *cover;
+    const char *backdrop;
+    const char *genre;
+    const char *release_date;
+    const char *rating;
+    const char *duration;
+    const char *cast;
+    const char *director;
+    const char *trailer;
+} xtream_metadata_values_t;
+
+/* Xtream forks use different aliases, and movie_data has a different cover
+ * precedence than info. Keep that quirk explicit so fallback behavior remains
+ * compatible with servers that expose both stream_icon and movie_image. */
+static void metadata_values_read(json_object *obj, bool fallback_layout, xtream_metadata_values_t *values) {
+    memset(values, 0, sizeof(*values));
+    if (!obj || json_object_get_type(obj) != json_type_object)
+        return;
+
+    values->plot = jstr_alias(obj, "plot", "description", "overview");
+    values->cover = fallback_layout ? jstr_alias(obj, "stream_icon", "movie_image", "cover")
+                                    : jstr_alias(obj, "movie_image", "cover", "stream_icon");
+    values->backdrop = first_string_or_array_item(obj, "backdrop_path");
+    if (!values->backdrop[0])
+        values->backdrop = jstr_alias(obj, "backdrop", "cover_big", "backdrop_url");
+    values->genre = jstr_alias(obj, "genre", "genres", NULL);
+    values->release_date = jstr_alias(obj, "release_date", "releaseDate", "releasedate");
+    values->rating = jstr_alias(obj, "rating", "rating_5based", "imdb_rating");
+    values->duration = jstr_alias(obj, "duration", "runtime", NULL);
+    values->cast = jstr_alias(obj, "cast", "actors", NULL);
+    values->director = jstr_alias(obj, "director", "directors", NULL);
+    values->trailer = jstr_alias(obj, "youtube_trailer", "trailer", NULL);
+}
+
+static void metadata_values_fill_missing(xtream_metadata_values_t *values,
+                                         const xtream_metadata_values_t *fallback) {
+#define FILL_METADATA_FIELD(field)                                                                                     \
+    do {                                                                                                               \
+        if ((!values->field || !values->field[0]) && fallback->field && fallback->field[0])                           \
+            values->field = fallback->field;                                                                           \
+    } while (0)
+
+    FILL_METADATA_FIELD(plot);
+    FILL_METADATA_FIELD(cover);
+    FILL_METADATA_FIELD(backdrop);
+    FILL_METADATA_FIELD(genre);
+    FILL_METADATA_FIELD(release_date);
+    FILL_METADATA_FIELD(rating);
+    FILL_METADATA_FIELD(duration);
+    FILL_METADATA_FIELD(cast);
+    FILL_METADATA_FIELD(director);
+    FILL_METADATA_FIELD(trailer);
+
+#undef FILL_METADATA_FIELD
+}
+
+static vip_status_t metadata_values_store(const xtream_metadata_values_t *values, vip_media_metadata_t *out,
+                                          vip_error_t *error) {
+    struct {
+        char **dst;
+        const char *value;
+    } assignments[] = {
+        {&out->plot, values->plot},
+        {&out->cover_url, values->cover},
+        {&out->backdrop_url, values->backdrop},
+        {&out->genre, values->genre},
+        {&out->release_date, values->release_date},
+        {&out->rating, values->rating},
+        {&out->duration, values->duration},
+        {&out->cast, values->cast},
+        {&out->director, values->director},
+        {&out->youtube_trailer, values->trailer},
+    };
+
+    for (size_t i = 0; i < sizeof(assignments) / sizeof(assignments[0]); ++i) {
+        if (!metadata_assign(assignments[i].dst, assignments[i].value)) {
+            vip_media_metadata_clear(out);
+            vip_error_set(error, VIP_ERR_NOMEM, "sem memória para metadados Xtream");
+            return VIP_ERR_NOMEM;
+        }
+    }
+    vip_error_clear(error);
+    return VIP_OK;
+}
+
 /* Handle the metadata from info operation. */
 static vip_status_t metadata_from_info(json_object *info, json_object *fallback, vip_media_metadata_t *out,
                                        vip_error_t *error) {
@@ -291,66 +378,25 @@ static vip_status_t metadata_from_info(json_object *info, json_object *fallback,
         return VIP_ERR_INVALID_ARGUMENT;
     }
     vip_media_metadata_init(out);
-    if (!info || json_object_get_type(info) != json_type_object)
-        info = fallback;
-    if (!info || json_object_get_type(info) != json_type_object) {
+
+    json_object *primary = info;
+    if (!primary || json_object_get_type(primary) != json_type_object)
+        primary = fallback;
+    if (!primary || json_object_get_type(primary) != json_type_object) {
         vip_error_set(error, VIP_ERR_MALFORMED, "provider não enviou metadados válidos");
         return VIP_ERR_MALFORMED;
     }
 
-    const char *plot = jstr_alias(info, "plot", "description", "overview");
-    const char *cover = jstr_alias(info, "movie_image", "cover", "stream_icon");
-    const char *backdrop = first_string_or_array_item(info, "backdrop_path");
-    if (!backdrop[0])
-        backdrop = jstr_alias(info, "backdrop", "cover_big", "backdrop_url");
-    const char *genre = jstr_alias(info, "genre", "genres", NULL);
-    const char *release_date = jstr_alias(info, "release_date", "releaseDate", "releasedate");
-    const char *rating = jstr_alias(info, "rating", "rating_5based", "imdb_rating");
-    const char *duration = jstr_alias(info, "duration", "runtime", NULL);
-    const char *cast = jstr_alias(info, "cast", "actors", NULL);
-    const char *director = jstr_alias(info, "director", "directors", NULL);
-    const char *trailer = jstr_alias(info, "youtube_trailer", "trailer", NULL);
+    xtream_metadata_values_t values;
+    metadata_values_read(primary, false, &values);
 
-    /* Xtream forks disagree about whether metadata lives in `info`,
-       `movie_data`, or at the response root. Fill any missing field from
-       the fallback object rather than assuming one server layout. */
-    if (fallback && fallback != info && json_object_get_type(fallback) == json_type_object) {
-        if (!plot[0])
-            plot = jstr_alias(fallback, "plot", "description", "overview");
-        if (!cover[0])
-            cover = jstr_alias(fallback, "stream_icon", "movie_image", "cover");
-        if (!backdrop[0])
-            backdrop = first_string_or_array_item(fallback, "backdrop_path");
-        if (!backdrop[0])
-            backdrop = jstr_alias(fallback, "backdrop", "cover_big", "backdrop_url");
-        if (!genre[0])
-            genre = jstr_alias(fallback, "genre", "genres", NULL);
-        if (!release_date[0])
-            release_date = jstr_alias(fallback, "release_date", "releaseDate", "releasedate");
-        if (!rating[0])
-            rating = jstr_alias(fallback, "rating", "rating_5based", "imdb_rating");
-        if (!duration[0])
-            duration = jstr_alias(fallback, "duration", "runtime", NULL);
-        if (!cast[0])
-            cast = jstr_alias(fallback, "cast", "actors", NULL);
-        if (!director[0])
-            director = jstr_alias(fallback, "director", "directors", NULL);
-        if (!trailer[0])
-            trailer = jstr_alias(fallback, "youtube_trailer", "trailer", NULL);
+    if (fallback && fallback != primary && json_object_get_type(fallback) == json_type_object) {
+        xtream_metadata_values_t fallback_values;
+        metadata_values_read(fallback, true, &fallback_values);
+        metadata_values_fill_missing(&values, &fallback_values);
     }
 
-    bool ok = metadata_assign(&out->plot, plot) && metadata_assign(&out->cover_url, cover) &&
-              metadata_assign(&out->backdrop_url, backdrop) && metadata_assign(&out->genre, genre) &&
-              metadata_assign(&out->release_date, release_date) && metadata_assign(&out->rating, rating) &&
-              metadata_assign(&out->duration, duration) && metadata_assign(&out->cast, cast) &&
-              metadata_assign(&out->director, director) && metadata_assign(&out->youtube_trailer, trailer);
-    if (!ok) {
-        vip_media_metadata_clear(out);
-        vip_error_set(error, VIP_ERR_NOMEM, "sem memória para metadados Xtream");
-        return VIP_ERR_NOMEM;
-    }
-    vip_error_clear(error);
-    return VIP_OK;
+    return metadata_values_store(&values, out, error);
 }
 
 /* Parse vod info json using the Xtream provider. */
