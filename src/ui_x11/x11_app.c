@@ -5330,6 +5330,35 @@ static bool is_activate_key(KeySym sym) {
     return sym == XK_Return || sym == XK_KP_Enter || sym == XK_Select;
 }
 
+/* Seek or zap from the player with one horizontal key. */
+static bool handle_player_horizontal_key(app_t *a, KeySym sym) {
+    if (sym != XK_Left && sym != XK_Right)
+        return false;
+    int delta = sym == XK_Left ? -1 : 1;
+    if (a->player_item_live)
+        switch_relative_channel(a, delta);
+    else if (a->player) {
+        vip_error_t e = {0};
+        (void)vip_mpv_player_seek_relative(a->player, (double)delta * 10.0, &e);
+    }
+    return true;
+}
+
+/* Adjust the current player volume and keep it in the UI range. */
+static void adjust_player_volume(app_t *a, double delta) {
+    if (!a->player)
+        return;
+    vip_mpv_player_snapshot_t sn = {0};
+    vip_mpv_player_snapshot(a->player, &sn);
+    vip_error_t e = {0};
+    double volume = sn.volume + delta;
+    if (volume < 0.0)
+        volume = 0.0;
+    if (volume > 100.0)
+        volume = 100.0;
+    (void)vip_mpv_player_set_volume(a->player, volume, &e);
+}
+
 /* Handle player key input. */
 static void handle_player_key(app_t *a, KeySym sym) {
     show_player_hud(a);
@@ -5342,55 +5371,39 @@ static void handle_player_key(app_t *a, KeySym sym) {
         save_current_progress(a, true);
         return;
     }
-    if (sym == XK_Left) {
-        if (a->player_item_live)
-            switch_relative_channel(a, -1);
-        else if (a->player) {
-            vip_error_t e = {0};
-            (void)vip_mpv_player_seek_relative(a->player, -10.0, &e);
-        }
+    if (handle_player_horizontal_key(a, sym))
+        return;
+    if (sym == XK_Up) {
+        adjust_player_volume(a, 5.0);
         return;
     }
-    if (sym == XK_Right) {
-        if (a->player_item_live)
-            switch_relative_channel(a, 1);
-        else if (a->player) {
-            vip_error_t e = {0};
-            (void)vip_mpv_player_seek_relative(a->player, 10.0, &e);
-        }
-        return;
-    }
-    if ((sym == XK_Up || sym == XK_Down) && a->player) {
-        vip_mpv_player_snapshot_t sn = {0};
-        vip_mpv_player_snapshot(a->player, &sn);
-        vip_error_t e = {0};
-        double v = sn.volume + (sym == XK_Up ? 5.0 : -5.0);
-        if (v < 0.0)
-            v = 0.0;
-        if (v > 100.0)
-            v = 100.0;
-        (void)vip_mpv_player_set_volume(a->player, v, &e);
-    }
+    if (sym == XK_Down)
+        adjust_player_volume(a, -5.0);
 }
 
-/* Handle global browse shortcuts before focus-local navigation. */
-static bool handle_browse_shortcut(app_t *a, KeySym sym, bool ctrl) {
-    if (ctrl && sym == XK_1) {
+/* Handle Ctrl+1/2/3 content switching. */
+static bool handle_browse_content_shortcut(app_t *a, KeySym sym) {
+    switch (sym) {
+    case XK_1:
         switch_content(a, CONTENT_LIVE);
         browse_focus_top(a, BROWSE_TOP_TV);
         return true;
-    }
-    if (ctrl && sym == XK_2) {
+    case XK_2:
         switch_content(a, CONTENT_VOD);
         browse_focus_top(a, BROWSE_TOP_MOVIES);
         return true;
-    }
-    if (ctrl && sym == XK_3) {
+    case XK_3:
         switch_content(a, CONTENT_SERIES);
         browse_focus_top(a, BROWSE_TOP_SERIES);
         return true;
+    default:
+        return false;
     }
-    if (ctrl && (sym == XK_l || sym == XK_L)) {
+}
+
+/* Handle non-content Ctrl shortcuts on the browse screen. */
+static bool handle_browse_command_shortcut(app_t *a, KeySym sym) {
+    if (sym == XK_l || sym == XK_L) {
         if (a->thumbs)
             vip_thumbnail_scheduler_cancel_pending(a->thumbs);
         refresh_profiles(a);
@@ -5398,17 +5411,27 @@ static bool handle_browse_shortcut(app_t *a, KeySym sym, bool ctrl) {
         a->input_focus = INPUT_MODE;
         return true;
     }
-    if (ctrl && (sym == XK_f || sym == XK_F)) {
+    if (sym == XK_f || sym == XK_F) {
         browse_focus_top(a, BROWSE_TOP_SEARCH);
         return true;
     }
-    if (ctrl && (sym == XK_d || sym == XK_D) && a->filtered_len > 0u) {
-        if (a->focused_filtered >= a->filtered_len)
-            a->focused_filtered = a->filtered_len - 1u;
-        toggle_favorite(a, a->filtered[a->focused_filtered]);
+    if (sym != XK_d && sym != XK_D)
+        return false;
+    if (a->filtered_len == 0u)
+        return false;
+    if (a->focused_filtered >= a->filtered_len)
+        a->focused_filtered = a->filtered_len - 1u;
+    toggle_favorite(a, a->filtered[a->focused_filtered]);
+    return true;
+}
+
+/* Handle global browse shortcuts before focus-local navigation. */
+static bool handle_browse_shortcut(app_t *a, KeySym sym, bool ctrl) {
+    if (!ctrl)
+        return false;
+    if (handle_browse_content_shortcut(a, sym))
         return true;
-    }
-    return false;
+    return handle_browse_command_shortcut(a, sym);
 }
 
 /* Handle top-bar browse focus. */
@@ -5518,34 +5541,42 @@ static bool handle_browse_focus_key(app_t *a, KeySym sym) {
     return handle_browse_grid_key(a, sym);
 }
 
-/* Handle browse back/search/paste input after local focus navigation. */
-static bool handle_browse_text_key(app_t *a, KeySym sym, bool ctrl, bool shift,
-                                   bool printable, const char *buf, int n) {
-    if (sym == XK_BackSpace && a->browse_focus == BROWSE_FOCUS_TOP &&
-        a->browse_top_focus == BROWSE_TOP_SEARCH && a->search[0]) {
-        backspace_input(a);
+/* Backspace the active browse search field when it contains text. */
+static bool handle_browse_search_backspace(app_t *a, KeySym sym) {
+    if (sym != XK_BackSpace || a->browse_focus != BROWSE_FOCUS_TOP ||
+        a->browse_top_focus != BROWSE_TOP_SEARCH || !a->search[0])
+        return false;
+    backspace_input(a);
+    return true;
+}
+
+/* Handle Back/Escape semantics on the browse screen. */
+static bool handle_browse_back_key(app_t *a, KeySym sym) {
+    if (!is_navigation_back(sym) && sym != XK_BackSpace)
+        return false;
+    if (a->series_episode_mode) {
+        return_from_episode_list(a);
+        browse_focus_grid(a);
         return true;
     }
-    if (is_navigation_back(sym) || sym == XK_BackSpace) {
-        if (a->series_episode_mode) {
-            return_from_episode_list(a);
-            browse_focus_grid(a);
-            return true;
-        }
-        if (a->search[0]) {
-            a->search[0] = '\0';
-            rebuild_filter(a);
-            browse_focus_top(a, BROWSE_TOP_SEARCH);
-            return true;
-        }
-        if (a->thumbs)
-            vip_thumbnail_scheduler_cancel_pending(a->thumbs);
-        refresh_profiles(a);
-        a->screen = SCREEN_LOGIN;
-        a->input_focus = INPUT_MODE;
-        snprintf(a->status, sizeof(a->status), "Escolha uma lista ou adicione outra");
+    if (a->search[0]) {
+        a->search[0] = '\0';
+        rebuild_filter(a);
+        browse_focus_top(a, BROWSE_TOP_SEARCH);
         return true;
     }
+    if (a->thumbs)
+        vip_thumbnail_scheduler_cancel_pending(a->thumbs);
+    refresh_profiles(a);
+    a->screen = SCREEN_LOGIN;
+    a->input_focus = INPUT_MODE;
+    snprintf(a->status, sizeof(a->status), "Escolha uma lista ou adicione outra");
+    return true;
+}
+
+/* Handle paste, tab and printable browse-search input. */
+static bool handle_browse_search_input(app_t *a, KeySym sym, bool ctrl, bool shift,
+                                       bool printable, const char *buf, int n) {
     if (ctrl && (sym == XK_v || sym == XK_V)) {
         browse_focus_top(a, BROWSE_TOP_SEARCH);
         request_paste(a, a->clipboard);
@@ -5560,12 +5591,21 @@ static bool handle_browse_text_key(app_t *a, KeySym sym, bool ctrl, bool shift,
         browse_focus_top(a, BROWSE_TOP_SEARCH);
         return true;
     }
-    if (printable) {
-        browse_focus_top(a, BROWSE_TOP_SEARCH);
-        append_input(a, buf, (size_t)n);
+    if (!printable)
+        return false;
+    browse_focus_top(a, BROWSE_TOP_SEARCH);
+    append_input(a, buf, (size_t)n);
+    return true;
+}
+
+/* Handle browse back/search/paste input after local focus navigation. */
+static bool handle_browse_text_key(app_t *a, KeySym sym, bool ctrl, bool shift,
+                                   bool printable, const char *buf, int n) {
+    if (handle_browse_search_backspace(a, sym))
         return true;
-    }
-    return false;
+    if (handle_browse_back_key(a, sym))
+        return true;
+    return handle_browse_search_input(a, sym, ctrl, shift, printable, buf, n);
 }
 
 /* Handle browse-screen key input. */
@@ -5578,10 +5618,27 @@ static void handle_browse_key(app_t *a, KeySym sym, bool ctrl, bool shift,
     (void)handle_browse_text_key(a, sym, ctrl, shift, printable, buf, n);
 }
 
-/* Handle the saved-profile picker on the login screen. */
-static bool handle_saved_profile_key(app_t *a, KeySym sym) {
-    if (a->input_focus != INPUT_SAVED_PROFILE)
-        return false;
+/* Activate the selected saved profile. */
+static void activate_saved_profile(app_t *a) {
+    if (a->profiles.len == 0u)
+        return;
+    size_t index = (size_t)a->profile_focus;
+    if (index >= a->profiles.len)
+        index = a->profiles.len - 1u;
+    load_profile_into_form(a, index);
+    if (a->server[0] &&
+        (a->login_mode == LOGIN_M3U || (a->username[0] && a->password[0])))
+        start_login(a, false);
+}
+
+/* Handle movement within the saved-profile picker. */
+static bool handle_saved_profile_navigation(app_t *a, KeySym sym) {
+    if (is_navigation_back(sym) || sym == XK_BackSpace || sym == XK_Left) {
+        a->input_focus = INPUT_PROFILE_NAME;
+        return true;
+    }
+    if (sym == XK_Right)
+        return true;
     if (sym == XK_Up) {
         if (a->profile_focus > 0)
             --a->profile_focus;
@@ -5594,89 +5651,109 @@ static bool handle_saved_profile_key(app_t *a, KeySym sym) {
         login_profile_ensure_visible(a);
         return true;
     }
-    if (sym == XK_Left || is_navigation_back(sym) || sym == XK_BackSpace) {
-        a->input_focus = INPUT_PROFILE_NAME;
+    return false;
+}
+
+/* Handle the saved-profile picker on the login screen. */
+static bool handle_saved_profile_key(app_t *a, KeySym sym) {
+    if (a->input_focus != INPUT_SAVED_PROFILE)
+        return false;
+    if (handle_saved_profile_navigation(a, sym))
         return true;
-    }
-    if (sym == XK_Right)
-        return true;
-    if (is_activate_key(sym)) {
-        if (a->profiles.len == 0u)
-            return true;
-        size_t index = (size_t)a->profile_focus;
-        if (index >= a->profiles.len)
-            index = a->profiles.len - 1u;
-        load_profile_into_form(a, index);
-        if (a->server[0] &&
-            (a->login_mode == LOGIN_M3U || (a->username[0] && a->password[0])))
-            start_login(a, false);
-        return true;
-    }
+    if (is_activate_key(sym))
+        activate_saved_profile(a);
     return true;
 }
 
-/* Handle login-screen key input. */
-static void handle_login_key(app_t *a, KeySym sym, bool ctrl, bool shift,
-                             bool printable, const char *buf, int n) {
+/* Handle pairing-specific login keys before ordinary field navigation. */
+static bool handle_login_pairing_key(app_t *a, KeySym sym) {
     if (a->login_mode == LOGIN_M3U && sym == XK_F2) {
         a->input_focus = INPUT_PHONE;
         start_phone_pairing(a);
-        return;
+        return true;
     }
-    if (a->pairing_relay && (is_navigation_back(sym) || sym == XK_BackSpace)) {
-        stop_phone_pairing(a);
-        a->pairing_retry_ready = false;
-        snprintf(a->status, sizeof(a->status), "Pareamento cancelado");
-        a->input_focus = INPUT_PHONE;
-        return;
-    }
-    if (handle_saved_profile_key(a, sym))
-        return;
+    if (!a->pairing_relay || (!is_navigation_back(sym) && sym != XK_BackSpace))
+        return false;
+    stop_phone_pairing(a);
+    a->pairing_retry_ready = false;
+    snprintf(a->status, sizeof(a->status), "Pareamento cancelado");
+    a->input_focus = INPUT_PHONE;
+    return true;
+}
+
+/* Handle arrows and Back on ordinary login fields. */
+static bool handle_login_focus_key(app_t *a, KeySym sym) {
     if (sym == XK_Up) {
         login_move_focus(a, -1);
-        return;
+        return true;
     }
     if (sym == XK_Down) {
         login_move_focus(a, 1);
-        return;
+        return true;
     }
     if (a->input_focus == INPUT_MODE && (sym == XK_Left || sym == XK_Right)) {
         login_select_mode(a, a->login_mode == LOGIN_XTREAM ? LOGIN_M3U : LOGIN_XTREAM);
-        return;
+        return true;
     }
     if (sym == XK_Right && a->profiles.len > 0u && !a->pairing_relay) {
         login_focus_saved_profiles(a);
-        return;
+        return true;
     }
-    if (is_navigation_back(sym))
-        return;
+    return is_navigation_back(sym);
+}
+
+/* Handle paste and tab navigation on the login form. */
+static bool handle_login_edit_shortcut(app_t *a, KeySym sym, bool ctrl, bool shift) {
     if (ctrl && (sym == XK_v || sym == XK_V)) {
         request_paste(a, a->clipboard);
-        return;
+        return true;
     }
     if (shift && sym == XK_Insert) {
         request_paste(a, XA_PRIMARY);
-        return;
+        return true;
     }
-    if (sym == XK_Tab) {
-        login_move_focus(a, shift ? -1 : 1);
-        return;
-    }
-    if (is_activate_key(sym)) {
-        if (a->input_focus == INPUT_PHONE && a->login_mode == LOGIN_M3U)
-            start_phone_pairing(a);
-        else if (a->input_focus == INPUT_MODE)
-            return;
-        else
-            start_login(a, true);
-        return;
-    }
+    if (sym != XK_Tab)
+        return false;
+    login_move_focus(a, shift ? -1 : 1);
+    return true;
+}
+
+/* Activate the focused login control. */
+static bool handle_login_activate_key(app_t *a, KeySym sym) {
+    if (!is_activate_key(sym))
+        return false;
+    if (a->input_focus == INPUT_PHONE && a->login_mode == LOGIN_M3U)
+        start_phone_pairing(a);
+    else if (a->input_focus != INPUT_MODE)
+        start_login(a, true);
+    return true;
+}
+
+/* Handle direct text editing on the login form. */
+static void handle_login_text_key(app_t *a, KeySym sym, bool printable,
+                                  const char *buf, int n) {
     if (sym == XK_BackSpace) {
         backspace_input(a);
         return;
     }
     if (printable)
         append_input(a, buf, (size_t)n);
+}
+
+/* Handle login-screen key input. */
+static void handle_login_key(app_t *a, KeySym sym, bool ctrl, bool shift,
+                             bool printable, const char *buf, int n) {
+    if (handle_login_pairing_key(a, sym))
+        return;
+    if (handle_saved_profile_key(a, sym))
+        return;
+    if (handle_login_focus_key(a, sym))
+        return;
+    if (handle_login_edit_shortcut(a, sym, ctrl, shift))
+        return;
+    if (handle_login_activate_key(a, sym))
+        return;
+    handle_login_text_key(a, sym, printable, buf, n);
 }
 
 /* Handle key. */
