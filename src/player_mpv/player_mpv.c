@@ -732,37 +732,94 @@ static void update_video_presence_locked(vip_mpv_player_t *player, json_object *
     player->has_video = value && strcmp(value, "no") != 0 && strcmp(value, "false") != 0;
 }
 
+static bool apply_boolean_property_locked(vip_mpv_player_t *player,
+                                          const char *name,
+                                          json_object *data) {
+    if (!json_value_present(data))
+        return false;
+    if (strcmp(name, "pause") == 0) {
+        player->paused = json_object_get_boolean(data) != 0;
+        return true;
+    }
+    if (strcmp(name, "paused-for-cache") == 0) {
+        player->buffering = json_object_get_boolean(data) != 0;
+        return true;
+    }
+    if (strcmp(name, "seekable") == 0) {
+        player->seekable = json_object_get_boolean(data) != 0;
+        return true;
+    }
+    return false;
+}
+
+static bool apply_double_property_locked(vip_mpv_player_t *player,
+                                         const char *name,
+                                         json_object *data) {
+    if (!json_value_present(data))
+        return false;
+    if (strcmp(name, "time-pos") == 0)
+        player->position_seconds = json_object_get_double(data);
+    else if (strcmp(name, "duration") == 0)
+        player->duration_seconds = json_object_get_double(data);
+    else if (strcmp(name, "percent-pos") == 0)
+        player->percent_pos = json_object_get_double(data);
+    else if (strcmp(name, "volume") == 0)
+        player->volume = json_object_get_double(data);
+    else if (strcmp(name, "demuxer-cache-duration") == 0)
+        player->cache_duration_seconds = json_object_get_double(data);
+    else
+        return false;
+    return true;
+}
+
+static bool apply_video_dimension_locked(vip_mpv_player_t *player,
+                                         const char *name,
+                                         json_object *data) {
+    if (!json_value_present(data))
+        return false;
+    if (strcmp(name, "width") == 0) {
+        player->video_width = json_object_get_int(data);
+        return true;
+    }
+    if (strcmp(name, "height") == 0) {
+        player->video_height = json_object_get_int(data);
+        return true;
+    }
+    return false;
+}
+
+static bool apply_string_property_locked(vip_mpv_player_t *player,
+                                         const char *name,
+                                         json_object *data) {
+    if (strcmp(name, "video-codec") == 0) {
+        copy_json_string(player->video_codec, sizeof(player->video_codec), data);
+        return true;
+    }
+    if (strcmp(name, "current-vo") == 0) {
+        copy_json_string(player->vo, sizeof(player->vo), data);
+        return true;
+    }
+    if (strcmp(name, "hwdec-current") == 0) {
+        copy_json_string(player->hwdec, sizeof(player->hwdec), data);
+        return true;
+    }
+    return false;
+}
+
 static void apply_property_change_locked(vip_mpv_player_t *player,
                                          const char *name,
                                          json_object *data) {
-    if (strcmp(name, "pause") == 0 && json_value_present(data))
-        player->paused = json_object_get_boolean(data) != 0;
-    else if (strcmp(name, "time-pos") == 0 && json_value_present(data))
-        player->position_seconds = json_object_get_double(data);
-    else if (strcmp(name, "duration") == 0 && json_value_present(data))
-        player->duration_seconds = json_object_get_double(data);
-    else if (strcmp(name, "percent-pos") == 0 && json_value_present(data))
-        player->percent_pos = json_object_get_double(data);
-    else if (strcmp(name, "paused-for-cache") == 0 && json_value_present(data))
-        player->buffering = json_object_get_boolean(data) != 0;
-    else if (strcmp(name, "seekable") == 0 && json_value_present(data))
-        player->seekable = json_object_get_boolean(data) != 0;
-    else if (strcmp(name, "volume") == 0 && json_value_present(data))
-        player->volume = json_object_get_double(data);
-    else if (strcmp(name, "demuxer-cache-duration") == 0 && json_value_present(data))
-        player->cache_duration_seconds = json_object_get_double(data);
-    else if (strcmp(name, "vid") == 0)
+    if (apply_boolean_property_locked(player, name, data))
+        return;
+    if (apply_double_property_locked(player, name, data))
+        return;
+    if (strcmp(name, "vid") == 0) {
         update_video_presence_locked(player, data);
-    else if (strcmp(name, "video-codec") == 0)
-        copy_json_string(player->video_codec, sizeof(player->video_codec), data);
-    else if (strcmp(name, "width") == 0 && json_value_present(data))
-        player->video_width = json_object_get_int(data);
-    else if (strcmp(name, "height") == 0 && json_value_present(data))
-        player->video_height = json_object_get_int(data);
-    else if (strcmp(name, "current-vo") == 0)
-        copy_json_string(player->vo, sizeof(player->vo), data);
-    else if (strcmp(name, "hwdec-current") == 0)
-        copy_json_string(player->hwdec, sizeof(player->hwdec), data);
+        return;
+    }
+    if (apply_video_dimension_locked(player, name, data))
+        return;
+    (void)apply_string_property_locked(player, name, data);
 }
 
 static void handle_property_change_locked(vip_mpv_player_t *player, json_object *root) {
