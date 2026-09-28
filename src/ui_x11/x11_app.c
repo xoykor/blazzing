@@ -3006,108 +3006,196 @@ static void draw_pairing_qr(app_t *a, int x, int y, int size) {
 }
 
 /* Run the series background worker. */
-static void *series_worker(void *userdata) {
-    series_job_t *job = userdata;
-    app_t *a = job->app;
-    vip_credentials_t credentials = {0};
-    vip_xtream_client_t *client = NULL;
-    vip_category_list_t seasons;
-    vip_category_list_init(&seasons);
-    vip_channel_list_t episodes;
-    vip_channel_list_init(&episodes);
-    vip_channel_list_t season_cards;
-    vip_channel_list_init(&season_cards);
-    vip_media_metadata_t series_metadata;
-    vip_media_metadata_init(&series_metadata);
-    vip_error_t error = {0};
+static char *series_artwork_url(const vip_media_metadata_t *metadata,
+                                const series_job_t *job) {
+    if (metadata->cover_url && metadata->cover_url[0])
+        return metadata->cover_url;
+    if (job->logo_url && job->logo_url[0])
+        return job->logo_url;
+    return NULL;
+}
 
-    vip_status_t st = vip_credentials_init(&credentials, job->server, job->username, job->password, &error);
-    if (st == VIP_OK)
-        st = vip_xtream_client_create(&client, &credentials, &error);
-    if (st == VIP_OK)
-        st = vip_xtream_series_info(client, job->series_id, &series_metadata, &seasons, &episodes, &error);
+static vip_status_t inherit_episode_artwork(vip_channel_list_t *episodes,
+                                            const char *series_art,
+                                            vip_error_t *error) {
+    if (!series_art)
+        return VIP_OK;
 
-    if (st == VIP_OK) {
-        char *series_art = series_metadata.cover_url && series_metadata.cover_url[0]
-                               ? series_metadata.cover_url
-                               : (job->logo_url && job->logo_url[0] ? job->logo_url : NULL);
-        if (series_art) {
-            for (size_t i = 0; i < episodes.len; ++i) {
-                char *inherited = vip_strdup(series_art);
-                if (!inherited) {
-                    vip_error_set(&error, VIP_ERR_NOMEM, "sem memória para capa dos episódios");
-                    st = VIP_ERR_NOMEM;
-                    break;
-                }
-                free(episodes.items[i].logo_url);
-                episodes.items[i].logo_url = inherited;
-            }
+    for (size_t i = 0u; i < episodes->len; ++i) {
+        char *inherited = vip_strdup(series_art);
+        if (!inherited) {
+            vip_error_set(
+                error,
+                VIP_ERR_NOMEM,
+                "sem memória para capa dos episódios"
+            );
+            return VIP_ERR_NOMEM;
         }
-        const char *fallback_provider =
-            episodes.len > 0u ? episodes.items[0].provider_id : credentials.provider_id;
-        for (size_t i = 0; i < seasons.len; ++i) {
-            vip_category_t *season = &seasons.items[i];
-            char season_id[512];
-            snprintf(season_id, sizeof(season_id), "season:%s:%s", job->series_id,
-                     season->id ? season->id : "0");
-            vip_channel_t card = {
-                .provider_id = season->provider_id && season->provider_id[0] ? season->provider_id
-                                                                             : (char *)fallback_provider,
-                .id = season_id,
-                .category_id = season->id,
-                .name = season->name ? season->name : "Temporada",
-                .logo_url = series_art,
-                .stream_url = "series://season",
-                .epg_channel_id = NULL,
-                .position = (int)i,
-            };
-            st = vip_channel_list_push(&season_cards, &card, &error);
-            if (st != VIP_OK)
-                break;
-        }
-        if (st == VIP_OK) {
-            sort_episode_channels(&episodes);
-            sort_season_channels(&season_cards);
-        }
+        free(episodes->items[i].logo_url);
+        episodes->items[i].logo_url = inherited;
+    }
+    return VIP_OK;
+}
+
+static const char *season_fallback_provider(const vip_channel_list_t *episodes,
+                                            const vip_credentials_t *credentials) {
+    if (episodes->len > 0u)
+        return episodes->items[0].provider_id;
+    return credentials->provider_id;
+}
+
+static vip_status_t append_season_card(vip_channel_list_t *season_cards,
+                                       const vip_category_t *season,
+                                       const char *series_id,
+                                       const char *fallback_provider,
+                                       const char *series_art,
+                                       size_t position,
+                                       vip_error_t *error) {
+    char season_id[512];
+    snprintf(
+        season_id,
+        sizeof(season_id),
+        "season:%s:%s",
+        series_id,
+        season->id ? season->id : "0"
+    );
+
+    vip_channel_t card = {
+        .provider_id = season->provider_id && season->provider_id[0]
+                           ? season->provider_id
+                           : (char *)fallback_provider,
+        .id = season_id,
+        .category_id = season->id,
+        .name = season->name ? season->name : "Temporada",
+        .logo_url = (char *)series_art,
+        .stream_url = "series://season",
+        .epg_channel_id = NULL,
+        .position = (int)position,
+    };
+    return vip_channel_list_push(season_cards, &card, error);
+}
+
+static vip_status_t build_series_season_cards(const vip_category_list_t *seasons,
+                                              const vip_channel_list_t *episodes,
+                                              const vip_credentials_t *credentials,
+                                              const series_job_t *job,
+                                              const char *series_art,
+                                              vip_channel_list_t *season_cards,
+                                              vip_error_t *error) {
+    const char *fallback_provider = season_fallback_provider(
+        episodes, credentials
+    );
+
+    for (size_t i = 0u; i < seasons->len; ++i) {
+        vip_status_t status = append_season_card(
+            season_cards,
+            &seasons->items[i],
+            job->series_id,
+            fallback_provider,
+            series_art,
+            i,
+            error
+        );
+        if (status != VIP_OK)
+            return status;
+    }
+    return VIP_OK;
+}
+
+static vip_status_t prepare_series_catalog(vip_category_list_t *seasons,
+                                           vip_channel_list_t *episodes,
+                                           vip_channel_list_t *season_cards,
+                                           const vip_credentials_t *credentials,
+                                           const series_job_t *job,
+                                           const vip_media_metadata_t *metadata,
+                                           vip_error_t *error) {
+    char *series_art = series_artwork_url(metadata, job);
+    vip_status_t status = inherit_episode_artwork(
+        episodes, series_art, error
+    );
+    if (status != VIP_OK)
+        return status;
+
+    status = build_series_season_cards(
+        seasons,
+        episodes,
+        credentials,
+        job,
+        series_art,
+        season_cards,
+        error
+    );
+    if (status != VIP_OK)
+        return status;
+
+    sort_episode_channels(episodes);
+    sort_season_channels(season_cards);
+    return VIP_OK;
+}
+
+static void publish_series_catalog(app_t *app,
+                                   series_job_t *job,
+                                   vip_category_list_t *seasons,
+                                   vip_channel_list_t *episodes,
+                                   vip_channel_list_t *season_cards) {
+    pthread_mutex_lock(&app->data_mutex);
+    vip_category_list_clear(&app->episode_categories);
+    vip_channel_list_clear(&app->episode_channels);
+    vip_channel_list_clear(&app->season_channels);
+
+    app->episode_categories = *seasons;
+    memset(seasons, 0, sizeof(*seasons));
+    app->episode_channels = *episodes;
+    memset(episodes, 0, sizeof(*episodes));
+    app->season_channels = *season_cards;
+    memset(season_cards, 0, sizeof(*season_cards));
+
+    snprintf(
+        app->series_title,
+        sizeof(app->series_title),
+        "%s",
+        job->title ? job->title : "Série"
+    );
+    snprintf(
+        app->status,
+        sizeof(app->status),
+        "%zu temporadas • %zu episódios",
+        app->season_channels.len,
+        app->episode_channels.len
+    );
+    pthread_mutex_unlock(&app->data_mutex);
+    atomic_store(&app->series_success, true);
+}
+
+static void report_series_worker_failure(app_t *app,
+                                         vip_status_t status,
+                                         vip_error_t *error) {
+    if (status == VIP_OK) {
+        vip_error_set(
+            error,
+            VIP_ERR_MALFORMED,
+            "nenhuma temporada encontrada"
+        );
     }
 
-    if (st == VIP_OK && season_cards.len > 0u) {
-        pthread_mutex_lock(&a->data_mutex);
-        vip_category_list_clear(&a->episode_categories);
-        vip_channel_list_clear(&a->episode_channels);
-        vip_channel_list_clear(&a->season_channels);
-        a->episode_categories = seasons;
-        memset(&seasons, 0, sizeof(seasons));
-        a->episode_channels = episodes;
-        memset(&episodes, 0, sizeof(episodes));
-        a->season_channels = season_cards;
-        memset(&season_cards, 0, sizeof(season_cards));
-        snprintf(a->series_title, sizeof(a->series_title), "%s", job->title ? job->title : "Série");
-        snprintf(a->status, sizeof(a->status), "%zu temporadas • %zu episódios", a->season_channels.len,
-                 a->episode_channels.len);
-        pthread_mutex_unlock(&a->data_mutex);
-        atomic_store(&a->series_success, true);
-    } else {
-        if (st == VIP_OK)
-            vip_error_set(&error, VIP_ERR_MALFORMED, "nenhuma temporada encontrada");
-        pthread_mutex_lock(&a->data_mutex);
-        snprintf(a->status, sizeof(a->status), "Falha ao carregar episódios: %s",
-                 error.message[0] ? error.message : "erro desconhecido");
-        pthread_mutex_unlock(&a->data_mutex);
-        atomic_store(&a->series_success, false);
-    }
+    pthread_mutex_lock(&app->data_mutex);
+    snprintf(
+        app->status,
+        sizeof(app->status),
+        "Falha ao carregar episódios: %s",
+        error->message[0] ? error->message : "erro desconhecido"
+    );
+    pthread_mutex_unlock(&app->data_mutex);
+    atomic_store(&app->series_success, false);
+}
 
-    if (client)
-        vip_xtream_client_destroy(client);
-    vip_credentials_clear(&credentials);
-    vip_category_list_clear(&seasons);
-    vip_channel_list_clear(&episodes);
-    vip_channel_list_clear(&season_cards);
-    vip_media_metadata_clear(&series_metadata);
+static void destroy_series_worker_job(series_job_t *job) {
+    if (!job)
+        return;
     if (job->password) {
         volatile char *wipe = job->password;
-        size_t n = strlen(job->password);
-        while (n-- > 0u)
+        size_t length = strlen(job->password);
+        while (length-- > 0u)
             *wipe++ = 0;
     }
     free(job->server);
@@ -3117,8 +3205,93 @@ static void *series_worker(void *userdata) {
     free(job->title);
     free(job->logo_url);
     free(job);
-    atomic_store(&a->series_running, false);
-    atomic_store(&a->series_done, true);
+}
+
+static void finish_series_worker(app_t *app,
+                                 series_job_t *job,
+                                 vip_xtream_client_t *client,
+                                 vip_credentials_t *credentials,
+                                 vip_category_list_t *seasons,
+                                 vip_channel_list_t *episodes,
+                                 vip_channel_list_t *season_cards,
+                                 vip_media_metadata_t *metadata) {
+    if (client)
+        vip_xtream_client_destroy(client);
+    vip_credentials_clear(credentials);
+    vip_category_list_clear(seasons);
+    vip_channel_list_clear(episodes);
+    vip_channel_list_clear(season_cards);
+    vip_media_metadata_clear(metadata);
+    destroy_series_worker_job(job);
+    atomic_store(&app->series_running, false);
+    atomic_store(&app->series_done, true);
+}
+
+static void *series_worker(void *userdata) {
+    series_job_t *job = userdata;
+    app_t *app = job->app;
+    vip_credentials_t credentials = {0};
+    vip_xtream_client_t *client = NULL;
+
+    vip_category_list_t seasons;
+    vip_category_list_init(&seasons);
+    vip_channel_list_t episodes;
+    vip_channel_list_init(&episodes);
+    vip_channel_list_t season_cards;
+    vip_channel_list_init(&season_cards);
+
+    vip_media_metadata_t metadata;
+    vip_media_metadata_init(&metadata);
+    vip_error_t error = {0};
+
+    vip_status_t status = vip_credentials_init(
+        &credentials,
+        job->server,
+        job->username,
+        job->password,
+        &error
+    );
+    if (status == VIP_OK)
+        status = vip_xtream_client_create(&client, &credentials, &error);
+    if (status == VIP_OK) {
+        status = vip_xtream_series_info(
+            client,
+            job->series_id,
+            &metadata,
+            &seasons,
+            &episodes,
+            &error
+        );
+    }
+    if (status == VIP_OK) {
+        status = prepare_series_catalog(
+            &seasons,
+            &episodes,
+            &season_cards,
+            &credentials,
+            job,
+            &metadata,
+            &error
+        );
+    }
+
+    if (status == VIP_OK && season_cards.len > 0u)
+        publish_series_catalog(
+            app, job, &seasons, &episodes, &season_cards
+        );
+    else
+        report_series_worker_failure(app, status, &error);
+
+    finish_series_worker(
+        app,
+        job,
+        client,
+        &credentials,
+        &seasons,
+        &episodes,
+        &season_cards,
+        &metadata
+    );
     return NULL;
 }
 
