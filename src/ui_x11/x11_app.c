@@ -5327,6 +5327,75 @@ static void handle_browse_click(app_t *a, int x, int y) {
 }
 
 /* Handle click. */
+static bool handle_login_mode_click(app_t *a, int x, int y, int form_x, int form_w, int py) {
+    int mode_w = (form_w - 10) / 2;
+    if (point_in(x, y, form_x, py + 88, mode_w, 42)) {
+        login_select_mode(a, LOGIN_XTREAM);
+        return true;
+    }
+    if (!point_in(x, y, form_x + mode_w + 10, py + 88, mode_w, 42))
+        return false;
+
+    login_select_mode(a, LOGIN_M3U);
+    return true;
+}
+
+static bool handle_login_field_click(app_t *a, int x, int y, int form_x, int form_w, int py) {
+    if (point_in(x, y, form_x, py + 142, form_w, 44)) {
+        a->input_focus = INPUT_PROFILE_NAME;
+        return true;
+    }
+    if (point_in(x, y, form_x, py + 196, form_w, 44)) {
+        a->input_focus = INPUT_SERVER;
+        return true;
+    }
+    if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 250, form_w, 44)) {
+        a->input_focus = INPUT_SERVER_ALT;
+        return true;
+    }
+    if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 304, form_w, 44)) {
+        a->input_focus = INPUT_USERNAME;
+        return true;
+    }
+    if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 358, form_w, 44)) {
+        a->input_focus = INPUT_PASSWORD;
+        return true;
+    }
+    return false;
+}
+
+static bool handle_login_action_click(app_t *a, int x, int y, int form_x, int form_w, int py) {
+    if (a->login_mode == LOGIN_M3U && point_in(x, y, form_x, py + 314, form_w, 46)) {
+        a->input_focus = INPUT_PHONE;
+        start_phone_pairing(a);
+        return true;
+    }
+    if (!point_in(x, y, form_x, py + 430, form_w, 50))
+        return false;
+
+    a->input_focus = INPUT_CONNECT;
+    start_login(a, true);
+    return true;
+}
+
+static bool handle_saved_profile_click(app_t *a, int x, int y, int list_x, int list_w, int py) {
+    int row_y = py + 154;
+    for (int r = 0; r < 6; ++r) {
+        int idx = a->profile_scroll + r;
+        if ((size_t)idx >= a->profiles.len)
+            break;
+        if (point_in(x, y, list_x, row_y, list_w, 52)) {
+            a->profile_focus = idx;
+            load_profile_into_form(a, (size_t)idx);
+            if (cached_m3u_matches(a))
+                start_login(a, false);
+            return true;
+        }
+        row_y += 60;
+    }
+    return false;
+}
+
 static void handle_login_click(app_t *a, int x, int y) {
     int w = a->width > 1120 ? 1080 : a->width - 40;
     if (w < 720)
@@ -5342,63 +5411,15 @@ static void handle_login_click(app_t *a, int x, int y) {
     int form_w = (w * 58) / 100 - 50;
     int list_x = px + (w * 60) / 100;
     int list_w = w - (list_x - px) - 34;
-    int mode_w = (form_w - 10) / 2;
 
-    if (point_in(x, y, form_x, py + 88, mode_w, 42)) {
-        login_select_mode(a, LOGIN_XTREAM);
+    if (handle_login_mode_click(a, x, y, form_x, form_w, py))
         return;
-    }
-    if (point_in(x, y, form_x + mode_w + 10, py + 88, mode_w, 42)) {
-        login_select_mode(a, LOGIN_M3U);
+    if (handle_login_field_click(a, x, y, form_x, form_w, py))
         return;
-    }
-    if (point_in(x, y, form_x, py + 142, form_w, 44)) {
-        a->input_focus = INPUT_PROFILE_NAME;
+    if (handle_login_action_click(a, x, y, form_x, form_w, py))
         return;
-    }
-    if (point_in(x, y, form_x, py + 196, form_w, 44)) {
-        a->input_focus = INPUT_SERVER;
+    if (handle_saved_profile_click(a, x, y, list_x, list_w, py))
         return;
-    }
-    if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 250, form_w, 44)) {
-        a->input_focus = INPUT_SERVER_ALT;
-        return;
-    }
-    if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 304, form_w, 44)) {
-        a->input_focus = INPUT_USERNAME;
-        return;
-    }
-    if (a->login_mode == LOGIN_XTREAM && point_in(x, y, form_x, py + 358, form_w, 44)) {
-        a->input_focus = INPUT_PASSWORD;
-        return;
-    }
-    if (a->login_mode == LOGIN_M3U && point_in(x, y, form_x, py + 314, form_w, 46)) {
-        a->input_focus = INPUT_PHONE;
-        start_phone_pairing(a);
-        return;
-    }
-    if (point_in(x, y, form_x, py + 430, form_w, 50)) {
-        a->input_focus = INPUT_CONNECT;
-        start_login(a, true);
-        return;
-    }
-
-    int row_y = py + 154;
-    for (int r = 0; r < 6; ++r) {
-        int idx = a->profile_scroll + r;
-        if ((size_t)idx >= a->profiles.len)
-            break;
-        if (!point_in(x, y, list_x, row_y, list_w, 52)) {
-            row_y += 60;
-            continue;
-        }
-
-        a->profile_focus = idx;
-        load_profile_into_form(a, (size_t)idx);
-        if (cached_m3u_matches(a))
-            start_login(a, false);
-        return;
-    }
     a->input_focus = 0;
 }
 
