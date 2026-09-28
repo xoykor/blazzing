@@ -561,6 +561,10 @@ vip_status_t vip_thumbnail_validate_rgb(const uint8_t *rgb, size_t width, size_t
     return VIP_OK;
 }
 
+static vip_status_t save_rgb_jpeg_exact(const uint8_t *rgb, size_t width, size_t height,
+                                          size_t stride, const char *path, int quality,
+                                          vip_error_t *error);
+
 /* Persist rgb jpeg in the thumbnail subsystem. */
 static uint8_t *scale_thumbnail_rgb(const uint8_t *rgb,
                                     size_t width,
