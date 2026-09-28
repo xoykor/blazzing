@@ -2283,243 +2283,428 @@ static void remap_catalog_provider_id(vip_category_list_t *cats, vip_channel_lis
 
 /* Network authentication/catalog fetch runs off-thread; Xlib must not be
  * called from this worker.  Results are transferred back through app state. */
-static void *login_worker(void *userdata) {
-    login_job_t *job = userdata;
-    app_t *a = job->app;
-    vip_error_t error = {0};
-    vip_credentials_t credentials = {0};
-    vip_category_list_t cats;
-    vip_category_list_init(&cats);
+typedef struct {
+    vip_error_t error;
+    vip_credentials_t credentials;
+    vip_category_list_t categories;
     vip_channel_list_t channels;
-    vip_channel_list_init(&channels);
-    catalog_t vod = {0};
-    catalog_t series = {0};
-    bool success = false;
-    bool used_alternate = false;
-    bool saw_http_404 = false;
-    char *resolved_primary = NULL;
-    char *resolved_alternate = NULL;
-    char provider_id[17] = {0};
-    vip_status_t st = VIP_ERR_INVALID_ARGUMENT;
+    catalog_t vod;
+    catalog_t series;
+    bool used_alternate;
+    bool saw_http_404;
+    char *resolved_primary;
+    char *resolved_alternate;
+    char provider_id[17];
+    vip_status_t status;
+} login_workspace_t;
+
+static void login_workspace_init(login_workspace_t *workspace) {
+    memset(workspace, 0, sizeof(*workspace));
+    vip_category_list_init(&workspace->categories);
+    vip_channel_list_init(&workspace->channels);
+    workspace->status = VIP_ERR_INVALID_ARGUMENT;
+}
+
+static void login_workspace_clear_catalogs(login_workspace_t *workspace) {
+    vip_category_list_clear(&workspace->categories);
+    vip_channel_list_clear(&workspace->channels);
+    vip_category_list_clear(&workspace->vod.categories);
+    vip_channel_list_clear(&workspace->vod.channels);
+    vip_category_list_clear(&workspace->series.categories);
+    vip_channel_list_clear(&workspace->series.channels);
+}
+
+static void login_workspace_reset_attempt(login_workspace_t *workspace) {
+    login_workspace_clear_catalogs(workspace);
+    vip_category_list_init(&workspace->categories);
+    vip_channel_list_init(&workspace->channels);
+    memset(&workspace->vod, 0, sizeof(workspace->vod));
+    memset(&workspace->series, 0, sizeof(workspace->series));
+    vip_credentials_clear(&workspace->credentials);
+    vip_error_clear(&workspace->error);
+}
+
+static void login_workspace_destroy(login_workspace_t *workspace) {
+    login_workspace_clear_catalogs(workspace);
+    vip_credentials_clear(&workspace->credentials);
+    free(workspace->resolved_primary);
+    free(workspace->resolved_alternate);
+}
+
+static void set_login_status(app_t *app, const char *message) {
+    pthread_mutex_lock(&app->data_mutex);
+    snprintf(app->status, sizeof(app->status), "%s", message ? message : "");
+    pthread_mutex_unlock(&app->data_mutex);
+}
+
+static vip_status_t split_m3u_login_catalog(login_workspace_t *workspace) {
+    vip_category_list_t live_categories;
+    vip_category_list_init(&live_categories);
+    vip_channel_list_t live_channels;
+    vip_channel_list_init(&live_channels);
+
+    vip_category_list_init(&workspace->vod.categories);
+    vip_channel_list_init(&workspace->vod.channels);
+    vip_category_list_init(&workspace->series.categories);
+    vip_channel_list_init(&workspace->series.channels);
+
+    vip_status_t status = vip_m3u_split_catalog(
+        &workspace->categories,
+        &workspace->channels,
+        &live_categories,
+        &live_channels,
+        &workspace->vod.categories,
+        &workspace->vod.channels,
+        &workspace->series.categories,
+        &workspace->series.channels,
+        &workspace->error
+    );
+
+    if (status == VIP_OK) {
+        vip_category_list_clear(&workspace->categories);
+        vip_channel_list_clear(&workspace->channels);
+        workspace->categories = live_categories;
+        memset(&live_categories, 0, sizeof(live_categories));
+        workspace->channels = live_channels;
+        memset(&live_channels, 0, sizeof(live_channels));
+        workspace->vod.loaded = workspace->vod.channels.len > 0u;
+        workspace->series.loaded = workspace->series.channels.len > 0u;
+        fprintf(
+            stderr,
+            "[catalog] M3U separado: TV=%zu Filmes=%zu Séries=%zu\n",
+            workspace->channels.len,
+            workspace->vod.channels.len,
+            workspace->series.channels.len
+        );
+    }
+
+    vip_category_list_clear(&live_categories);
+    vip_channel_list_clear(&live_channels);
+    return status;
+}
+
+static void load_m3u_login(login_workspace_t *workspace, const login_job_t *job) {
+    fprintf(stderr, "[login] carregando playlist M3U\n");
+    workspace->status = vip_m3u_load(
+        job->server,
+        &workspace->categories,
+        &workspace->channels,
+        workspace->provider_id,
+        &workspace->error
+    );
+    if (workspace->status == VIP_OK)
+        workspace->status = split_m3u_login_catalog(workspace);
+}
+
+static vip_status_t login_workspace_server(login_workspace_t *workspace,
+                                           const char *server,
+                                           const login_job_t *job) {
+    return login_one_server(
+        server,
+        job->username,
+        job->password,
+        &workspace->credentials,
+        &workspace->categories,
+        &workspace->channels,
+        &workspace->vod,
+        &workspace->series,
+        &workspace->error
+    );
+}
+
+static void note_login_404(login_workspace_t *workspace) {
+    if (workspace->status != VIP_OK &&
+        strstr(workspace->error.message, "HTTP 404") != NULL)
+        workspace->saw_http_404 = true;
+}
+
+static void remap_alternate_provider_identity(login_workspace_t *workspace,
+                                              const login_job_t *job) {
+    vip_credentials_t identity = {0};
+    vip_error_t identity_error = {0};
+    if (vip_credentials_init(
+            &identity,
+            job->server,
+            job->username,
+            job->password,
+            &identity_error) == VIP_OK) {
+        snprintf(
+            workspace->credentials.provider_id,
+            sizeof(workspace->credentials.provider_id),
+            "%s",
+            identity.provider_id
+        );
+        remap_catalog_provider_id(
+            &workspace->categories,
+            &workspace->channels,
+            identity.provider_id
+        );
+        if (workspace->vod.loaded) {
+            remap_catalog_provider_id(
+                &workspace->vod.categories,
+                &workspace->vod.channels,
+                identity.provider_id
+            );
+        }
+        if (workspace->series.loaded) {
+            remap_catalog_provider_id(
+                &workspace->series.categories,
+                &workspace->series.channels,
+                identity.provider_id
+            );
+        }
+    }
+    vip_credentials_clear(&identity);
+}
+
+static void try_configured_alternate(login_workspace_t *workspace,
+                                     login_job_t *job) {
+    if (workspace->status == VIP_OK ||
+        !job->server_alt || !job->server_alt[0])
+        return;
+
+    fprintf(stderr, "[login] primário falhou; tentando servidor alternativo\n");
+    set_login_status(
+        job->app,
+        "Primário indisponível; tentando servidor alternativo..."
+    );
+
+    login_workspace_reset_attempt(workspace);
+    workspace->status = login_workspace_server(
+        workspace, job->server_alt, job
+    );
+    note_login_404(workspace);
+    workspace->used_alternate = workspace->status == VIP_OK;
+    if (workspace->used_alternate)
+        remap_alternate_provider_identity(workspace, job);
+}
+
+static bool external_resolver_allowed(void) {
+    const char *option = getenv("VIPTV_ALLOW_EXTERNAL_RESOLVER");
+    return option && option[0] && strcmp(option, "0") != 0;
+}
+
+static vip_status_t copy_resolved_servers(login_workspace_t *workspace,
+                                          const vip_server_resolution_t *resolution) {
+    workspace->resolved_primary = vip_strdup(resolution->primary);
+    workspace->resolved_alternate = vip_strdup_nullable(resolution->alternate);
+    if (workspace->resolved_primary)
+        return VIP_OK;
+
+    vip_error_set(
+        &workspace->error,
+        VIP_ERR_NOMEM,
+        "sem memória para servidor resolvido"
+    );
+    return VIP_ERR_NOMEM;
+}
+
+static void try_resolved_alternate(login_workspace_t *workspace,
+                                   const login_job_t *job) {
+    if (workspace->status == VIP_OK ||
+        !workspace->resolved_alternate ||
+        !workspace->resolved_alternate[0])
+        return;
+
+    login_workspace_reset_attempt(workspace);
+    workspace->status = login_workspace_server(
+        workspace, workspace->resolved_alternate, job
+    );
+    workspace->used_alternate = workspace->status == VIP_OK;
+}
+
+static void try_external_resolver(login_workspace_t *workspace,
+                                  login_job_t *job) {
+    if (workspace->status == VIP_OK || !workspace->saw_http_404)
+        return;
+
+    if (!external_resolver_allowed()) {
+        vip_error_set(
+            &workspace->error,
+            VIP_ERR_NETWORK,
+            "servidor retornou HTTP 404; descoberta externa desativada por privacidade "
+            "(VIPTV_ALLOW_EXTERNAL_RESOLVER=1 para autorizar)"
+        );
+        return;
+    }
+
+    fprintf(
+        stderr,
+        "[login] endpoint Xtream retornou 404; resolvedor externo autorizado pelo usuário\n"
+    );
+    set_login_status(
+        job->app,
+        "Servidor retornou 404; procurando endpoint automaticamente..."
+    );
+
+    vip_server_resolution_t resolution = {0};
+    vip_error_t resolve_error = {0};
+    if (vip_streamfire_resolve_servers(
+            job->username,
+            job->password,
+            &resolution,
+            &resolve_error) != VIP_OK) {
+        workspace->error = resolve_error;
+        vip_server_resolution_clear(&resolution);
+        return;
+    }
+
+    if (copy_resolved_servers(workspace, &resolution) == VIP_OK) {
+        login_workspace_reset_attempt(workspace);
+        workspace->used_alternate = false;
+        workspace->status = login_workspace_server(
+            workspace, workspace->resolved_primary, job
+        );
+        try_resolved_alternate(workspace, job);
+    }
+    vip_server_resolution_clear(&resolution);
+}
+
+static void load_xtream_login(login_workspace_t *workspace,
+                              login_job_t *job) {
+    fprintf(stderr, "[login] conectando ao servidor primário\n");
+    workspace->status = login_workspace_server(
+        workspace, job->server, job
+    );
+    note_login_404(workspace);
+    try_configured_alternate(workspace, job);
+    try_external_resolver(workspace, job);
+
+    if (workspace->status == VIP_OK) {
+        snprintf(
+            workspace->provider_id,
+            sizeof(workspace->provider_id),
+            "%s",
+            workspace->credentials.provider_id
+        );
+    }
+}
+
+static void move_catalog(catalog_t *destination, catalog_t *source) {
+    vip_category_list_clear(&destination->categories);
+    vip_channel_list_clear(&destination->channels);
+    *destination = *source;
+    memset(source, 0, sizeof(*source));
+}
+
+static void publish_login_catalog(app_t *app,
+                                  login_workspace_t *workspace,
+                                  const login_job_t *job) {
+    if (app->db) {
+        (void)vip_database_replace_catalog(
+            app->db,
+            workspace->provider_id,
+            &workspace->categories,
+            &workspace->channels,
+            &workspace->error
+        );
+    }
+
+    pthread_mutex_lock(&app->data_mutex);
+    vip_category_list_clear(&app->catalogs[CONTENT_LIVE].categories);
+    vip_channel_list_clear(&app->catalogs[CONTENT_LIVE].channels);
+    app->catalogs[CONTENT_LIVE].categories = workspace->categories;
+    memset(&workspace->categories, 0, sizeof(workspace->categories));
+    app->catalogs[CONTENT_LIVE].channels = workspace->channels;
+    memset(&workspace->channels, 0, sizeof(workspace->channels));
+    app->catalogs[CONTENT_LIVE].loaded = true;
+
+    move_catalog(&app->catalogs[CONTENT_VOD], &workspace->vod);
+    move_catalog(&app->catalogs[CONTENT_SERIES], &workspace->series);
+
+    if (workspace->resolved_primary && workspace->resolved_primary[0]) {
+        snprintf(app->server, sizeof(app->server), "%s",
+                 workspace->resolved_primary);
+        snprintf(app->server_alt, sizeof(app->server_alt), "%s",
+                 workspace->resolved_alternate
+                     ? workspace->resolved_alternate
+                     : "");
+    }
+
+    app->active_server_alt = workspace->used_alternate;
+    app->content_kind = CONTENT_LIVE;
+    app->series_episode_mode = false;
+    app->series_season_select = false;
+    snprintf(
+        app->active_profile_id,
+        sizeof(app->active_profile_id),
+        "%s",
+        workspace->provider_id
+    );
 
     if (job->mode == LOGIN_M3U) {
-        fprintf(stderr, "[login] carregando playlist M3U\n");
-        st = vip_m3u_load(job->server, &cats, &channels, provider_id, &error);
-        if (st == VIP_OK) {
-            vip_category_list_t live_cats;
-            vip_category_list_init(&live_cats);
-            vip_channel_list_t live_channels;
-            vip_channel_list_init(&live_channels);
-            vip_category_list_init(&vod.categories);
-            vip_channel_list_init(&vod.channels);
-            vip_category_list_init(&series.categories);
-            vip_channel_list_init(&series.channels);
-            st = vip_m3u_split_catalog(&cats, &channels, &live_cats, &live_channels, &vod.categories,
-                                       &vod.channels, &series.categories, &series.channels, &error);
-            if (st == VIP_OK) {
-                vip_category_list_clear(&cats);
-                vip_channel_list_clear(&channels);
-                cats = live_cats;
-                memset(&live_cats, 0, sizeof(live_cats));
-                channels = live_channels;
-                memset(&live_channels, 0, sizeof(live_channels));
-                vod.loaded = vod.channels.len > 0u;
-                series.loaded = series.channels.len > 0u;
-                fprintf(stderr, "[catalog] M3U separado: TV=%zu Filmes=%zu Séries=%zu\n", channels.len,
-                        vod.channels.len, series.channels.len);
-            }
-            vip_category_list_clear(&live_cats);
-            vip_channel_list_clear(&live_channels);
-        }
+        snprintf(
+            app->cached_m3u_server,
+            sizeof(app->cached_m3u_server),
+            "%s",
+            job->server
+        );
+        app->cached_m3u_valid = true;
     } else {
-        fprintf(stderr, "[login] conectando ao servidor primário\n");
-        st = login_one_server(job->server, job->username, job->password, &credentials, &cats, &channels, &vod,
-                              &series, &error);
-        saw_http_404 = st != VIP_OK && strstr(error.message, "HTTP 404") != NULL;
-        if (st != VIP_OK && job->server_alt && job->server_alt[0]) {
-            fprintf(stderr, "[login] primário falhou; tentando servidor alternativo\n");
-            pthread_mutex_lock(&a->data_mutex);
-            snprintf(a->status, sizeof(a->status), "Primário indisponível; tentando servidor alternativo...");
-            pthread_mutex_unlock(&a->data_mutex);
-            vip_category_list_clear(&cats);
-            vip_category_list_init(&cats);
-            vip_channel_list_clear(&channels);
-            vip_channel_list_init(&channels);
-            vip_category_list_clear(&vod.categories);
-            vip_channel_list_clear(&vod.channels);
-            memset(&vod, 0, sizeof(vod));
-            vip_category_list_clear(&series.categories);
-            vip_channel_list_clear(&series.channels);
-            memset(&series, 0, sizeof(series));
-            vip_credentials_clear(&credentials);
-            vip_error_clear(&error);
-            st = login_one_server(job->server_alt, job->username, job->password, &credentials, &cats,
-                                  &channels, &vod, &series, &error);
-            if (st != VIP_OK && strstr(error.message, "HTTP 404") != NULL)
-                saw_http_404 = true;
-            used_alternate = st == VIP_OK;
-            if (used_alternate) {
-                vip_credentials_t identity = {0};
-                vip_error_t identity_error = {0};
-                if (vip_credentials_init(&identity, job->server, job->username, job->password,
-                                         &identity_error) == VIP_OK) {
-                    snprintf(credentials.provider_id, sizeof(credentials.provider_id), "%s",
-                             identity.provider_id);
-                    remap_catalog_provider_id(&cats, &channels, identity.provider_id);
-                    if (vod.loaded)
-                        remap_catalog_provider_id(&vod.categories, &vod.channels, identity.provider_id);
-                    if (series.loaded)
-                        remap_catalog_provider_id(&series.categories, &series.channels, identity.provider_id);
-                }
-                vip_credentials_clear(&identity);
-            }
-        }
-
-        /* StreamFire/Spark-compatible fallback. Only an HTTP 404 from the
-         * regular Xtream endpoint activates it. Every candidate returned by
-         * the resolver API is verified through player_api.php before use. */
-        const char *resolver_opt = getenv("VIPTV_ALLOW_EXTERNAL_RESOLVER");
-        bool allow_external_resolver = resolver_opt && resolver_opt[0] && strcmp(resolver_opt, "0") != 0;
-        if (st != VIP_OK && saw_http_404 && allow_external_resolver) {
-            fprintf(stderr,
-                    "[login] endpoint Xtream retornou 404; resolvedor externo autorizado pelo usuário\n");
-            pthread_mutex_lock(&a->data_mutex);
-            snprintf(a->status, sizeof(a->status),
-                     "Servidor retornou 404; procurando endpoint automaticamente...");
-            pthread_mutex_unlock(&a->data_mutex);
-
-            vip_server_resolution_t resolution = {0};
-            vip_error_t resolve_error = {0};
-            if (vip_streamfire_resolve_servers(job->username, job->password, &resolution, &resolve_error) ==
-                VIP_OK) {
-                resolved_primary = vip_strdup(resolution.primary);
-                resolved_alternate = vip_strdup_nullable(resolution.alternate);
-                if (!resolved_primary) {
-                    vip_error_set(&error, VIP_ERR_NOMEM, "sem memória para servidor resolvido");
-                } else {
-                    vip_category_list_clear(&cats);
-                    vip_category_list_init(&cats);
-                    vip_channel_list_clear(&channels);
-                    vip_channel_list_init(&channels);
-                    vip_category_list_clear(&vod.categories);
-                    vip_channel_list_clear(&vod.channels);
-                    memset(&vod, 0, sizeof(vod));
-                    vip_category_list_clear(&series.categories);
-                    vip_channel_list_clear(&series.channels);
-                    memset(&series, 0, sizeof(series));
-                    vip_credentials_clear(&credentials);
-                    vip_error_clear(&error);
-                    used_alternate = false;
-                    st = login_one_server(resolved_primary, job->username, job->password, &credentials, &cats,
-                                          &channels, &vod, &series, &error);
-                    if (st != VIP_OK && resolved_alternate && resolved_alternate[0]) {
-                        vip_category_list_clear(&cats);
-                        vip_category_list_init(&cats);
-                        vip_channel_list_clear(&channels);
-                        vip_channel_list_init(&channels);
-                        vip_category_list_clear(&vod.categories);
-                        vip_channel_list_clear(&vod.channels);
-                        memset(&vod, 0, sizeof(vod));
-                        vip_category_list_clear(&series.categories);
-                        vip_channel_list_clear(&series.channels);
-                        memset(&series, 0, sizeof(series));
-                        vip_credentials_clear(&credentials);
-                        vip_error_clear(&error);
-                        st = login_one_server(resolved_alternate, job->username, job->password, &credentials,
-                                              &cats, &channels, &vod, &series, &error);
-                        used_alternate = st == VIP_OK;
-                    }
-                }
-            } else {
-                error = resolve_error;
-            }
-            vip_server_resolution_clear(&resolution);
-        } else if (st != VIP_OK && saw_http_404 && !allow_external_resolver) {
-            vip_error_set(&error, VIP_ERR_NETWORK,
-                          "servidor retornou HTTP 404; descoberta externa desativada por privacidade "
-                          "(VIPTV_ALLOW_EXTERNAL_RESOLVER=1 para autorizar)");
-        }
-        if (st == VIP_OK)
-            snprintf(provider_id, sizeof(provider_id), "%s", credentials.provider_id);
+        app->cached_m3u_server[0] = '\0';
+        app->cached_m3u_valid = false;
     }
 
-    if (st == VIP_OK) {
-        if (a->db)
-            (void)vip_database_replace_catalog(a->db, provider_id, &cats, &channels, &error);
-        pthread_mutex_lock(&a->data_mutex);
-        vip_category_list_clear(&a->catalogs[CONTENT_LIVE].categories);
-        vip_channel_list_clear(&a->catalogs[CONTENT_LIVE].channels);
-        a->catalogs[CONTENT_LIVE].categories = cats;
-        memset(&cats, 0, sizeof(cats));
-        a->catalogs[CONTENT_LIVE].channels = channels;
-        memset(&channels, 0, sizeof(channels));
-        a->catalogs[CONTENT_LIVE].loaded = true;
-        vip_category_list_clear(&a->catalogs[CONTENT_VOD].categories);
-        vip_channel_list_clear(&a->catalogs[CONTENT_VOD].channels);
-        vip_category_list_clear(&a->catalogs[CONTENT_SERIES].categories);
-        vip_channel_list_clear(&a->catalogs[CONTENT_SERIES].channels);
-        a->catalogs[CONTENT_VOD] = vod;
-        memset(&vod, 0, sizeof(vod));
-        a->catalogs[CONTENT_SERIES] = series;
-        memset(&series, 0, sizeof(series));
-        if (resolved_primary && resolved_primary[0]) {
-            snprintf(a->server, sizeof(a->server), "%s", resolved_primary);
-            snprintf(a->server_alt, sizeof(a->server_alt), "%s",
-                     resolved_alternate ? resolved_alternate : "");
-        }
-        a->active_server_alt = used_alternate;
-        a->content_kind = CONTENT_LIVE;
-        a->series_episode_mode = false;
-        a->series_season_select = false;
-        snprintf(a->active_profile_id, sizeof(a->active_profile_id), "%s", provider_id);
-        if (job->mode == LOGIN_M3U) {
-            snprintf(a->cached_m3u_server, sizeof(a->cached_m3u_server), "%s", job->server);
-            a->cached_m3u_valid = true;
-        } else {
-            a->cached_m3u_server[0] = '\0';
-            a->cached_m3u_valid = false;
-        }
-        if (job->mode == LOGIN_XTREAM) {
-            fprintf(stderr, "[catalog] filmes: %zu itens/%zu categorias; séries: %zu itens/%zu categorias\n",
-                    a->catalogs[CONTENT_VOD].channels.len, a->catalogs[CONTENT_VOD].categories.len,
-                    a->catalogs[CONTENT_SERIES].channels.len, a->catalogs[CONTENT_SERIES].categories.len);
-        }
-        snprintf(a->status, sizeof(a->status), "%zu canais em %zu categorias%s",
-                 a->catalogs[CONTENT_LIVE].channels.len, a->catalogs[CONTENT_LIVE].categories.len,
-                 used_alternate ? " (servidor alternativo)" : "");
-        pthread_mutex_unlock(&a->data_mutex);
-        success = true;
-    } else {
-        fprintf(stderr, "[login] falhou: %s\n", error.message);
-        pthread_mutex_lock(&a->data_mutex);
-        snprintf(a->status, sizeof(a->status), "%s", error.message[0] ? error.message : "falha ao conectar");
-        pthread_mutex_unlock(&a->data_mutex);
+    if (job->mode == LOGIN_XTREAM) {
+        fprintf(
+            stderr,
+            "[catalog] filmes: %zu itens/%zu categorias; séries: %zu itens/%zu categorias\n",
+            app->catalogs[CONTENT_VOD].channels.len,
+            app->catalogs[CONTENT_VOD].categories.len,
+            app->catalogs[CONTENT_SERIES].channels.len,
+            app->catalogs[CONTENT_SERIES].categories.len
+        );
     }
 
-    vip_category_list_clear(&cats);
-    vip_channel_list_clear(&channels);
-    vip_category_list_clear(&vod.categories);
-    vip_channel_list_clear(&vod.channels);
-    vip_category_list_clear(&series.categories);
-    vip_channel_list_clear(&series.channels);
-    vip_credentials_clear(&credentials);
-    free(resolved_primary);
-    free(resolved_alternate);
-    if (job->password) {
-        volatile char *p = job->password;
-        size_t n = strlen(job->password);
-        while (n--)
-            *p++ = 0;
-    }
-    free(job->server);
-    free(job->server_alt);
-    free(job->username);
-    free(job->password);
-    free(job->profile_name);
-    free(job);
-    atomic_store(&a->login_success, success);
-    atomic_store(&a->login_running, false);
-    atomic_store(&a->login_done, true);
+    snprintf(
+        app->status,
+        sizeof(app->status),
+        "%zu canais em %zu categorias%s",
+        app->catalogs[CONTENT_LIVE].channels.len,
+        app->catalogs[CONTENT_LIVE].categories.len,
+        workspace->used_alternate ? " (servidor alternativo)" : ""
+    );
+    pthread_mutex_unlock(&app->data_mutex);
+}
+
+static void report_login_failure(app_t *app,
+                                 const vip_error_t *error) {
+    fprintf(stderr, "[login] falhou: %s\n", error->message);
+    set_login_status(
+        app,
+        error->message[0] ? error->message : "falha ao conectar"
+    );
+}
+
+static void finish_login_worker(app_t *app,
+                                login_job_t *job,
+                                login_workspace_t *workspace,
+                                bool success) {
+    login_workspace_destroy(workspace);
+    login_job_free(job);
+    atomic_store(&app->login_success, success);
+    atomic_store(&app->login_running, false);
+    atomic_store(&app->login_done, true);
+}
+
+static void *login_worker(void *userdata) {
+    login_job_t *job = userdata;
+    app_t *app = job->app;
+    login_workspace_t workspace;
+    login_workspace_init(&workspace);
+
+    if (job->mode == LOGIN_M3U)
+        load_m3u_login(&workspace, job);
+    else
+        load_xtream_login(&workspace, job);
+
+    bool success = workspace.status == VIP_OK;
+    if (success)
+        publish_login_catalog(app, &workspace, job);
+    else
+        report_login_failure(app, &workspace.error);
+
+    finish_login_worker(app, job, &workspace, success);
     return NULL;
 }
 
