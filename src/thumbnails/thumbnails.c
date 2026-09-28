@@ -562,84 +562,63 @@ vip_status_t vip_thumbnail_validate_rgb(const uint8_t *rgb, size_t width, size_t
 }
 
 /* Persist rgb jpeg in the thumbnail subsystem. */
-vip_status_t vip_thumbnail_save_rgb_jpeg(const uint8_t *rgb, size_t width, size_t height, size_t stride,
-                                         const char *path, int quality, vip_error_t *error) {
-    vip_status_t st = vip_thumbnail_validate_rgb(rgb, width, height, stride, error);
-    if (st != VIP_OK)
-        return st;
-    st = mkdir_parents(path, error);
-    if (st != VIP_OK)
-        return st;
-    const size_t out_w = 320, out_h = 180;
-    uint8_t *scaled = malloc(out_w * out_h * 3);
+static uint8_t *scale_thumbnail_rgb(const uint8_t *rgb,
+                                    size_t width,
+                                    size_t height,
+                                    size_t stride,
+                                    size_t out_w,
+                                    size_t out_h) {
+    uint8_t *scaled = malloc(out_w * out_h * 3u);
     if (!scaled)
-        return VIP_ERR_NOMEM;
+        return NULL;
+
     for (size_t y = 0; y < out_h; ++y) {
-        size_t src_y = y * height / out_h;
+        size_t source_y = y * height / out_h;
         for (size_t x = 0; x < out_w; ++x) {
-            size_t src_x = x * width / out_w;
-            memcpy(scaled + (y * out_w + x) * 3, rgb + src_y * stride + src_x * 3, 3);
+            size_t source_x = x * width / out_w;
+            memcpy(
+                scaled + (y * out_w + x) * 3u,
+                rgb + source_y * stride + source_x * 3u,
+                3u
+            );
         }
     }
-    char *tmp_path = temporary_cache_path(path);
-    if (!tmp_path) {
-        free(scaled);
-        vip_error_set(error, VIP_ERR_NOMEM, "sem memória para cache temporário");
+    return scaled;
+}
+
+vip_status_t vip_thumbnail_save_rgb_jpeg(const uint8_t *rgb,
+                                         size_t width,
+                                         size_t height,
+                                         size_t stride,
+                                         const char *path,
+                                         int quality,
+                                         vip_error_t *error) {
+    vip_status_t st = vip_thumbnail_validate_rgb(
+        rgb, width, height, stride, error
+    );
+    if (st != VIP_OK)
+        return st;
+
+    const size_t out_w = 320u;
+    const size_t out_h = 180u;
+    uint8_t *scaled = scale_thumbnail_rgb(
+        rgb, width, height, stride, out_w, out_h
+    );
+    if (!scaled)
         return VIP_ERR_NOMEM;
-    }
-    FILE *fp = fopen(tmp_path, "wb");
-    if (!fp) {
-        free(tmp_path);
-        free(scaled);
-        vip_error_set(error, VIP_ERR_IO, "não foi possível abrir cache temporário: %s", strerror(errno));
-        return VIP_ERR_IO;
-    }
-    struct jpeg_compress_struct cinfo;
-    memset(&cinfo, 0, sizeof(cinfo));
-    thumbnail_jpeg_error_t jerr;
-    volatile bool created = false;
-    cinfo.err = jpeg_std_error(&jerr.pub);
-    jerr.pub.error_exit = thumbnail_jpeg_fail;
-    if (setjmp(jerr.env)) {
-        if (created)
-            jpeg_destroy_compress(&cinfo);
-        fclose(fp);
-        (void)remove(tmp_path);
-        free(tmp_path);
-        free(scaled);
-        vip_error_set(error, VIP_ERR_IO, "falha da libjpeg ao gravar thumbnail");
-        return VIP_ERR_IO;
-    }
-    jpeg_create_compress(&cinfo);
-    created = true;
-    jpeg_stdio_dest(&cinfo, fp);
-    cinfo.image_width = (JDIMENSION)out_w;
-    cinfo.image_height = (JDIMENSION)out_h;
-    cinfo.input_components = 3;
-    cinfo.in_color_space = JCS_RGB;
-    jpeg_set_defaults(&cinfo);
-    jpeg_set_quality(&cinfo, quality < 1 ? 1 : quality > 100 ? 100 : quality, TRUE);
-    jpeg_start_compress(&cinfo, TRUE);
-    while (cinfo.next_scanline < cinfo.image_height) {
-        JSAMPROW row = scaled + cinfo.next_scanline * out_w * 3;
-        jpeg_write_scanlines(&cinfo, &row, 1);
-    }
-    jpeg_finish_compress(&cinfo);
-    jpeg_destroy_compress(&cinfo);
-    int close_rc = fclose(fp);
-    int rename_rc = close_rc == 0 ? rename(tmp_path, path) : -1;
-    if (close_rc != 0 || rename_rc != 0) {
-        int saved_errno = errno;
-        (void)remove(tmp_path);
-        free(tmp_path);
-        free(scaled);
-        vip_error_set(error, VIP_ERR_IO, "falha ao publicar thumbnail no cache: %s", strerror(saved_errno));
-        return VIP_ERR_IO;
-    }
-    free(tmp_path);
+
+    int jpeg_quality = quality < 1 ? 1 : (quality > 100 ? 100 : quality);
+    st = save_rgb_jpeg_exact(
+        scaled,
+        out_w,
+        out_h,
+        out_w * 3u,
+        path,
+        jpeg_quality,
+        error
+    );
     free(scaled);
-    vip_error_clear(error);
-    return VIP_OK;
+    return st;
 }
 
 typedef struct {
