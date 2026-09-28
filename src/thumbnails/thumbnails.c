@@ -994,40 +994,91 @@ static vip_status_t save_rgb_jpeg_exact(const uint8_t *rgb, size_t width, size_t
 }
 
 /* Persist logo preserving aspect. */
-static vip_status_t save_logo_preserving_aspect(const decoded_image_t *image, const char *path, int quality,
-                                                vip_error_t *error) {
-    if (!image || !image->data || !image->width || !image->height)
-        return VIP_ERR_INVALID_ARGUMENT;
-    const size_t max_w = 480u, max_h = 720u;
+static void logo_output_size(const decoded_image_t *image,
+                             size_t *width_out,
+                             size_t *height_out) {
+    const size_t max_w = 480u;
+    const size_t max_h = 720u;
     double scale = 1.0;
+
     if (image->width > max_w)
         scale = (double)max_w / (double)image->width;
     if ((double)image->height * scale > (double)max_h)
         scale = (double)max_h / (double)image->height;
-    size_t out_w = (size_t)((double)image->width * scale + 0.5),
-           out_h = (size_t)((double)image->height * scale + 0.5);
-    if (out_w < 1u)
-        out_w = 1u;
-    if (out_h < 1u)
-        out_h = 1u;
-    if (out_w == image->width && out_h == image->height)
-        return save_rgb_jpeg_exact(image->data, image->width, image->height, image->stride, path, quality,
-                                   error);
+
+    size_t width = (size_t)((double)image->width * scale + 0.5);
+    size_t height = (size_t)((double)image->height * scale + 0.5);
+    *width_out = width < 1u ? 1u : width;
+    *height_out = height < 1u ? 1u : height;
+}
+
+static uint8_t *scale_logo_rgb(const decoded_image_t *image,
+                               size_t out_w,
+                               size_t out_h) {
     if (out_w > SIZE_MAX / out_h / 3u)
-        return VIP_ERR_NOMEM;
+        return NULL;
+
     uint8_t *scaled = malloc(out_w * out_h * 3u);
     if (!scaled)
-        return VIP_ERR_NOMEM;
+        return NULL;
+
     for (size_t y = 0; y < out_h; ++y) {
-        size_t sy = y * image->height / out_h;
+        size_t source_y = y * image->height / out_h;
         for (size_t x = 0; x < out_w; ++x) {
-            size_t sx = x * image->width / out_w;
-            memcpy(scaled + (y * out_w + x) * 3u, image->data + sy * image->stride + sx * 3u, 3u);
+            size_t source_x = x * image->width / out_w;
+            memcpy(
+                scaled + (y * out_w + x) * 3u,
+                image->data + source_y * image->stride + source_x * 3u,
+                3u
+            );
         }
     }
-    vip_status_t st = save_rgb_jpeg_exact(scaled, out_w, out_h, out_w * 3u, path, quality, error);
+    return scaled;
+}
+
+static vip_status_t save_scaled_logo(const decoded_image_t *image,
+                                     size_t out_w,
+                                     size_t out_h,
+                                     const char *path,
+                                     int quality,
+                                     vip_error_t *error) {
+    uint8_t *scaled = scale_logo_rgb(image, out_w, out_h);
+    if (!scaled)
+        return VIP_ERR_NOMEM;
+
+    vip_status_t st = save_rgb_jpeg_exact(
+        scaled, out_w, out_h, out_w * 3u, path, quality, error
+    );
     free(scaled);
     return st;
+}
+
+static vip_status_t save_logo_preserving_aspect(const decoded_image_t *image,
+                                                const char *path,
+                                                int quality,
+                                                vip_error_t *error) {
+    if (!image || !image->data || !image->width || !image->height)
+        return VIP_ERR_INVALID_ARGUMENT;
+
+    size_t out_w = 0u;
+    size_t out_h = 0u;
+    logo_output_size(image, &out_w, &out_h);
+
+    if (out_w == image->width && out_h == image->height) {
+        return save_rgb_jpeg_exact(
+            image->data,
+            image->width,
+            image->height,
+            image->stride,
+            path,
+            quality,
+            error
+        );
+    }
+
+    return save_scaled_logo(
+        image, out_w, out_h, path, quality, error
+    );
 }
 
 /* Capture logo direct. */
