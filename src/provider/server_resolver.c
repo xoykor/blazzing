@@ -519,56 +519,79 @@ static struct curl_slist *resolver_headers(int profile) {
 }
 
 /* Handle the resolver post operation. */
-static vip_status_t resolver_post(const char *api, int profile, const char *username, const char *password,
-                                  const char *identity, char **body_out, long *http_out, vip_error_t *error) {
-    *body_out = NULL;
-    *http_out = 0;
-    CURL *curl = curl_easy_init();
-    if (!curl)
-        return VIP_ERR_NETWORK;
-    char *eu = curl_easy_escape(curl, username, 0), *ep = curl_easy_escape(curl, password, 0),
-         *ei = curl_easy_escape(curl, identity, 0);
-    if (!eu || !ep || !ei) {
-        if (eu)
-            curl_free(eu);
-        if (ep)
-            curl_free(ep);
-        if (ei)
-            curl_free(ei);
-        curl_easy_cleanup(curl);
-        return VIP_ERR_NOMEM;
-    }
-    size_t form_n = strlen(eu) + strlen(ep) + strlen(ei) + 128u;
-    char *form = malloc(form_n);
-    if (!form) {
-        curl_free(eu);
-        curl_free(ep);
-        curl_free(ei);
-        curl_easy_cleanup(curl);
-        return VIP_ERR_NOMEM;
-    }
-    snprintf(form, form_n, "code=%s&username=%s&password=%s&identity=%s&platform=%s", resolver_code, eu, ep,
-             ei, resolver_platform);
-    curl_free(eu);
-    curl_free(ep);
-    curl_free(ei);
-    size_t url_n = strlen(api) + 16u;
-    char *url = malloc(url_n);
-    if (!url) {
-        free(form);
-        curl_easy_cleanup(curl);
-        return VIP_ERR_NOMEM;
-    }
-    snprintf(url, url_n, "%s/validate-login", api);
-    resolver_buf_t buf = {0};
-    struct curl_slist *headers = resolver_headers(profile);
+typedef struct {
+    char *username;
+    char *password;
+    char *identity;
+} resolver_escaped_t;
+
+static void resolver_escaped_clear(resolver_escaped_t *escaped) {
+    if (!escaped)
+        return;
+    if (escaped->username)
+        curl_free(escaped->username);
+    if (escaped->password)
+        curl_free(escaped->password);
+    if (escaped->identity)
+        curl_free(escaped->identity);
+    memset(escaped, 0, sizeof(*escaped));
+}
+
+static bool resolver_escape_fields(CURL *curl,
+                                   const char *username,
+                                   const char *password,
+                                   const char *identity,
+                                   resolver_escaped_t *escaped) {
+    escaped->username = curl_easy_escape(curl, username, 0);
+    escaped->password = curl_easy_escape(curl, password, 0);
+    escaped->identity = curl_easy_escape(curl, identity, 0);
+    return escaped->username && escaped->password && escaped->identity;
+}
+
+static char *resolver_form_body(const resolver_escaped_t *escaped) {
+    size_t length = strlen(escaped->username) +
+                    strlen(escaped->password) +
+                    strlen(escaped->identity) + 128u;
+    char *form = malloc(length);
+    if (!form)
+        return NULL;
+
+    snprintf(
+        form,
+        length,
+        "code=%s&username=%s&password=%s&identity=%s&platform=%s",
+        resolver_code,
+        escaped->username,
+        escaped->password,
+        escaped->identity,
+        resolver_platform
+    );
+    return form;
+}
+
+static char *resolver_validate_url(const char *api) {
+    size_t length = strlen(api) + 16u;
+    char *url = malloc(length);
+    if (!url)
+        return NULL;
+    snprintf(url, length, "%s/validate-login", api);
+    return url;
+}
+
+static void configure_resolver_request(CURL *curl,
+                                       const char *url,
+                                       const char *form,
+                                       int profile,
+                                       struct curl_slist *headers,
+                                       resolver_buf_t *buffer) {
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, form);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, profile == 2 ? android_ua : chrome_ua);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT,
+                     profile == 2 ? android_ua : chrome_ua);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, resolver_write);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, buffer);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
@@ -577,23 +600,78 @@ static vip_status_t resolver_post(const char *api, int profile, const char *user
 #ifdef CURL_HTTP_VERSION_2TLS
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
 #endif
-    CURLcode rc = curl_easy_perform(curl);
+}
+
+static vip_status_t finish_resolver_response(resolver_buf_t *buffer,
+                                             CURLcode curl_status,
+                                             char **body_out,
+                                             vip_error_t *error) {
+    if (curl_status != CURLE_OK || buffer->overflow) {
+        free(buffer->data);
+        vip_error_set(error, VIP_ERR_NETWORK,
+                      "falha ao consultar resolvedor");
+        return VIP_ERR_NETWORK;
+    }
+
+    if (!buffer->data)
+        buffer->data = vip_strdup("");
+    if (!buffer->data)
+        return VIP_ERR_NOMEM;
+
+    *body_out = buffer->data;
+    return VIP_OK;
+}
+
+static vip_status_t resolver_post(const char *api,
+                                  int profile,
+                                  const char *username,
+                                  const char *password,
+                                  const char *identity,
+                                  char **body_out,
+                                  long *http_out,
+                                  vip_error_t *error) {
+    *body_out = NULL;
+    *http_out = 0;
+
+    CURL *curl = curl_easy_init();
+    if (!curl)
+        return VIP_ERR_NETWORK;
+
+    resolver_escaped_t escaped = {0};
+    if (!resolver_escape_fields(
+            curl, username, password, identity, &escaped)) {
+        resolver_escaped_clear(&escaped);
+        curl_easy_cleanup(curl);
+        return VIP_ERR_NOMEM;
+    }
+
+    char *form = resolver_form_body(&escaped);
+    resolver_escaped_clear(&escaped);
+    char *url = form ? resolver_validate_url(api) : NULL;
+    if (!form || !url) {
+        free(form);
+        free(url);
+        curl_easy_cleanup(curl);
+        return VIP_ERR_NOMEM;
+    }
+
+    resolver_buf_t buffer = {0};
+    struct curl_slist *headers = resolver_headers(profile);
+    configure_resolver_request(
+        curl, url, form, profile, headers, &buffer
+    );
+
+    CURLcode curl_status = curl_easy_perform(curl);
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_out);
+
     curl_slist_free_all(headers);
     free(url);
     free(form);
     curl_easy_cleanup(curl);
-    if (rc != CURLE_OK || buf.overflow) {
-        free(buf.data);
-        vip_error_set(error, VIP_ERR_NETWORK, "falha ao consultar resolvedor");
-        return VIP_ERR_NETWORK;
-    }
-    if (!buf.data)
-        buf.data = vip_strdup("");
-    if (!buf.data)
-        return VIP_ERR_NOMEM;
-    *body_out = buf.data;
-    return VIP_OK;
+
+    return finish_resolver_response(
+        &buffer, curl_status, body_out, error
+    );
 }
 
 /* Handle the response payload operation. */
