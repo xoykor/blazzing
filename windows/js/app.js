@@ -454,19 +454,12 @@
         return artworkInFlight[cacheKey];
     }
 
-    function resolveCardLogo(item) {
-        if (!item) {
-            return Promise.resolve("");
-        }
-        if (safeImageUrl(item.logo)) {
-            return Promise.resolve(item.logo);
-        }
-
+function cardIndexInfo(item) {
         var base = String(item.cardIndexBase || "").replace(/\/+$/, "");
         var key = String(item.cardKey || "");
         var version = String(item.cardIndexVersion || "");
         if (!base || !key || !httpUrl(base)) {
-            return resolveOnDemandArtwork(item);
+            return null;
         }
 
         var prefixLength = parseInt(item.cardIndexShardLength || 1, 10);
@@ -475,46 +468,84 @@
         }
 
         var prefix = key.slice(0, prefixLength);
-        var cacheKey = base + "|" + version + "|" + prefix;
+        return {
+            base: base,
+            key: key,
+            version: version,
+            prefix: prefix,
+            cacheKey: base + "|" + version + "|" + prefix
+        };
+    }
 
-        if (cardShardCache[cacheKey]) {
-            item.logo = safeImageUrl(cardShardCache[cacheKey][key] || "");
-            return item.logo ?
-                Promise.resolve(item.logo) :
-                resolveOnDemandArtwork(item);
+    function cardShardUrl(info) {
+        var url = info.base + "/" + info.prefix + ".json";
+        if (info.version) {
+            url += "?v=" + encodeURIComponent(info.version);
+        }
+        return url;
+    }
+
+    function resolveLogoFromRows(item, key, rows) {
+        item.logo = safeImageUrl((rows && rows[key]) || "");
+        return item.logo ? item.logo : resolveOnDemandArtwork(item);
+    }
+
+    function cachedCardShardResult(item, info) {
+        if (!cardShardCache[info.cacheKey]) {
+            return null;
+        }
+        return resolveLogoFromRows(item, info.key, cardShardCache[info.cacheKey]);
+    }
+
+    function cardShardCoolingDown(info) {
+        var failedAt = Number(cardShardFailureAt[info.cacheKey] || 0);
+        return !!failedAt && Date.now() - failedAt < 30000;
+    }
+
+    function loadCardShard(info) {
+        if (cardShardPromises[info.cacheKey]) {
+            return cardShardPromises[info.cacheKey];
         }
 
-        var failedAt = Number(cardShardFailureAt[cacheKey] || 0);
-        if (failedAt && Date.now() - failedAt < 30000) {
+        cardShardPromises[info.cacheKey] = native.netJson(cardShardUrl(info), {
+            timeout: 20000,
+            maxBytes: 4 * 1024 * 1024
+        }).then(function (rows) {
+            cardShardCache[info.cacheKey] =
+                rows && typeof rows === "object" ? rows : {};
+            delete cardShardFailureAt[info.cacheKey];
+            return cardShardCache[info.cacheKey];
+        }).catch(function () {
+            cardShardFailureAt[info.cacheKey] = Date.now();
+            delete cardShardPromises[info.cacheKey];
+            return {};
+        });
+        return cardShardPromises[info.cacheKey];
+    }
+
+    function resolveCardLogo(item) {
+        if (!item) {
+            return Promise.resolve("");
+        }
+        if (safeImageUrl(item.logo)) {
+            return Promise.resolve(item.logo);
+        }
+
+        var info = cardIndexInfo(item);
+        if (!info) {
             return resolveOnDemandArtwork(item);
         }
 
-        if (!cardShardPromises[cacheKey]) {
-            var url = base + "/" + prefix + ".json";
-            if (version) {
-                url += "?v=" + encodeURIComponent(version);
-            }
-
-            cardShardPromises[cacheKey] = native.netJson(url, {
-                timeout: 20000,
-                maxBytes: 4 * 1024 * 1024
-            }).then(function (rows) {
-                cardShardCache[cacheKey] =
-                    rows && typeof rows === "object" ? rows : {};
-                delete cardShardFailureAt[cacheKey];
-                return cardShardCache[cacheKey];
-            }).catch(function () {
-                cardShardFailureAt[cacheKey] = Date.now();
-                delete cardShardPromises[cacheKey];
-                return {};
-            });
+        var cached = cachedCardShardResult(item, info);
+        if (cached) {
+            return Promise.resolve(cached);
+        }
+        if (cardShardCoolingDown(info)) {
+            return resolveOnDemandArtwork(item);
         }
 
-        return cardShardPromises[cacheKey].then(function (rows) {
-            item.logo = safeImageUrl(rows[key] || "");
-            return item.logo ?
-                item.logo :
-                resolveOnDemandArtwork(item);
+        return loadCardShard(info).then(function (rows) {
+            return resolveLogoFromRows(item, info.key, rows);
         });
     }
 
@@ -1161,7 +1192,121 @@
         fillProfile(null);
     }
 
-    function installEvents() {
+function handleSavedProfileChange() {
+        var id = this.value;
+        var profile = loadProfiles().find(function (item) {
+            return item.id === id;
+        });
+        fillProfile(profile || null);
+        $("delete-profile").classList.toggle("hidden", !id);
+    }
+
+    function handleAllCategoryClick() {
+        state.selectedCategory = "all";
+        state.renderLimit = MAX_RENDER;
+        renderAll();
+    }
+
+    function handleSearchInput() {
+        state.query = this.value;
+        state.renderLimit = MAX_RENDER;
+        renderCards();
+    }
+
+    function handleContentTabClick(button) {
+        var kind = button.getAttribute("data-kind");
+        if (kind === state.kind && !state.seriesParent) {
+            return;
+        }
+        loadKind(kind).catch(function (error) {
+            status(
+                $("catalog-status"),
+                error && error.message ? error.message : String(error),
+                true
+            );
+        });
+    }
+
+    function installContentTabEvents() {
+        Array.prototype.forEach.call(
+            document.querySelectorAll(".content-tab"),
+            function (button) {
+                button.addEventListener("click", function () {
+                    handleContentTabClick(button);
+                });
+            }
+        );
+    }
+
+    function handleCatalogShortcut(event) {
+        if (!event.ctrlKey) {
+            return false;
+        }
+        if (event.key === "1") {
+            document.querySelector('[data-kind="live"]').click();
+            return true;
+        }
+        if (event.key === "2") {
+            document.querySelector('[data-kind="vod"]').click();
+            return true;
+        }
+        if (event.key === "3") {
+            document.querySelector('[data-kind="series"]').click();
+            return true;
+        }
+        if (event.key.toLowerCase() === "f" &&
+                !$("browser-view").classList.contains("hidden")) {
+            event.preventDefault();
+            $("search").focus();
+            return true;
+        }
+        return false;
+    }
+
+    function handleGlobalKeydown(event) {
+        if (state.pairingActive && event.key === "Escape") {
+            cancelPairing();
+            return;
+        }
+        if (handleCatalogShortcut(event)) {
+            return;
+        }
+        if (event.key === "Escape" && state.seriesParent) {
+            closeSeries();
+        }
+    }
+
+    function handleNativePlayerState(payload) {
+        if (!payload) {
+            return;
+        }
+        status($("catalog-status"), payload.text || "", !!payload.error);
+        if (payload.error && state.currentPlaying) {
+            tryFallback(payload.text || "Falha de reprodução.").catch(function () {});
+        }
+    }
+
+    function shouldWritePlayerProgress(payload) {
+        if (!payload || !state.currentPlaying ||
+                state.currentPlaying.kind === "live") {
+            return false;
+        }
+        return Date.now() - state.progressWriteAt >= 5000;
+    }
+
+    function handleNativePlayerTime(payload) {
+        if (!shouldWritePlayerProgress(payload)) {
+            return;
+        }
+
+        var now = Date.now();
+        state.progressWriteAt = now;
+        state.progress[state.currentPlaying.key] =
+            Math.max(0, Number(payload.milliseconds) || 0);
+        saveStateObject(STORAGE_PROGRESS, state.progress);
+    }
+
+    function installBasicClickEvents() {
         $("mode-xtream").addEventListener("click", function () {
             setMode("xtream");
         });
@@ -1180,92 +1325,17 @@
                 native.toggleFullscreen();
             }
         });
+    }
 
-        $("saved-profile").addEventListener("change", function () {
-            var id = this.value;
-            var profile = loadProfiles().find(function (item) {
-                return item.id === id;
-            });
-            fillProfile(profile || null);
-            $("delete-profile").classList.toggle("hidden", !id);
-        });
-
-        $("all-category").addEventListener("click", function () {
-            state.selectedCategory = "all";
-            state.renderLimit = MAX_RENDER;
-            renderAll();
-        });
-
-        $("search").addEventListener("input", function () {
-            state.query = this.value;
-            state.renderLimit = MAX_RENDER;
-            renderCards();
-        });
-
-        Array.prototype.forEach.call(document.querySelectorAll(".content-tab"), function (button) {
-            button.addEventListener("click", function () {
-                var kind = button.getAttribute("data-kind");
-                if (kind === state.kind && !state.seriesParent) {
-                    return;
-                }
-                loadKind(kind).catch(function (error) {
-                    status(
-                        $("catalog-status"),
-                        error && error.message ? error.message : String(error),
-                        true
-                    );
-                });
-            });
-        });
-
-        document.addEventListener("keydown", function (event) {
-            if (state.pairingActive && event.key === "Escape") {
-                cancelPairing();
-                return;
-            }
-
-            if (event.ctrlKey && event.key === "1") {
-                document.querySelector('[data-kind="live"]').click();
-            } else if (event.ctrlKey && event.key === "2") {
-                document.querySelector('[data-kind="vod"]').click();
-            } else if (event.ctrlKey && event.key === "3") {
-                document.querySelector('[data-kind="series"]').click();
-            } else if (event.ctrlKey && event.key.toLowerCase() === "f" &&
-                    !$("browser-view").classList.contains("hidden")) {
-                event.preventDefault();
-                $("search").focus();
-            } else if (event.key === "Escape" && state.seriesParent) {
-                closeSeries();
-            }
-        });
-
-        native.onPlayerState(function (payload) {
-            if (!payload) {
-                return;
-            }
-
-            status($("catalog-status"), payload.text || "", !!payload.error);
-            if (payload.error && state.currentPlaying) {
-                tryFallback(payload.text || "Falha de reprodução.").catch(function () {});
-            }
-        });
-
-        native.onPlayerTime(function (payload) {
-            if (!payload || !state.currentPlaying ||
-                    state.currentPlaying.kind === "live") {
-                return;
-            }
-
-            var now = Date.now();
-            if (now - state.progressWriteAt < 5000) {
-                return;
-            }
-
-            state.progressWriteAt = now;
-            state.progress[state.currentPlaying.key] =
-                Math.max(0, Number(payload.milliseconds) || 0);
-            saveStateObject(STORAGE_PROGRESS, state.progress);
-        });
+    function installEvents() {
+        installBasicClickEvents();
+        $("saved-profile").addEventListener("change", handleSavedProfileChange);
+        $("all-category").addEventListener("click", handleAllCategoryClick);
+        $("search").addEventListener("input", handleSearchInput);
+        installContentTabEvents();
+        document.addEventListener("keydown", handleGlobalKeydown);
+        native.onPlayerState(handleNativePlayerState);
+        native.onPlayerTime(handleNativePlayerTime);
     }
 
     function bootstrap() {
