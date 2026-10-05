@@ -10,18 +10,18 @@
 
 Blazzing is a multi-platform IPTV player. Its Linux desktop client is native C17 with X11/XWayland, Cairo/Pango, SQLite and persistent mpv playback; the repository also contains Samsung Tizen and Windows desktop ports.
 
-> **Project status:** **v1.4.8** is the current Linux desktop release. Samsung Tizen and Windows desktop ports are maintained in the same repository. The Windows port currently builds from source/CI and is not yet published as a versioned Windows release. Phone-assisted playlist entry uses an encrypted Cloudflare relay while playlist decryption remains local to the client.
+> **Project status:** **v1.4.10** is the current Linux desktop release. Samsung Tizen and Windows desktop ports are maintained in the same repository. The Windows port currently builds from source/CI and is not yet published as a versioned Windows release. Phone-assisted playlist entry uses an encrypted Cloudflare relay while playlist decryption remains local to the client.
 
 > Use Blazzing only with playlists, servers and content that you are authorized to access.
 
 ## Download
 
-The recommended installation is the official **v1.4.8 Flatpak bundle** from the [GitHub release](https://github.com/xoykor/blazzing/releases/tag/v1.4.8).
+The recommended installation is the official **v1.4.10 Flatpak bundle** from the [GitHub release](https://github.com/xoykor/blazzing/releases/tag/v1.4.10).
 
-After downloading `Blazzing-v1.4.8-x86_64.flatpak`:
+After downloading `Blazzing-v1.4.10-x86_64.flatpak`:
 
 ```sh
-flatpak install --user ./Blazzing-v1.4.8-x86_64.flatpak
+flatpak install --user ./Blazzing-v1.4.10-x86_64.flatpak
 flatpak run io.github.xoykor.Blazzing
 ```
 

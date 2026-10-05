@@ -1,3 +1,10 @@
+## 1.4.10 — 2026-10-05
+
+Linux thumbnail cache refresh:
+
+- cache artwork thumbnails by provider, item and image URL, so a newly published poster is downloaded the next time its card enters the visible viewport;
+- retain lazy loading and the existing bounded thumbnail workers instead of redownloading the full catalog on startup.
+
 ## 1.4.0 — 2026-09-18
 
 Internet pairing replaces LAN pairing:

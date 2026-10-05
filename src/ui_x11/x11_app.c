@@ -917,7 +917,10 @@ static bool sample_artwork_ratio(app_t *a, size_t chidx, double *ratio) {
         return false;
     vip_channel_t *ch = &ACTIVE_CHANNELS(a).items[chidx];
     vip_error_t error = {0};
-    char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
+    char *path = ch->logo_url && ch->logo_url[0]
+                     ? vip_thumbnail_artwork_cache_path(a->cache_dir, ch->provider_id, ch->id,
+                                                        ch->logo_url, &error)
+                     : vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
     image_slot_t *slot = path ? image_cache_slot_get(a, path) : NULL;
     free(path);
     if (!slot || !slot->image || slot->image->height <= 0)
@@ -1920,7 +1923,10 @@ static void enqueue_thumbnail(app_t *a, const vip_channel_t *ch, int64_t priorit
     if (!a->thumbs || !ch || !ch->provider_id || !ch->id || !ch->stream_url)
         return;
     vip_error_t error = {0};
-    char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
+    char *path = ch->logo_url && ch->logo_url[0]
+                     ? vip_thumbnail_artwork_cache_path(a->cache_dir, ch->provider_id, ch->id,
+                                                        ch->logo_url, &error)
+                     : vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, ch->id, &error);
     if (path) {
         struct stat st;
         bool exists = stat(path, &st) == 0 && st.st_size > 0;
@@ -4680,7 +4686,8 @@ static int draw_details_art(app_t *a, const vip_channel_t *ch, const details_vie
         char art_id[256];
         detail_art_id(art_id, sizeof(art_id), ch->id);
         vip_error_t art_error = {0};
-        char *path = vip_thumbnail_cache_path(a->cache_dir, ch->provider_id, art_id, &art_error);
+        char *path = vip_thumbnail_artwork_cache_path(a->cache_dir, ch->provider_id, art_id,
+                                                      art_url, &art_error);
         art_ok = path && draw_cached_image_contain(a, path, art_x, art_y, art_w, art_h);
         free(path);
         if (!art_ok)
@@ -5038,7 +5045,11 @@ static void draw_browse_card_shell(app_t *a, const card_layout_t *layout, int cx
 static void draw_browse_card_image(app_t *a, vip_channel_t *channel, const card_layout_t *layout,
                                    int cx, int cy, int row_offset, int col, bool active_card) {
     vip_error_t error = {0};
-    char *path = vip_thumbnail_cache_path(a->cache_dir, channel->provider_id, channel->id, &error);
+    char *path = channel->logo_url && channel->logo_url[0]
+                     ? vip_thumbnail_artwork_cache_path(a->cache_dir, channel->provider_id,
+                                                        channel->id, channel->logo_url, &error)
+                     : vip_thumbnail_cache_path(a->cache_dir, channel->provider_id, channel->id,
+                                                &error);
     bool image_ok = path &&
                     draw_cached_image_contain(a, path, cx, cy, layout->card_w, layout->art_h);
     bool can_load_image =

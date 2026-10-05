@@ -487,17 +487,25 @@ static vip_status_t mkdir_parents(const char *path, vip_error_t *error) {
 }
 
 /* Handle the thumbnail cache path operation. */
-char *vip_thumbnail_cache_path(const char *cache_dir, const char *provider_id, const char *channel_id,
-                               vip_error_t *error) {
+static char *thumbnail_cache_path(const char *cache_dir, const char *provider_id,
+                                  const char *channel_id, const char *artwork_url,
+                                  vip_error_t *error) {
     if (!cache_dir || !provider_id || !channel_id)
         return NULL;
     EVP_MD_CTX *ctx = EVP_MD_CTX_new();
     unsigned char digest[32];
     unsigned int len = 0;
+    const bool has_artwork_url = artwork_url && artwork_url[0];
+    const char *aspect_tag = has_artwork_url ? "\0aspect-v3" : "\0aspect-v2";
     if (!ctx || EVP_DigestInit_ex(ctx, EVP_sha256(), NULL) != 1 ||
         EVP_DigestUpdate(ctx, provider_id, strlen(provider_id)) != 1 || EVP_DigestUpdate(ctx, "\0", 1) != 1 ||
         EVP_DigestUpdate(ctx, channel_id, strlen(channel_id)) != 1 ||
-        EVP_DigestUpdate(ctx, "\0aspect-v2", 10u) != 1 || EVP_DigestFinal_ex(ctx, digest, &len) != 1) {
+        (has_artwork_url &&
+         (EVP_DigestUpdate(ctx, "\0artwork-url-v1\0",
+                           sizeof("\0artwork-url-v1\0") - 1u) != 1 ||
+          EVP_DigestUpdate(ctx, artwork_url, strlen(artwork_url)) != 1)) ||
+        EVP_DigestUpdate(ctx, aspect_tag, 10u) != 1 ||
+        EVP_DigestFinal_ex(ctx, digest, &len) != 1) {
         EVP_MD_CTX_free(ctx);
         vip_error_set(error, VIP_ERR_IO, "falha ao calcular chave SHA-256");
         return NULL;
@@ -515,6 +523,17 @@ char *vip_thumbnail_cache_path(const char *cache_dir, const char *provider_id, c
     }
     snprintf(path, n, "%s/%s.jpg", cache_dir, hex);
     return path;
+}
+
+char *vip_thumbnail_cache_path(const char *cache_dir, const char *provider_id, const char *channel_id,
+                               vip_error_t *error) {
+    return thumbnail_cache_path(cache_dir, provider_id, channel_id, NULL, error);
+}
+
+char *vip_thumbnail_artwork_cache_path(const char *cache_dir, const char *provider_id,
+                                       const char *channel_id, const char *artwork_url,
+                                       vip_error_t *error) {
+    return thumbnail_cache_path(cache_dir, provider_id, channel_id, artwork_url, error);
 }
 
 /* Validate rgb in the thumbnail subsystem. */
@@ -1124,8 +1143,11 @@ vip_status_t vip_thumbnail_capture_with_decoder(const vip_thumbnail_request_t *r
         return VIP_ERR_INVALID_ARGUMENT;
     }
     *path_out = NULL;
-    char *path =
-        vip_thumbnail_cache_path(context->cache_dir, request->provider_id, request->channel_id, error);
+    char *path = request->logo_url && request->logo_url[0]
+                     ? vip_thumbnail_artwork_cache_path(context->cache_dir, request->provider_id,
+                                                        request->channel_id, request->logo_url, error)
+                     : vip_thumbnail_cache_path(context->cache_dir, request->provider_id,
+                                                request->channel_id, error);
     if (!path)
         return error ? error->code : VIP_ERR_IO;
 

@@ -20,6 +20,12 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.4.10" date="2026-10-05">
+      <description>
+        <p>Refreshes Linux card thumbnails when artwork URLs change, loading updated images lazily as cards enter the visible viewport.</p>
+        <p xml:lang="pt-BR">Atualiza as miniaturas dos cards no Linux quando a URL da capa muda, carregando as novas imagens sob demanda conforme os cards aparecem na tela.</p>
+      </description>
+    </release>
     <release version="1.4.8" date="2026-09-24">
       <description>
         <p>Adds on-demand artwork resolution for visible movie and series cards, backed by the shared Blazzing artwork service and TMDB poster URLs.</p>

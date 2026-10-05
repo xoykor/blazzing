@@ -71,6 +71,11 @@ vip_status_t vip_thumbnail_scheduler_enqueue(vip_thumbnail_scheduler_t *schedule
 char *vip_thumbnail_cache_path(const char *cache_dir, const char *provider_id, const char *channel_id,
                                vip_error_t *error);
 
+/** Create a deterministic cache path that also changes when artwork URL changes. */
+char *vip_thumbnail_artwork_cache_path(const char *cache_dir, const char *provider_id,
+                                       const char *channel_id, const char *artwork_url,
+                                       vip_error_t *error);
+
 /** Validate RGB dimensions/stride before image encoding. */
 vip_status_t vip_thumbnail_validate_rgb(const uint8_t *rgb, size_t width, size_t height, size_t stride,
                                         vip_error_t *error);
