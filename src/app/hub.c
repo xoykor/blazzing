@@ -385,12 +385,16 @@ int vip_hub_run(void) {
             return 0;
         if (action == HUB_ACTION_IPTV) {
             int rc = vip_x11_app_run();
-            if (rc != 0)
+            if (rc != 0) {
+                vip_error_clear(NULL);
                 return rc;
+            }
         } else if (action == HUB_ACTION_PLUTO) {
             int rc = vip_pluto_app_run();
-            if (rc != 0)
+            if (rc != 0) {
+                vip_error_clear(NULL);
                 fprintf(stderr, "[hub] Pluto TV encerrou com codigo %d\n", rc);
+            }
         }
     }
 }
