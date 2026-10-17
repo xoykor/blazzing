@@ -1071,6 +1071,7 @@
                     reason || "Nenhuma fonte alternativa pôde ser reproduzida.",
                     true
                 );
+                await native.playerStop();
                 return;
             }
 

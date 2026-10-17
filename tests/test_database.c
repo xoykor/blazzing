@@ -30,6 +30,10 @@ int main(void) {
                         .logo_url = "https://example/logo.png",
                         .stream_url = "https://example/live.ts",
                         .epg_channel_id = "news",
+                        .fallback_id = "fb_42",
+                        .fallback_base = "https://fallback.example",
+                        .fallback_version = "v1",
+                        .fallback_shard_length = 3,
                         .position = 0};
     TEST_STATUS(vip_channel_list_push(&channels, &ch, &error), VIP_OK, &error);
     TEST_STATUS(vip_database_replace_catalog(db, "p", &categories, &channels, &error), VIP_OK, &error);
@@ -39,6 +43,10 @@ int main(void) {
     TEST_STATUS(vip_database_load_channels(db, "p", &loaded, &error), VIP_OK, &error);
     TEST_CHECK(loaded.len == 1);
     TEST_CHECK(strcmp(loaded.items[0].id, "42") == 0);
+    TEST_CHECK(loaded.items[0].fallback_id && strcmp(loaded.items[0].fallback_id, "fb_42") == 0);
+    TEST_CHECK(loaded.items[0].fallback_base && strcmp(loaded.items[0].fallback_base, "https://fallback.example") == 0);
+    TEST_CHECK(loaded.items[0].fallback_version && strcmp(loaded.items[0].fallback_version, "v1") == 0);
+    TEST_CHECK(loaded.items[0].fallback_shard_length == 3);
     TEST_STATUS(vip_database_set_favorite(db, "p", "42", true, &error), VIP_OK, &error);
     bool favorite_flags[1] = {false};
     TEST_STATUS(vip_database_load_favorite_flags(db, "p", &loaded, favorite_flags, 1, &error), VIP_OK,

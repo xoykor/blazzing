@@ -59,7 +59,13 @@
         try { window.webapis.avplay.close(); } catch (ignoreClose) {}
     }
 
+    var html5ResumeListener = null;
+
     function stopHtml5() {
+        if (html5ResumeListener) {
+            video.removeEventListener("loadedmetadata", html5ResumeListener);
+            html5ResumeListener = null;
+        }
         try { video.pause(); } catch (ignorePause) {}
         video.removeAttribute("src");
         try { video.load(); } catch (ignoreLoad) {}
@@ -250,12 +256,18 @@
         video.classList.remove("hidden");
         video.src = url || item.url;
         emitState("Preparando…");
-        video.addEventListener("loadedmetadata", function resumeOnce() {
-            video.removeEventListener("loadedmetadata", resumeOnce);
-            if (resumeMs) {
+        if (html5ResumeListener) {
+            video.removeEventListener("loadedmetadata", html5ResumeListener);
+            html5ResumeListener = null;
+        }
+        if (resumeMs) {
+            html5ResumeListener = function () {
+                video.removeEventListener("loadedmetadata", html5ResumeListener);
+                html5ResumeListener = null;
                 try { video.currentTime = resumeMs / 1000; } catch (ignoreResume) {}
-            }
-        });
+            };
+            video.addEventListener("loadedmetadata", html5ResumeListener);
+        }
         promise = video.play();
         if (promise && promise.catch) {
             promise.catch(function () {
@@ -349,6 +361,12 @@
         if (!usingAvPlay) {
             setScreenSaver(true);
             emitState("Concluído");
+        }
+    });
+
+    document.addEventListener("visibilitychange", function () {
+        if (document.hidden) {
+            stop();
         }
     });
 

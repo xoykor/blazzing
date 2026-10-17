@@ -140,7 +140,9 @@ static vip_status_t request_copy(vip_thumbnail_request_t *dst, const vip_thumbna
     dst->artwork_kind = vip_strdup_nullable(src->artwork_kind);
     dst->priority = src->priority;
     if (!dst->provider_id || !dst->channel_id || !dst->stream_url ||
-        (src->title && !dst->title) || (src->artwork_kind && !dst->artwork_kind)) {
+        (src->logo_url && src->logo_url[0] && !dst->logo_url) ||
+        (src->title && src->title[0] && !dst->title) ||
+        (src->artwork_kind && src->artwork_kind[0] && !dst->artwork_kind)) {
         request_clear(dst);
         vip_error_set(error, VIP_ERR_NOMEM, "sem memória para pedido de thumbnail");
         return VIP_ERR_NOMEM;
@@ -475,9 +477,12 @@ static vip_status_t mkdir_parents(const char *path, vip_error_t *error) {
         if (*p == '/') {
             *p = '\0';
             if (mkdir(tmp, 0755) != 0 && errno != EEXIST) {
-                vip_error_set(error, VIP_ERR_IO, "não foi possível criar %s: %s", tmp, strerror(errno));
-                free(tmp);
-                return VIP_ERR_IO;
+                struct stat st;
+                if (stat(tmp, &st) != 0 || !S_ISDIR(st.st_mode)) {
+                    vip_error_set(error, VIP_ERR_IO, "não foi possível criar %s: %s", tmp, strerror(errno));
+                    free(tmp);
+                    return VIP_ERR_IO;
+                }
             }
             *p = '/';
         }

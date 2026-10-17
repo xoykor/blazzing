@@ -167,9 +167,25 @@ int main(void) {
 
     vip_channel_list_clear(&channels);
     vip_category_list_clear(&cats);
+    /* Test duplicate tvg-id in the same playlist */
+    fp = fopen(path, "w");
+    TEST_CHECK(fp != NULL);
+    fputs("#EXTM3U\n"
+          "#EXTINF:-1 tvg-id=\"dup\" group-title=\"G1\",Canal 1\n"
+          "https://stream/1.ts\n"
+          "#EXTINF:-1 tvg-id=\"dup\" group-title=\"G1\",Canal 2\n"
+          "https://stream/2.ts\n", fp);
+    TEST_CHECK(fclose(fp) == 0);
+    vip_category_list_init(&cats);
+    vip_channel_list_init(&channels);
+    TEST_STATUS(vip_m3u_load(path, &cats, &channels, provider_id, &error), VIP_OK, &error);
+    TEST_CHECK(channels.len == 2);
+    TEST_CHECK(strcmp(channels.items[0].id, channels.items[1].id) != 0);
+    vip_channel_list_clear(&channels);
+    vip_category_list_clear(&cats);
+
     TEST_CHECK(unlink(shard_path) == 0);
     TEST_CHECK(rmdir(cards_dir) == 0);
-
     unlink(path);
     return 0;
 }

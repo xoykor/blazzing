@@ -24,6 +24,13 @@ static vip_status_t db_error(vip_database_t *db, vip_error_t *error, const char 
     return VIP_ERR_DATABASE;
 }
 
+/* Handle db error and unlock mutex in a thread-safe manner. */
+static vip_status_t db_error_unlock(vip_database_t *db, vip_error_t *error, const char *prefix) {
+    vip_status_t st = db_error(db, error, prefix);
+    pthread_mutex_unlock(&db->mutex);
+    return st;
+}
+
 /* Handle the exec sql operation. */
 static vip_status_t exec_sql(vip_database_t *db, const char *sql, vip_error_t *error) {
     char *msg = NULL;
@@ -49,6 +56,7 @@ static vip_status_t migrate(vip_database_t *db, vip_error_t *error) {
         "CREATE TABLE IF NOT EXISTS channels("
         " provider_id TEXT NOT NULL, channel_id TEXT NOT NULL, category_id TEXT, name TEXT NOT NULL,"
         " logo_url TEXT, stream_url TEXT NOT NULL, epg_channel_id TEXT, position INTEGER NOT NULL DEFAULT 0,"
+        " fallback_id TEXT, fallback_base TEXT, fallback_version TEXT, fallback_shard_length INTEGER NOT NULL DEFAULT 0,"
         " PRIMARY KEY(provider_id, channel_id));"
         "CREATE INDEX IF NOT EXISTS channels_category_idx ON channels(provider_id, category_id, position);"
         "CREATE TABLE IF NOT EXISTS favorites("
@@ -84,7 +92,14 @@ static vip_status_t migrate(vip_database_t *db, vip_error_t *error) {
         " genre TEXT, release_date TEXT, rating TEXT, duration TEXT, cast TEXT, director TEXT, "
         "youtube_trailer TEXT,"
         " updated_at INTEGER NOT NULL DEFAULT(unixepoch()), PRIMARY KEY(provider_id, media_id));";
-    return exec_sql(db, sql, error);
+    vip_status_t st = exec_sql(db, sql, error);
+    if (st != VIP_OK)
+        return st;
+    (void)exec_sql(db, "ALTER TABLE channels ADD COLUMN fallback_id TEXT;", NULL);
+    (void)exec_sql(db, "ALTER TABLE channels ADD COLUMN fallback_base TEXT;", NULL);
+    (void)exec_sql(db, "ALTER TABLE channels ADD COLUMN fallback_version TEXT;", NULL);
+    (void)exec_sql(db, "ALTER TABLE channels ADD COLUMN fallback_shard_length INTEGER NOT NULL DEFAULT 0;", NULL);
+    return VIP_OK;
 }
 
 /* Open common. */
@@ -100,13 +115,14 @@ static vip_status_t open_common(vip_database_t **out, const char *path, vip_erro
                              SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, NULL);
     if (rc != SQLITE_OK) {
         vip_error_set(error, VIP_ERR_DATABASE, "não foi possível abrir SQLite: %s",
-                      db->conn ? sqlite3_errmsg(db->conn) : "erro desconhecido");
+                       db->conn ? sqlite3_errmsg(db->conn) : "erro desconhecido");
         if (db->conn)
             sqlite3_close(db->conn);
         pthread_mutex_destroy(&db->mutex);
         free(db);
         return VIP_ERR_DATABASE;
     }
+    sqlite3_busy_timeout(db->conn, 5000);
     vip_status_t st = migrate(db, error);
     if (st != VIP_OK) {
         vip_database_close(db);
@@ -160,13 +176,17 @@ vip_status_t vip_database_replace_catalog(vip_database_t *db, const char *provid
         sqlite3_prepare_v2(db->conn, "DELETE FROM channels WHERE provider_id=?1", -1, &delch, NULL) !=
             SQLITE_OK ||
         sqlite3_prepare_v2(
-            db->conn, "INSERT INTO categories(provider_id,category_id,name,position) VALUES(?1,?2,?3,?4)", -1,
+            db->conn, "INSERT INTO categories(provider_id,category_id,name,position) VALUES(?1,?2,?3,?4) "
+                      "ON CONFLICT(provider_id,category_id) DO UPDATE SET name=excluded.name, position=excluded.position", -1,
             &inscat, NULL) != SQLITE_OK ||
         sqlite3_prepare_v2(
             db->conn,
             "INSERT INTO "
-            "channels(provider_id,channel_id,category_id,name,logo_url,stream_url,epg_channel_id,position)"
-            " VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+            "channels(provider_id,channel_id,category_id,name,logo_url,stream_url,epg_channel_id,position,fallback_id,fallback_base,fallback_version,fallback_shard_length)"
+            " VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12) "
+            "ON CONFLICT(provider_id,channel_id) DO UPDATE SET category_id=excluded.category_id, name=excluded.name, "
+            "logo_url=excluded.logo_url, stream_url=excluded.stream_url, epg_channel_id=excluded.epg_channel_id, position=excluded.position, "
+            "fallback_id=excluded.fallback_id, fallback_base=excluded.fallback_base, fallback_version=excluded.fallback_version, fallback_shard_length=excluded.fallback_shard_length",
             -1, &insch, NULL) != SQLITE_OK) {
         st = db_error(db, error, "falha ao preparar catálogo");
         goto rollback;
@@ -207,6 +227,10 @@ vip_status_t vip_database_replace_catalog(vip_database_t *db, const char *provid
         sqlite3_bind_text(insch, 6, c->stream_url, -1, SQLITE_TRANSIENT);
         bind_nullable(insch, 7, c->epg_channel_id);
         sqlite3_bind_int(insch, 8, c->position);
+        bind_nullable(insch, 9, c->fallback_id);
+        bind_nullable(insch, 10, c->fallback_base);
+        bind_nullable(insch, 11, c->fallback_version);
+        sqlite3_bind_int(insch, 12, (int)c->fallback_shard_length);
         if (sqlite3_step(insch) != SQLITE_DONE) {
             st = db_error(db, error, "falha ao inserir canal");
             goto rollback;
@@ -234,12 +258,11 @@ vip_status_t vip_database_load_channels(vip_database_t *db, const char *provider
     vip_channel_list_init(out);
     pthread_mutex_lock(&db->mutex);
     sqlite3_stmt *stmt = NULL;
-    const char *sql = "SELECT channel_id,category_id,name,logo_url,stream_url,epg_channel_id,position"
+    const char *sql = "SELECT channel_id,category_id,name,logo_url,stream_url,epg_channel_id,position,"
+                      "fallback_id,fallback_base,fallback_version,fallback_shard_length"
                       " FROM channels WHERE provider_id=?1 ORDER BY position";
-    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK) {
-        pthread_mutex_unlock(&db->mutex);
-        return db_error(db, error, "falha ao ler canais");
-    }
+    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return db_error_unlock(db, error, "falha ao ler canais");
     sqlite3_bind_text(stmt, 1, provider_id, -1, SQLITE_TRANSIENT);
     vip_status_t st = VIP_OK;
     while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -252,6 +275,10 @@ vip_status_t vip_database_load_channels(vip_database_t *db, const char *provider
             .stream_url = (char *)sqlite3_column_text(stmt, 4),
             .epg_channel_id = (char *)sqlite3_column_text(stmt, 5),
             .position = sqlite3_column_int(stmt, 6),
+            .fallback_id = (char *)sqlite3_column_text(stmt, 7),
+            .fallback_base = (char *)sqlite3_column_text(stmt, 8),
+            .fallback_version = (char *)sqlite3_column_text(stmt, 9),
+            .fallback_shard_length = (size_t)sqlite3_column_int(stmt, 10),
         };
         st = vip_channel_list_push(out, &c, error);
         if (st != VIP_OK)
@@ -274,17 +301,15 @@ vip_status_t vip_database_set_favorite(vip_database_t *db, const char *provider_
     const char *sql =
         favorite ? "INSERT INTO favorites(provider_id,channel_id) VALUES(?1,?2) ON CONFLICT DO NOTHING"
                  : "DELETE FROM favorites WHERE provider_id=?1 AND channel_id=?2";
-    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK) {
-        pthread_mutex_unlock(&db->mutex);
-        return db_error(db, error, "falha ao preparar favorito");
-    }
+    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return db_error_unlock(db, error, "falha ao preparar favorito");
     sqlite3_bind_text(stmt, 1, provider_id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, channel_id, -1, SQLITE_TRANSIENT);
     int rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    pthread_mutex_unlock(&db->mutex);
     if (rc != SQLITE_DONE)
-        return db_error(db, error, "falha ao atualizar favorito");
+        return db_error_unlock(db, error, "falha ao atualizar favorito");
+    pthread_mutex_unlock(&db->mutex);
     return VIP_OK;
 }
 
@@ -301,10 +326,8 @@ vip_status_t vip_database_set_thumbnail(vip_database_t *db, const char *provider
         " VALUES(?1,?2,?3,?4,?5,?6)"
         " ON CONFLICT(provider_id,channel_id) DO UPDATE SET path=excluded.path,source=excluded.source,"
         " generated_at=excluded.generated_at,last_verified=excluded.last_verified";
-    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK) {
-        pthread_mutex_unlock(&db->mutex);
-        return db_error(db, error, "falha ao preparar thumbnail");
-    }
+    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return db_error_unlock(db, error, "falha ao preparar thumbnail");
     sqlite3_bind_text(stmt, 1, provider_id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, channel_id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 3, path, -1, SQLITE_TRANSIENT);
@@ -313,9 +336,9 @@ vip_status_t vip_database_set_thumbnail(vip_database_t *db, const char *provider
     sqlite3_bind_int64(stmt, 6, last_verified);
     int rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    pthread_mutex_unlock(&db->mutex);
     if (rc != SQLITE_DONE)
-        return db_error(db, error, "falha ao salvar thumbnail");
+        return db_error_unlock(db, error, "falha ao salvar thumbnail");
+    pthread_mutex_unlock(&db->mutex);
     return VIP_OK;
 }
 
@@ -329,10 +352,8 @@ vip_status_t vip_database_load_favorite_flags(vip_database_t *db, const char *pr
     pthread_mutex_lock(&db->mutex);
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(db->conn, "SELECT channel_id FROM favorites WHERE provider_id=?1", -1, &stmt,
-                           NULL) != SQLITE_OK) {
-        pthread_mutex_unlock(&db->mutex);
-        return db_error(db, error, "falha ao ler favoritos");
-    }
+                           NULL) != SQLITE_OK)
+        return db_error_unlock(db, error, "falha ao ler favoritos");
     sqlite3_bind_text(stmt, 1, provider_id, -1, SQLITE_TRANSIENT);
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         const char *id = (const char *)sqlite3_column_text(stmt, 0);
@@ -451,10 +472,8 @@ vip_status_t vip_database_save_profile(vip_database_t *db, const vip_profile_t *
                       " ON CONFLICT(profile_id) DO UPDATE SET name=excluded.name,type=excluded.type,"
                       " server=excluded.server,server_alt=excluded.server_alt,username=excluded.username,"
                       "last_used=unixepoch()";
-    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK) {
-        pthread_mutex_unlock(&db->mutex);
-        return db_error(db, error, "falha ao preparar perfil");
-    }
+    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return db_error_unlock(db, error, "falha ao preparar perfil");
     sqlite3_bind_text(stmt, 1, profile->profile_id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, profile->name, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(stmt, 3, (int)profile->type);
@@ -463,9 +482,9 @@ vip_status_t vip_database_save_profile(vip_database_t *db, const vip_profile_t *
     bind_nullable(stmt, 6, profile->username);
     int rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    pthread_mutex_unlock(&db->mutex);
     if (rc != SQLITE_DONE)
-        return db_error(db, error, "falha ao salvar perfil");
+        return db_error_unlock(db, error, "falha ao salvar perfil");
+    pthread_mutex_unlock(&db->mutex);
     vip_error_clear(error);
     return VIP_OK;
 }
@@ -480,10 +499,8 @@ vip_status_t vip_database_list_profiles(vip_database_t *db, vip_profile_list_t *
     if (sqlite3_prepare_v2(db->conn,
                            "SELECT profile_id,name,type,server,server_alt,username,last_used FROM profiles "
                            "ORDER BY last_used DESC,name",
-                           -1, &stmt, NULL) != SQLITE_OK) {
-        pthread_mutex_unlock(&db->mutex);
-        return db_error(db, error, "falha ao listar perfis");
-    }
+                           -1, &stmt, NULL) != SQLITE_OK)
+        return db_error_unlock(db, error, "falha ao listar perfis");
     vip_status_t st = VIP_OK;
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         const unsigned char *pid = sqlite3_column_text(stmt, 0);
@@ -521,24 +538,22 @@ vip_status_t vip_database_touch_profile(vip_database_t *db, const char *profile_
     pthread_mutex_lock(&db->mutex);
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(db->conn, "UPDATE profiles SET last_used=unixepoch() WHERE profile_id=?1", -1,
-                           &stmt, NULL) != SQLITE_OK) {
-        pthread_mutex_unlock(&db->mutex);
-        return db_error(db, error, "falha ao atualizar perfil");
-    }
+                           &stmt, NULL) != SQLITE_OK)
+        return db_error_unlock(db, error, "falha ao atualizar perfil");
     sqlite3_bind_text(stmt, 1, profile_id, -1, SQLITE_TRANSIENT);
     int rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    pthread_mutex_unlock(&db->mutex);
     if (rc != SQLITE_DONE)
-        return db_error(db, error, "falha ao atualizar perfil");
+        return db_error_unlock(db, error, "falha ao atualizar perfil");
+    pthread_mutex_unlock(&db->mutex);
     vip_error_clear(error);
     return VIP_OK;
 }
 
 /* Set progress in the database. */
 vip_status_t vip_database_set_progress(vip_database_t *db, const char *provider_id, const char *channel_id,
-                                       double position_seconds, double duration_seconds, bool completed,
-                                       vip_error_t *error) {
+                                        double position_seconds, double duration_seconds, bool completed,
+                                        vip_error_t *error) {
     if (!db || !provider_id || !channel_id)
         return VIP_ERR_INVALID_ARGUMENT;
     if (position_seconds < 0.0)
@@ -553,10 +568,8 @@ vip_status_t vip_database_set_progress(vip_database_t *db, const char *provider_
         " VALUES(?1,?2,?3,?4,?5,unixepoch())"
         " ON CONFLICT(provider_id,channel_id) DO UPDATE SET position_seconds=excluded.position_seconds,"
         " duration_seconds=excluded.duration_seconds,completed=excluded.completed,updated_at=unixepoch()";
-    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK) {
-        pthread_mutex_unlock(&db->mutex);
-        return db_error(db, error, "falha ao preparar progresso");
-    }
+    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return db_error_unlock(db, error, "falha ao preparar progresso");
     sqlite3_bind_text(stmt, 1, provider_id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, channel_id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_double(stmt, 3, position_seconds);
@@ -564,9 +577,9 @@ vip_status_t vip_database_set_progress(vip_database_t *db, const char *provider_
     sqlite3_bind_int(stmt, 5, completed ? 1 : 0);
     int rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    pthread_mutex_unlock(&db->mutex);
     if (rc != SQLITE_DONE)
-        return db_error(db, error, "falha ao salvar progresso");
+        return db_error_unlock(db, error, "falha ao salvar progresso");
+    pthread_mutex_unlock(&db->mutex);
     vip_error_clear(error);
     return VIP_OK;
 }
@@ -582,10 +595,8 @@ vip_status_t vip_database_get_progress(vip_database_t *db, const char *provider_
     if (sqlite3_prepare_v2(db->conn,
                            "SELECT position_seconds,duration_seconds,completed,updated_at FROM "
                            "watch_progress WHERE provider_id=?1 AND channel_id=?2",
-                           -1, &stmt, NULL) != SQLITE_OK) {
-        pthread_mutex_unlock(&db->mutex);
-        return db_error(db, error, "falha ao consultar progresso");
-    }
+                           -1, &stmt, NULL) != SQLITE_OK)
+        return db_error_unlock(db, error, "falha ao consultar progresso");
     sqlite3_bind_text(stmt, 1, provider_id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, channel_id, -1, SQLITE_TRANSIENT);
     if (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -612,10 +623,8 @@ vip_status_t vip_database_load_progress(vip_database_t *db, const char *provider
     if (sqlite3_prepare_v2(db->conn,
                            "SELECT channel_id,position_seconds,duration_seconds,completed,updated_at FROM "
                            "watch_progress WHERE provider_id=?1",
-                           -1, &stmt, NULL) != SQLITE_OK) {
-        pthread_mutex_unlock(&db->mutex);
-        return db_error(db, error, "falha ao carregar progresso");
-    }
+                           -1, &stmt, NULL) != SQLITE_OK)
+        return db_error_unlock(db, error, "falha ao carregar progresso");
     sqlite3_bind_text(stmt, 1, provider_id, -1, SQLITE_TRANSIENT);
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         const char *id = (const char *)sqlite3_column_text(stmt, 0);
@@ -655,10 +664,8 @@ vip_status_t vip_database_set_series_progress(vip_database_t *db, const char *pr
         " VALUES(?1,?2,?3,?4,?5,unixepoch())"
         " ON CONFLICT(provider_id,series_id) DO UPDATE SET last_episode_id=excluded.last_episode_id,"
         " watched_count=excluded.watched_count,total_count=excluded.total_count,updated_at=unixepoch()";
-    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK) {
-        pthread_mutex_unlock(&db->mutex);
-        return db_error(db, error, "falha ao preparar progresso da série");
-    }
+    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return db_error_unlock(db, error, "falha ao preparar progresso da série");
     sqlite3_bind_text(stmt, 1, provider_id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, series_id, -1, SQLITE_TRANSIENT);
     bind_nullable(stmt, 3, last_episode_id);
@@ -666,9 +673,9 @@ vip_status_t vip_database_set_series_progress(vip_database_t *db, const char *pr
     sqlite3_bind_int(stmt, 5, total_count);
     int rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    pthread_mutex_unlock(&db->mutex);
     if (rc != SQLITE_DONE)
-        return db_error(db, error, "falha ao salvar progresso da série");
+        return db_error_unlock(db, error, "falha ao salvar progresso da série");
+    pthread_mutex_unlock(&db->mutex);
     vip_error_clear(error);
     return VIP_OK;
 }
@@ -685,10 +692,8 @@ vip_status_t vip_database_load_series_progress(vip_database_t *db, const char *p
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(
             db->conn, "SELECT series_id,watched_count,total_count FROM series_progress WHERE provider_id=?1",
-            -1, &stmt, NULL) != SQLITE_OK) {
-        pthread_mutex_unlock(&db->mutex);
-        return db_error(db, error, "falha ao carregar progresso das séries");
-    }
+            -1, &stmt, NULL) != SQLITE_OK)
+        return db_error_unlock(db, error, "falha ao carregar progresso das séries");
     sqlite3_bind_text(stmt, 1, provider_id, -1, SQLITE_TRANSIENT);
     int rc = SQLITE_DONE;
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
@@ -704,9 +709,9 @@ vip_status_t vip_database_load_series_progress(vip_database_t *db, const char *p
         }
     }
     sqlite3_finalize(stmt);
-    pthread_mutex_unlock(&db->mutex);
     if (rc != SQLITE_DONE)
-        return db_error(db, error, "falha ao carregar progresso das séries");
+        return db_error_unlock(db, error, "falha ao carregar progresso das séries");
+    pthread_mutex_unlock(&db->mutex);
     vip_error_clear(error);
     return VIP_OK;
 }
@@ -731,10 +736,8 @@ vip_status_t vip_database_get_series_progress(vip_database_t *db, const char *pr
     if (sqlite3_prepare_v2(db->conn,
                            "SELECT last_episode_id,watched_count,total_count,updated_at FROM series_progress "
                            "WHERE provider_id=?1 AND series_id=?2",
-                           -1, &stmt, NULL) != SQLITE_OK) {
-        pthread_mutex_unlock(&db->mutex);
-        return db_error(db, error, "falha ao consultar progresso da série");
-    }
+                           -1, &stmt, NULL) != SQLITE_OK)
+        return db_error_unlock(db, error, "falha ao consultar progresso da série");
     sqlite3_bind_text(stmt, 1, provider_id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, series_id, -1, SQLITE_TRANSIENT);
     if (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -769,10 +772,8 @@ vip_status_t vip_database_set_media_metadata(vip_database_t *db, const char *pro
         " rating=excluded.rating,duration=excluded.duration,[cast]=excluded.[cast],director=excluded."
         "director,"
         " youtube_trailer=excluded.youtube_trailer,updated_at=unixepoch()";
-    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK) {
-        pthread_mutex_unlock(&db->mutex);
-        return db_error(db, error, "falha ao preparar cache de metadados");
-    }
+    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return db_error_unlock(db, error, "falha ao preparar cache de metadados");
     sqlite3_bind_text(stmt, 1, provider_id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, media_id, -1, SQLITE_TRANSIENT);
     bind_nullable(stmt, 3, metadata->plot);
@@ -787,9 +788,9 @@ vip_status_t vip_database_set_media_metadata(vip_database_t *db, const char *pro
     bind_nullable(stmt, 12, metadata->youtube_trailer);
     int rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    pthread_mutex_unlock(&db->mutex);
     if (rc != SQLITE_DONE)
-        return db_error(db, error, "falha ao salvar cache de metadados");
+        return db_error_unlock(db, error, "falha ao salvar cache de metadados");
+    pthread_mutex_unlock(&db->mutex);
     vip_error_clear(error);
     return VIP_OK;
 }
@@ -817,10 +818,8 @@ vip_status_t vip_database_get_media_metadata(vip_database_t *db, const char *pro
                       "plot,cover_url,backdrop_url,genre,release_date,rating,duration,[cast],director,"
                       "youtube_trailer,updated_at"
                       " FROM media_metadata WHERE provider_id=?1 AND media_id=?2";
-    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK) {
-        pthread_mutex_unlock(&db->mutex);
-        return db_error(db, error, "falha ao consultar cache de metadados");
-    }
+    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return db_error_unlock(db, error, "falha ao consultar cache de metadados");
     sqlite3_bind_text(stmt, 1, provider_id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, media_id, -1, SQLITE_TRANSIENT);
     int rc = sqlite3_step(stmt);
@@ -841,11 +840,11 @@ vip_status_t vip_database_get_media_metadata(vip_database_t *db, const char *pro
             *found_out = true;
     }
     sqlite3_finalize(stmt);
-    pthread_mutex_unlock(&db->mutex);
     if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
         vip_media_metadata_clear(metadata_out);
-        return db_error(db, error, "falha ao consultar cache de metadados");
+        return db_error_unlock(db, error, "falha ao consultar cache de metadados");
     }
+    pthread_mutex_unlock(&db->mutex);
     vip_error_clear(error);
     return VIP_OK;
 }

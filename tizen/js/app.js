@@ -709,7 +709,7 @@
         var copy;
         var saved;
 
-        if (profile.type !== "m3u" && !byId("save-profile").checked) {
+        if (!byId("save-profile").checked) {
             return profile;
         }
 
@@ -1213,6 +1213,44 @@
         }).catch(function (error) {
             showToast(error.message || "Falha ao carregar catálogo.");
         });
+    }
+
+    function bindCatalogSections() {
+        Array.prototype.forEach.call(
+            document.querySelectorAll("[data-section]"),
+            function (button) {
+                button.addEventListener("click", function () {
+                    openCatalog(button.getAttribute("data-section"));
+                });
+            }
+        );
+    }
+
+    function toggleFavoritesFilter() {
+        state.favoritesOnly = !state.favoritesOnly;
+        byId("favorites-button").classList.toggle(
+            "active",
+            state.favoritesOnly
+        );
+        applyFilters();
+    }
+
+    function refreshCurrentPlaylist() {
+        if (!state.profile || state.profile.type !== "m3u") {
+            showToast("Nenhuma playlist M3U aberta.");
+            return;
+        }
+        connectM3u(state.profile, true, state.kind || "live");
+    }
+
+    function showProfileList() {
+        setView("home");
+        renderSavedProfiles();
+    }
+
+    function scheduleCatalogSearch() {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(applyFilters, 180);
     }
 
     bindCatalogSections();
@@ -1966,9 +2004,23 @@
         return parseInt(String(episode.season || 0), 10) || 0;
     }
 
+    function updateSeasonButtons() {
+        var root = byId("season-list");
+        var buttons = root.querySelectorAll("button");
+        for (var i = 0; i < buttons.length; i++) {
+            var btn = buttons[i];
+            var val = btn.getAttribute("data-season-value");
+            if (val === String(state.currentSeason)) {
+                btn.classList.add("active");
+            } else {
+                btn.classList.remove("active");
+            }
+        }
+    }
+
     function setSeriesSeason(season) {
         state.currentSeason = season;
-        renderSeasons();
+        updateSeasonButtons();
         renderEpisodes();
     }
 
@@ -1978,6 +2030,7 @@
 
         button.textContent = label;
         button.setAttribute("data-focusable", "true");
+        button.setAttribute("data-season-value", value);
         button.className =
             String(state.currentSeason) === value ? "active" : "";
         button.addEventListener("click", function () {

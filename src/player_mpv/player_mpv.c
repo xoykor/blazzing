@@ -6,7 +6,7 @@
  * sent over the private Unix socket instead of argv. On X11, mpv is embedded
  * directly into the application's video container with --wid.
  */
-#define _POSIX_C_SOURCE 200809L
+#define _GNU_SOURCE
 #include "visual_iptv/player_mpv.h"
 
 #include <json-c/json.h>
@@ -498,12 +498,12 @@ static int spawn_runtime(vip_mpv_player_t *player, int *log_read_fd) {
 
     const char *vo_arg = use_x11_vo ? "--vo=x11" : (use_gpu_next ? "--vo=gpu-next,gpu" : "--vo=gpu");
     const char *context_arg =
-        use_x11_vo ? NULL : (use_gpu_next ? "--gpu-context=x11egl,x11,x11vk" : "--gpu-context=x11");
+        use_x11_vo ? NULL : "--gpu-context=x11egl,x11,x11vk";
     debug_log(player, "runtime persistente renderer=%s hwdec=%s embed=wid parent=%lu",
               use_x11_vo ? "x11" : (use_gpu_next ? "gpu-next-x11" : "gpu-x11"), hwdec, player->window_id);
 
     int log_pipe[2] = {-1, -1};
-    if (pipe(log_pipe) != 0)
+    if (pipe2(log_pipe, O_CLOEXEC) != 0)
         return -1;
     if (!make_ipc_path(player)) {
         close(log_pipe[0]);

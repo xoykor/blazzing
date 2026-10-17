@@ -289,6 +289,7 @@ function handleMpvMessage(message) {
         const reason = String(message.reason || "");
         if (reason === "eof") {
             playerState("Concluído", false);
+            revealCatalog();
         } else if (reason !== "stop" && reason !== "quit") {
             playerState(recentMpvLog || "O mpv não conseguiu abrir a mídia.", true);
         }
@@ -378,82 +379,95 @@ function revealCatalog() {
     }
 }
 
+let mpvStartingPromise = null;
+
 async function ensureMpvRuntime() {
     if (mpvProcess && mpvSocket && !mpvSocket.destroyed) {
         return;
     }
-
-    const pipePath = "\\\\.\\pipe\\blazzing-mpv-" + process.pid + "-" + Date.now();
-    const inputConf = await ensureInputConfig();
-    const executable = resolveMpvPath();
-    recentMpvLog = "";
-    mpvStopping = false;
-
-    const args = [
-        "--no-config",
-        "--idle=yes",
-        "--force-window=yes",
-        "--keep-open=no",
-        "--osc=yes",
-        "--input-terminal=no",
-        "--input-default-bindings=yes",
-        "--input-conf=" + inputConf,
-        "--hwdec=auto-safe",
-        "--audio=auto",
-        "--msg-level=all=warn",
-        "--input-ipc-server=" + pipePath,
-        "--title=Blazzing Player"
-    ];
-
-    let child;
-    try {
-        child = spawn(executable, args, {
-            windowsHide: false,
-            stdio: ["ignore", "pipe", "pipe"]
-        });
-        mpvProcess = child;
-    } catch (error) {
-        throw new Error("Não foi possível iniciar mpv.exe: " + error.message);
+    if (mpvStartingPromise) {
+        return mpvStartingPromise;
     }
 
-    if (child.stdout) {
-        child.stdout.on("data", appendMpvLog);
-    }
-    if (child.stderr) {
-        child.stderr.on("data", appendMpvLog);
-    }
+    mpvStartingPromise = (async () => {
+        try {
+            const pipePath = "\\\\.\\pipe\\blazzing-mpv-" + process.pid + "-" + Date.now();
+            const inputConf = await ensureInputConfig();
+            const executable = resolveMpvPath();
+            recentMpvLog = "";
+            mpvStopping = false;
 
-    child.on("error", (error) => {
-        if (mpvProcess === child && !mpvStopping) {
-            playerState(
-                error && error.code === "ENOENT"
-                    ? "mpv.exe não encontrado no pacote."
-                    : "Falha ao executar mpv: " + error.message,
-                true
-            );
-            revealCatalog();
-        }
-    });
+            const args = [
+                "--no-config",
+                "--idle=yes",
+                "--force-window=yes",
+                "--keep-open=no",
+                "--osc=yes",
+                "--input-terminal=no",
+                "--input-default-bindings=yes",
+                "--input-conf=" + inputConf,
+                "--hwdec=auto-safe",
+                "--audio=auto",
+                "--msg-level=all=warn",
+                "--input-ipc-server=" + pipePath,
+                "--title=Blazzing Player"
+            ];
 
-    child.on("exit", (code) => {
-        if (mpvProcess !== child) {
-            return;
-        }
-        const unexpected = !mpvStopping;
-        mpvProcess = null;
-        if (mpvSocket) {
-            mpvSocket.destroy();
-            mpvSocket = null;
-        }
-        if (unexpected && typeof code === "number" && code !== 0) {
-            playerState(recentMpvLog || ("mpv encerrou com código " + code), true);
-        }
-        revealCatalog();
-    });
+            let child;
+            try {
+                child = spawn(executable, args, {
+                    windowsHide: false,
+                    stdio: ["ignore", "pipe", "pipe"]
+                });
+                mpvProcess = child;
+            } catch (error) {
+                throw new Error("Não foi possível iniciar mpv.exe: " + error.message);
+            }
 
-    const socket = await connectMpvPipe(pipePath, PLAYER_CONNECT_TIMEOUT_MS);
-    attachMpvSocket(socket);
-    sendObservers();
+            if (child.stdout) {
+                child.stdout.on("data", appendMpvLog);
+            }
+            if (child.stderr) {
+                child.stderr.on("data", appendMpvLog);
+            }
+
+            child.on("error", (error) => {
+                if (mpvProcess === child && !mpvStopping) {
+                    playerState(
+                        error && error.code === "ENOENT"
+                            ? "mpv.exe não encontrado no pacote."
+                            : "Falha ao executar mpv: " + error.message,
+                        true
+                    );
+                    revealCatalog();
+                }
+            });
+
+            child.on("exit", (code) => {
+                if (mpvProcess !== child) {
+                    return;
+                }
+                const unexpected = !mpvStopping;
+                mpvProcess = null;
+                if (mpvSocket) {
+                    mpvSocket.destroy();
+                    mpvSocket = null;
+                }
+                if (unexpected && typeof code === "number" && code !== 0) {
+                    playerState(recentMpvLog || ("mpv encerrou com código " + code), true);
+                }
+                revealCatalog();
+            });
+
+            const socket = await connectMpvPipe(pipePath, PLAYER_CONNECT_TIMEOUT_MS);
+            attachMpvSocket(socket);
+            sendObservers();
+        } finally {
+            mpvStartingPromise = null;
+        }
+    })();
+
+    return mpvStartingPromise;
 }
 
 async function openPlayer(payload) {

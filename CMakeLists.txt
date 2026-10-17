@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(visual_iptv_x11 VERSION 1.4.10 LANGUAGES C)
+project(visual_iptv_x11 VERSION 1.5.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -78,14 +78,19 @@ vip_warnings(vip_pairing)
 
 add_library(vip_ui_x11
     src/ui_x11/x11_app.c
+    src/ui_x11/x11_catalog.c
+    src/ui_x11/x11_input.c
+    src/ui_x11/x11_keyring.c
+    src/ui_x11/x11_player_bridge.c
+    src/ui_x11/x11_views.c
+    src/ui_x11/x11_workers.c
     src/ui_x11/ui_motion.c
     src/ui_x11/ui_render.c)
 target_link_libraries(vip_ui_x11 PUBLIC
     vip_core vip_provider vip_database vip_decoder vip_thumbnails vip_player_mpv vip_pairing
     PkgConfig::X11 PkgConfig::JPEG PkgConfig::CURL PkgConfig::CAIRO PkgConfig::PANGOCAIRO PkgConfig::QRENCODE Threads::Threads)
 if(VIPTV_PAIRING_DEFAULT_URL)
-    target_compile_definitions(vip_ui_x11 PRIVATE
-        VIPTV_PAIRING_DEFAULT_URL="${VIPTV_PAIRING_DEFAULT_URL}")
+    add_compile_definitions(VIPTV_PAIRING_DEFAULT_URL="${VIPTV_PAIRING_DEFAULT_URL}")
 endif()
 vip_warnings(vip_ui_x11)
 
@@ -166,7 +171,7 @@ if(BUILD_TESTING)
     add_test(NAME player_mpv COMMAND test_player_mpv)
 
     add_executable(test_ui_motion tests/test_ui_motion.c src/ui_x11/ui_motion.c)
-    target_include_directories(test_ui_motion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_include_directories(test_ui_motion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     vip_warnings(test_ui_motion)
     add_test(NAME ui_motion COMMAND test_ui_motion)
 

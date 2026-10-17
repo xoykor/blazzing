@@ -6,7 +6,7 @@
  * read through a pipe.  The backend enforces timeouts and rejects useless
  * near-black/near-uniform candidate frames before returning one to the cache.
  */
-#define _POSIX_C_SOURCE 200809L
+#define _GNU_SOURCE
 #include "visual_iptv/decoder.h"
 #include "decoder_internal.h"
 
@@ -112,7 +112,7 @@ static bool frame_is_useful(const uint8_t *rgb, size_t width, size_t height, siz
 /* Spawn ffmpeg. */
 static int spawn_ffmpeg(const ffmpeg_impl_t *impl, const char *source, int *stdout_fd) {
     int pipefd[2];
-    if (pipe(pipefd) != 0)
+    if (pipe2(pipefd, O_CLOEXEC) != 0)
         return -1;
 
     pid_t pid = fork();

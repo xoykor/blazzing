@@ -6,8 +6,10 @@
  * behavior so a maintainer can follow intent without reverse-engineering it.
  */
 #include "visual_iptv/hub.h"
+#include <X11/Xlib.h>
 
 /* Run this executable's main entry point. */
 int main(void) {
+    XInitThreads();
     return vip_hub_run();
 }

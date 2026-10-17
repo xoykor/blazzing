@@ -439,7 +439,10 @@ static void enqueue_thumbnail(pluto_app_t *a, const vip_channel_t *channel, int6
     if (!a->thumbs || !channel || !channel->provider_id || !channel->id || !channel->stream_url)
         return;
     vip_error_t error = {0};
-    char *path = vip_thumbnail_cache_path(a->cache_dir, channel->provider_id, channel->id, &error);
+    char *path = (channel->logo_url && channel->logo_url[0])
+                     ? vip_thumbnail_artwork_cache_path(a->cache_dir, channel->provider_id, channel->id,
+                                                        channel->logo_url, &error)
+                     : vip_thumbnail_cache_path(a->cache_dir, channel->provider_id, channel->id, &error);
     if (path) {
         struct stat st;
         bool exists = stat(path, &st) == 0 && st.st_size > 0;
@@ -648,9 +651,11 @@ static void draw_grid(pluto_app_t *a) {
             stroke_rect(a, x - 3, y - 3, PLUTO_CARD_W + 6, PLUTO_CARD_H + 6, a->accent);
             stroke_rect(a, x - 2, y - 2, PLUTO_CARD_W + 4, PLUTO_CARD_H + 4, a->accent);
         }
-        fill_rect(a, x, y, PLUTO_CARD_W, PLUTO_ART_H, a->black);
         vip_error_t error = {0};
-        char *path = vip_thumbnail_cache_path(a->cache_dir, channel->provider_id, channel->id, &error);
+        char *path = (channel->logo_url && channel->logo_url[0])
+                         ? vip_thumbnail_artwork_cache_path(a->cache_dir, channel->provider_id, channel->id,
+                                                            channel->logo_url, &error)
+                         : vip_thumbnail_cache_path(a->cache_dir, channel->provider_id, channel->id, &error);
         bool image_ok = path && draw_cached_image(a, path, x, y, PLUTO_CARD_W, PLUTO_ART_H);
         free(path);
         if (!image_ok) {

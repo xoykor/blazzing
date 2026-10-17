@@ -212,7 +212,7 @@ vip_status_t vip_category_list_push(vip_category_list_t *list, const vip_categor
         .name = vip_strdup(category->name),
         .position = category->position,
     };
-    if (!copy.id || !copy.name || (category->provider_id && !copy.provider_id)) {
+    if (!copy.id || !copy.name || (category->provider_id && category->provider_id[0] && !copy.provider_id)) {
         category_clear(&copy);
         vip_error_set(error, VIP_ERR_NOMEM, "sem memória para categoria");
         return VIP_ERR_NOMEM;
@@ -294,7 +294,10 @@ vip_status_t vip_channel_list_push(vip_channel_list_t *list, const vip_channel_t
         .position = channel->position,
     };
     if (!copy.id || !copy.name || !copy.stream_url ||
-        (channel->provider_id && !copy.provider_id) ||
+        (channel->provider_id && channel->provider_id[0] && !copy.provider_id) ||
+        (channel->category_id && channel->category_id[0] && !copy.category_id) ||
+        (channel->logo_url && channel->logo_url[0] && !copy.logo_url) ||
+        (channel->epg_channel_id && channel->epg_channel_id[0] && !copy.epg_channel_id) ||
         (channel->fallback_id && channel->fallback_id[0] && !copy.fallback_id) ||
         (channel->fallback_base && channel->fallback_base[0] && !copy.fallback_base) ||
         (channel->fallback_version && channel->fallback_version[0] && !copy.fallback_version)) {

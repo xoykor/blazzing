@@ -1,3 +1,27 @@
+# Changelog
+
+[English](CHANGELOG.md)
+
+## 1.5.0 — 2026-10-16
+
+Versão Principal de Arquitetura e Estabilidade:
+
+- **Integração Nativa da Pluto TV:** Suporte nativo a canais e EPG da Pluto TV diretamente no hub C do aplicativo, eliminando necessidade de apps externas e viabilizando reprodução imediata.
+- **Descontinuação do LG webOS:** Remoção completa do porte legado webOS e da pasta de testes `BlazSmoke`, concentrando o suporte de TVs na Samsung Tizen e desktop em Linux/Windows.
+- **Decomposição Modular do Monólito X11:** Refatoração de [x11_app.c](file:///home/x/Documentos/Blazzing%20revis%C3%A3o/src/ui_x11/x11_app.c) (7.076 linhas) em 7 unidades modulares focadas (`x11_app.c` orquestrador com 578 linhas, `x11_catalog.c`, `x11_input.c`, `x11_keyring.c`, `x11_player_bridge.c`, `x11_views.c`, `x11_workers.c`).
+- **Correção de Deadlock no Secret Service / Keyring:** Uso de `pipe2(..., O_CLOEXEC)` impedindo que o descritor herdado no `secret-tool` cause travamento permanente da interface da UI no salvamento de senhas.
+- **Resiliência SQLite em Playlists M3U:** Prevenção de rollback de transação e perda de catálogo completo em playlists com IDs repetidos via chaves unívocas e `ON CONFLICT DO UPDATE`.
+- **Correção de Cache de Logos da Pluto TV:** Unificação dos caminhos de cache de capas evitando loop infinito de re-enfileiramento a 60 Hz e permitindo exibição imediata dos logotipos.
+- **Restauração da Janela Windows:** Garantia de que a janela principal do catálogo volte a ficar visível ao atingir o fim da mídia (`eof`) ou após falha de stream sem fallbacks no MPV.
+- **Segurança e Conformidade:** Flag `O_CLOEXEC` obrigatória em todos os pipes de decodificador/player, chamada de `XInitThreads()` no primeiro instante do `main()`, persistência de metadados de servidores de fallback no SQLite e adição de privilégios de tela no Tizen.
+
+## 1.4.10 — 2026-10-05
+
+Atualização do cache de miniaturas no Linux:
+
+- armazena em cache miniaturas de capas por provider, item e URL da imagem, baixando novos pôsteres quando seu card entra na área visível;
+- mantém carregamento sob demanda com limite de workers em vez de baixar todo o catálogo no boot.
+
 ## 1.4.0 — 2026-09-18
 
 Pareamento pela Internet substitui o pareamento LAN:
@@ -120,10 +144,6 @@ Descoberta automática do endpoint do provider:
 - o primeiro servidor validado vira o primário e um segundo servidor validado vira o failover;
 - credenciais não são enviadas às APIs de resolução quando o login Xtream normal funciona;
 - testes de regressão cobrem decodificação e extração de servidores.
-
-# Changelog
-
-[English](CHANGELOG.md)
 
 ## 1.2.11 — 2026-09-07
 

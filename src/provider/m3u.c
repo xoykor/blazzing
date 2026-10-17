@@ -674,6 +674,15 @@ vip_status_t vip_m3u_load(const char *source, vip_category_list_t *categories_ou
         stable_id(id_hash, identity);
         char channel_id[32];
         snprintf(channel_id, sizeof(channel_id), "m3u:%s", id_hash);
+        for (size_t k = channels_out->len; k > 0; --k) {
+            if (strcmp(channels_out->items[k - 1].id, channel_id) == 0) {
+                char disambiguated[1024];
+                snprintf(disambiguated, sizeof(disambiguated), "%s#%s#%d", identity, stream_url, position);
+                stable_id(id_hash, disambiguated);
+                snprintf(channel_id, sizeof(channel_id), "m3u:%s", id_hash);
+                break;
+            }
+        }
         vip_channel_t item = {
             .provider_id = provider_id_out,
             .id = channel_id,

@@ -353,6 +353,7 @@ vip_status_t vip_pluto_parse_channels_json(const char *json, const char *session
             continue;
         vip_status_t st = append_channel(obj, i, session_token, stitcher_base, out, error);
         if (st != VIP_OK) {
+            vip_channel_list_clear(out);
             json_object_put(root);
             return st;
         }

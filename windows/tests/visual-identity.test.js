@@ -15,7 +15,7 @@ function read(relative) {
 const windowsCss = read("windows/css/app.css");
 const windowsHtml = read("windows/index.html");
 const tizenCss = read("tizen/css/app.css");
-const linuxUi = read("src/ui_x11/x11_app.c");
+const linuxUi = read("src/ui_x11/x11_views.c") + read("src/ui_x11/x11_app.c");
 
 const canonical = {
     background: "#090b11",

@@ -1,3 +1,20 @@
+# Changelog
+
+[Português (Brasil)](CHANGELOG.pt-BR.md)
+
+## 1.5.0 — 2026-10-16
+
+Major Architecture & Stability Release:
+
+- **Pluto TV Native Integration:** Added direct native integration for Pluto TV channels and EPG inside the core hub, removing external workarounds and supporting out-of-the-box streaming.
+- **LG webOS Retirement:** Removed discontinued LG webOS port and legacy `BlazSmoke` test directory, focusing TV development on Samsung Tizen and desktop on Linux/Windows.
+- **Modularization of the X11 Core:** Refactored the monolithic 7,076-line `x11_app.c` into 7 focused translation units (`x11_app.c` orchestrator at 578 lines, `x11_catalog.c`, `x11_input.c`, `x11_keyring.c`, `x11_player_bridge.c`, `x11_views.c`, `x11_workers.c`).
+- **Secret Service / Keyring Fix:** Resolved permanent UI deadlock during password storage by using `pipe2(..., O_CLOEXEC)` to ensure proper EOF propagation to `secret-tool`.
+- **M3U SQLite Resilience:** Fixed full-catalog rollback on duplicate M3U channel IDs with disambiguated keys and `ON CONFLICT DO UPDATE`.
+- **Pluto TV Thumbnail Cache Fix:** Fixed artwork cache path resolution preventing endless 60 Hz thumbnail re-queuing and missing logos.
+- **Windows Video Lifecycle Fix:** Restored catalog window visibility on MPV end-of-file (`eof`) and failover stream exhaustion.
+- **Security & Portability:** Enforced `O_CLOEXEC` on all decoder/player pipes, invoked `XInitThreads()` before any display connection, preserved fallback candidate metadata in SQLite, and added Samsung Tizen display privileges.
+
 ## 1.4.10 — 2026-10-05
 
 Linux thumbnail cache refresh:
@@ -127,10 +144,6 @@ Automatic provider endpoint discovery:
 - the first verified base becomes the primary server and a second verified base becomes failover;
 - credentials are not sent to resolver APIs during normal successful Xtream logins;
 - regression tests cover payload decoding and server extraction.
-
-# Changelog
-
-[Português (Brasil)](CHANGELOG.pt-BR.md)
 
 ## 1.2.11 — 2026-09-07
 
