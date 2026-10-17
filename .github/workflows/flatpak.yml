@@ -117,27 +117,27 @@ jobs:
               -f "sha=${GITHUB_SHA}" >/dev/null
           fi
 
-          cat > release-notes.md <<EOF
-## Blazzing ${TAG}
+          sed 's/^ *//' > release-notes.md <<EOF
+          ## Blazzing ${TAG}
 
-### Flatpak
+          ### Flatpak
 
-Download **Blazzing-${TAG}-x86_64.flatpak** from the assets below.
+          Download **Blazzing-${TAG}-x86_64.flatpak** from the assets below.
 
-Install:
+          Install:
 
-\`\`\`sh
-flatpak install --user ./Blazzing-${TAG}-x86_64.flatpak
-\`\`\`
+          \`\`\`sh
+          flatpak install --user ./Blazzing-${TAG}-x86_64.flatpak
+          \`\`\`
 
-Run:
+          Run:
 
-\`\`\`sh
-flatpak run io.github.xoykor.Blazzing
-\`\`\`
+          \`\`\`sh
+          flatpak run io.github.xoykor.Blazzing
+          \`\`\`
 
-The accompanying \`.sha256\` file can be used to verify the download.
-EOF
+          The accompanying \`.sha256\` file can be used to verify the download.
+          EOF
 
           gh release create "$TAG" \
             "release/Blazzing-${TAG}-x86_64.flatpak" \
