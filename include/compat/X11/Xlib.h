@@ -8,6 +8,15 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -125,15 +134,17 @@ typedef unsigned long Time;
 #define PropertyChangeMask (1L << 22)
 
 /* Key/Button masks and buttons */
-#define ShiftMask (1u << 0)
-#define LockMask (1u << 1)
-#define ControlMask (1u << 2)
-#define Mod1Mask (1u << 3)
-#define Button1 1u
-#define Button2 2u
-#define Button3 3u
-#define Button4 4u
-#define Button5 5u
+enum {
+    ShiftMask = (1u << 0),
+    LockMask = (1u << 1),
+    ControlMask = (1u << 2),
+    Mod1Mask = (1u << 3),
+    Button1 = 1u,
+    Button2 = 2u,
+    Button3 = 3u,
+    Button4 = 4u,
+    Button5 = 5u
+};
 
 typedef struct _XDisplay Display;
 typedef struct _XGC *GC;

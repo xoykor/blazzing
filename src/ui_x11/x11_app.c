@@ -162,7 +162,13 @@ static size_t thumbnail_worker_count(void) {
             return (size_t)parsed;
     }
 
+#ifdef _WIN32
+    SYSTEM_INFO sysinfo;
+    GetSystemInfo(&sysinfo);
+    long online = (long)sysinfo.dwNumberOfProcessors;
+#else
     long online = sysconf(_SC_NPROCESSORS_ONLN);
+#endif
     size_t workers = online > 0 ? (size_t)online : 8u;
     if (workers < 8u)
         workers = 8u;

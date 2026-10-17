@@ -848,7 +848,7 @@ static vip_status_t decode_jpeg_memory(const uint8_t *data, size_t len, decoded_
     }
     jpeg_create_decompress(&cinfo);
     created = true;
-    jpeg_mem_src(&cinfo, data, len);
+    jpeg_mem_src(&cinfo, data, (unsigned long)len);
     if (jpeg_read_header(&cinfo, TRUE) != JPEG_HEADER_OK) {
         jpeg_destroy_decompress(&cinfo);
         return VIP_ERR_INVALID_FRAME;

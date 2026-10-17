@@ -32,27 +32,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup MSYS2 MinGW64
+      - name: Setup MSYS2 UCRT64
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: UCRT64
           update: true
           install: >-
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-pkgconf
-            mingw-w64-x86_64-SDL2
-            mingw-w64-x86_64-cairo
-            mingw-w64-x86_64-pango
-            mingw-w64-x86_64-curl
-            mingw-w64-x86_64-json-c
-            mingw-w64-x86_64-sqlite3
-            mingw-w64-x86_64-openssl
-            mingw-w64-x86_64-libjpeg-turbo
-            mingw-w64-x86_64-libpng
-            mingw-w64-x86_64-libwebp
-            mingw-w64-x86_64-qrencode
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-SDL2
+            mingw-w64-ucrt-x86_64-cairo
+            mingw-w64-ucrt-x86_64-pango
+            mingw-w64-ucrt-x86_64-curl
+            mingw-w64-ucrt-x86_64-json-c
+            mingw-w64-ucrt-x86_64-sqlite3
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-libjpeg-turbo
+            mingw-w64-ucrt-x86_64-libpng
+            mingw-w64-ucrt-x86_64-libwebp
+            mingw-w64-ucrt-x86_64-qrencode
 
       - name: Configure and build native C17 Windows app
         run: |
@@ -63,13 +63,13 @@ jobs:
         run: |
           ctest --test-dir build-win --output-on-failure
 
-      - name: Stage Windows portable binaries and MinGW64 DLLs
+      - name: Stage Windows portable binaries and UCRT64 DLLs
         run: |
           mkdir -p dist/Blazzing-Windows-x64
           cp build-win/visual-iptv.exe dist/Blazzing-Windows-x64/visual-iptv.exe
           cp build-win/visual-iptv.exe dist/Blazzing-Windows-x64/Blazzing.exe
           cp build-win/vip-thumb-probe.exe dist/Blazzing-Windows-x64/vip-thumb-probe.exe
-          ldd build-win/visual-iptv.exe | awk '/\/mingw64\/bin\// { print $3 }' | sort -u | xargs -I{} cp -f "{}" dist/Blazzing-Windows-x64/
+          ldd build-win/visual-iptv.exe | awk '/\/ucrt64\/bin\// { print $3 }' | sort -u | xargs -I{} cp -f "{}" dist/Blazzing-Windows-x64/
 
       - name: Bundle x64 mpv runtime and create portable ZIP
         shell: pwsh
