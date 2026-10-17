@@ -2,6 +2,15 @@
 
 [Português (Brasil)](CHANGELOG.pt-BR.md)
 
+## 1.5.1 — 2026-10-16
+
+Linux M3U Performance & Samsung Tizen Tab Transition Fix:
+
+- **Linux M3U Load Unfreeze ($O(1)$ Deduplication):** Replaced quadratic $O(N^2)$ linear backward scan during M3U channel ID deduplication with a 64-bit open-addressed hash set (`m3u_id_set_t`) and category hint caching, reducing 441,000-item playlist load time from >60 minutes to ~3 seconds.
+- **Fast M3U Catalog Classification ($O(N + C)$):** Replaced $O(N \times C)$ linear scans in `vip_m3u_split_catalog` and `recalc_category_counts` with direct single-pass category usage bitsets and prefix-filtered series season aggregation.
+- **Non-blocking M3U Login Path:** Removed synchronous remote HTTP shard downloads (`apply_external_card_artwork`) from the critical login path and fixed login panel status/error message clipping on smaller windows.
+- **Samsung Tizen Instant Tab Switching:** Preserved in-memory M3U and Xtream catalogs across tab transitions (`Live`, `Movies`, `Series`), cached category counts, batched sidebar rendering with `DocumentFragment`, and replaced slow `localeCompare` with fast case-insensitive comparator.
+
 ## 1.5.0 — 2026-10-16
 
 Major Architecture & Stability Release:

@@ -20,6 +20,12 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.5.1" date="2026-10-16">
+      <description>
+        <p>Blazzing 1.5.1: Fixes Linux freeze on large M3U playlists with O(1) hash deduplication and single-pass catalog splitting, improves login error visibility on compact windows, and speeds up Samsung Tizen tab transitions.</p>
+        <p xml:lang="pt-BR">Blazzing 1.5.1: Corrige travamento no Linux ao carregar listas M3U grandes com deduplicação hash O(1) e divisão de catálogo em passagem única, melhora visibilidade de erros no login e acelera transição de abas no Samsung Tizen.</p>
+      </description>
+    </release>
     <release version="1.5.0" date="2026-10-16">
       <description>
         <p>Blazzing 1.5.0: Native Pluto TV integration, LG webOS deprecation, complete X11 modularization, and major stability and crash fixes across Linux, Tizen, and Windows.</p>

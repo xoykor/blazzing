@@ -2,6 +2,15 @@
 
 [English](CHANGELOG.md)
 
+## 1.5.1 — 2026-10-16
+
+Correção de Travamento M3U no Linux e Performance de Abas no Samsung Tizen:
+
+- **Fim do Travamento no Carregamento M3U ($O(1)$):** Substituição da varredura linear quadrática $O(N^2)$ de deduplicação de IDs em `vip_m3u_load` por tabela hash *open-addressing* de 64 bits (`m3u_id_set_t`) e cache de categoria, reduzindo o carregamento de listas com 441 mil itens de >60 minutos para ~3 segundos.
+- **Classificação de Catálogo em Passagem Única ($O(N + C)$):** Eliminação das buscas lineares $O(N \times C)$ em `vip_m3u_split_catalog` e `recalc_category_counts` e adição de pré-filtro rápido por prefixo ao abrir séries M3U.
+- **Login Não-Bloqueante e Visibilidade de Erros:** Remoção do download síncrono de 16 shards JSON remotos durante o parse inicial e ajuste do layout do painel de login para exibir mensagens de status/erro HTTP em janelas compactas.
+- **Troca Instantânea de Abas no Samsung Tizen:** Preservação dos catálogos M3U e Xtream em memória RAM ao alternar entre `TV ao vivo`, `Filmes` e `Séries`, cache de contagem por categoria, uso de `DocumentFragment` e substituição de `localeCompare` lento por comparador direto.
+
 ## 1.5.0 — 2026-10-16
 
 Versão Principal de Arquitetura e Estabilidade:
