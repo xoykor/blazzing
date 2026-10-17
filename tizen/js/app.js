@@ -1166,9 +1166,15 @@
     }
 
     function loadM3uCatalogSection(kind) {
+        if (!state.m3uCatalogs) {
+            state.m3uCatalogs = {};
+        }
+        if (state.m3uCatalogs[kind]) {
+            return Promise.resolve(finishCatalogLoad(state.m3uCatalogs[kind]));
+        }
+
         state.catalog = { items: [], categories: [] };
         state.filtered = [];
-        state.m3uCatalogs = {};
         setBusy(true, catalogLoadMessage(kind));
 
         return loadStoredM3uCatalog(state.profile, kind).then(function (catalog) {
@@ -1183,6 +1189,10 @@
     function loadXtreamCatalogSection(kind) {
         if (!state.xtream) {
             return Promise.reject(new Error("Nenhum provider carregado."));
+        }
+
+        if (state.xtream.cache && state.xtream.cache[kind]) {
+            return Promise.resolve(finishCatalogLoad(state.xtream.cache[kind]));
         }
 
         setBusy(true, catalogLoadMessage(kind));
@@ -1200,8 +1210,7 @@
             return loadXtreamCatalogSection(kind);
         }
         if (state.m3uCatalogs[kind]) {
-            state.catalog = state.m3uCatalogs[kind];
-            return Promise.resolve(state.catalog);
+            return Promise.resolve(finishCatalogLoad(state.m3uCatalogs[kind]));
         }
         return loadM3uCatalogSection(kind);
     }
@@ -1283,10 +1292,18 @@
 
 
     function catalogCategoryCounts() {
+        if (state.catalog && state.catalog._categoryCounts) {
+            return state.catalog._categoryCounts;
+        }
         var counts = {};
-        state.catalog.items.forEach(function (item) {
-            counts[item.categoryId] = (counts[item.categoryId] || 0) + 1;
-        });
+        if (state.catalog && state.catalog.items) {
+            state.catalog.items.forEach(function (item) {
+                counts[item.categoryId] = (counts[item.categoryId] || 0) + 1;
+            });
+        }
+        if (state.catalog) {
+            state.catalog._categoryCounts = counts;
+        }
         return counts;
     }
 
@@ -1311,20 +1328,24 @@
     function renderCategories() {
         var root = byId("categories");
         var counts = catalogCategoryCounts();
+        var fragment = document.createDocumentFragment();
 
         root.innerHTML = "";
-        root.appendChild(makeCategoryButton(
+        fragment.appendChild(makeCategoryButton(
             "all",
-            "Todos (" + state.catalog.items.length + ")"
+            "Todos (" + (state.catalog && state.catalog.items ? state.catalog.items.length : 0) + ")"
         ));
 
-        state.catalog.categories.forEach(function (category) {
-            var count = counts[category.id] || 0;
-            root.appendChild(makeCategoryButton(
-                category.id,
-                (category.name || "Outros") + " (" + count + ")"
-            ));
-        });
+        if (state.catalog && state.catalog.categories) {
+            state.catalog.categories.forEach(function (category) {
+                var count = counts[category.id] || 0;
+                fragment.appendChild(makeCategoryButton(
+                    category.id,
+                    (category.name || "Outros") + " (" + count + ")"
+                ));
+            });
+        }
+        root.appendChild(fragment);
     }
 
     function searchableText(item, normalize) {

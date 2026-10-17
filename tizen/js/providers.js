@@ -556,11 +556,9 @@
 
             ["live", "vod", "series"].forEach(function (kind) {
                 catalogs[kind].categories.sort(function (a, b) {
-                    return String(a.name || "").localeCompare(
-                        String(b.name || ""),
-                        "pt-BR",
-                        { sensitivity: "base", numeric: true }
-                    );
+                    var nameA = String(a.name || "").toLowerCase();
+                    var nameB = String(b.name || "").toLowerCase();
+                    return nameA < nameB ? -1 : (nameA > nameB ? 1 : 0);
                 });
 
                 /* Keep provider order for items. Sorting huge IPTV catalogs here
@@ -856,11 +854,9 @@
             });
 
             catalog.categories.sort(function (a, b) {
-                return String(a.name || "").localeCompare(
-                    String(b.name || ""),
-                    "pt-BR",
-                    { sensitivity: "base", numeric: true }
-                );
+                var nameA = String(a.name || "").toLowerCase();
+                var nameB = String(b.name || "").toLowerCase();
+                return nameA < nameB ? -1 : (nameA > nameB ? 1 : 0);
             });
 
             /* Preserve the ordering supplied by the Xtream server. */
