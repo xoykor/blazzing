@@ -39,12 +39,9 @@ O antigo azul `#62A9FF` não faz mais parte da identidade principal.
 ### Tizen
 Fonte de referência. Prioriza distância de visualização, foco por controle remoto e elementos maiores.
 
-### Windows
-Mantém a mesma hierarquia do Tizen em escala desktop: hero, painéis, topnav, sidebar, cards e modal QR. Hover não substitui foco; ambos usam a mesma linguagem visual.
-
-### Linux/X11
-Mantém a estrutura e hitboxes nativos existentes, mas usa a mesma paleta, proporções gerais, arredondamento e linguagem de foco. Componentes desenhados por Cairo/Xlib devem aproximar os tokens canônicos sem introduzir dependência Web.
+### Desktop (Linux e Windows)
+Compartilha uma única base nativa C17 (`src/`) renderizada por Cairo/Pango sobre X11 (Linux) ou SDL2 (Windows/Linux), mantendo os mesmos tokens canônicos, proporções gerais, arredondamento e linguagem de foco sem introduzir dependência Web.
 
 ## Regra de manutenção
 
-Mudanças visuais novas devem ser definidas primeiro em relação ao Tizen e então adaptadas aos outros portes. O teste `windows/tests/visual-identity.test.js` impede regressões básicas de paleta e hierarquia.
+Mudanças visuais novas devem ser definidas primeiro em relação ao Tizen e então adaptadas à interface nativa desktop (`src/ui_x11/`).

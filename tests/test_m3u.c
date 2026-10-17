@@ -11,14 +11,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <direct.h>
+#include <io.h>
+#else
+#include <sys/stat.h>
 #include <unistd.h>
+#endif
 
 /* Run this executable's main entry point. */
 int main(void) {
-    char path[] = "/tmp/visual-iptv-m3u-XXXXXX";
-    int fd = mkstemp(path);
-    TEST_CHECK(fd >= 0);
-    FILE *fp = fdopen(fd, "w");
+    const char *path = "visual-iptv-m3u-test.m3u";
+    FILE *fp = fopen(path, "w");
     TEST_CHECK(fp != NULL);
     fputs(
         "#EXTM3U\n"
@@ -135,8 +139,12 @@ int main(void) {
     /* Lista publishes provider artwork in compact shards instead of duplicating
        hundreds of thousands of tvg-logo attributes inside the ~100 MiB M3U.
        Linux must resolve those shards and expose the original logo_url. */
-    char cards_dir[] = "/tmp/visual-iptv-card-shards-XXXXXX";
-    TEST_CHECK(mkdtemp(cards_dir) != NULL);
+    const char *cards_dir = "visual-iptv-card-shards-test";
+#ifdef _WIN32
+    (void)_mkdir(cards_dir);
+#else
+    (void)mkdir(cards_dir, 0700);
+#endif
 
     char shard_path[512];
     snprintf(shard_path, sizeof(shard_path), "%s/0.json", cards_dir);
@@ -184,8 +192,12 @@ int main(void) {
     vip_channel_list_clear(&channels);
     vip_category_list_clear(&cats);
 
-    TEST_CHECK(unlink(shard_path) == 0);
+    TEST_CHECK(remove(shard_path) == 0);
+#ifdef _WIN32
+    TEST_CHECK(_rmdir(cards_dir) == 0);
+#else
     TEST_CHECK(rmdir(cards_dir) == 0);
-    unlink(path);
+#endif
+    (void)remove(path);
     return 0;
 }

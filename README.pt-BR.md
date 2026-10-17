@@ -72,9 +72,7 @@ O porte Tizen não depende de X11, Cairo, SQLite ou mpv. Consulte [tizen/README.
 
 ### Desktop Windows
 
-O porte Windows fica em `windows/`. Ele reaproveita o frontend de catálogo/providers do Tizen, mas substitui as APIs Samsung por uma ponte Electron restrita para rede, armazenamento persistente de playlists e reprodução nativa com mpv. O mpv é embutido pelo HWND do Windows e controlado por um named pipe privado, então URLs de mídia são enviadas por JSON IPC em vez de argumentos do processo.
-
-O build por código-fonte requer atualmente Windows 10 ou superior, Node.js para empacotamento e `mpv.exe` no `PATH`, em um dos caminhos locais documentados ou definido por `VIPTV_MPV_PATH`. Veja [windows/README.md](windows/README.md).
+Windows e Linux compartilham a mesma base de código desktop nativa em C17 (`src/`). No Windows, o Blazzing é compilado com `-DVIPTV_USE_SDL2=ON`, renderizando a mesma interface Cairo/Pango sobre uma superfície SDL2, armazenando credenciais no Gerenciador de Credenciais nativo do Windows (`wincred.h`) e embutindo o `mpv.exe` em um `HWND` filho nativo Win32 (`--wid`) controlado por um named pipe privado do Windows (`\\.\pipe\viptv-mpv-...`).
 
 ## Controles
 
@@ -161,16 +159,16 @@ Também existe um helper em Fish:
 ./scripts/build-cachyos.fish
 ```
 
-### Windows
+### Windows (MSYS2 MinGW64)
 
-```powershell
-git clone https://github.com/xoykor/blazzing.git
-cd blazzing\windows
-npm install
-npm start
+```sh
+pacman -S --needed git mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-pkgconf mingw-w64-x86_64-SDL2 mingw-w64-x86_64-cairo mingw-w64-x86_64-pango mingw-w64-x86_64-curl mingw-w64-x86_64-json-c mingw-w64-x86_64-sqlite3 mingw-w64-x86_64-openssl mingw-w64-x86_64-libjpeg-turbo mingw-w64-x86_64-libpng mingw-w64-x86_64-libwebp mingw-w64-x86_64-qrencode
+cmake -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release -DVIPTV_USE_SDL2=ON
+cmake --build build-win
+./build-win/visual-iptv.exe
 ```
 
-Para gerar instalador NSIS e pacote portátil, use `npm run dist`. O build Windows usa um `mpv.exe` externo; consulte [windows/README.md](windows/README.md) para os caminhos aceitos e controles.
+Coloque `mpv.exe` ao lado de `visual-iptv.exe`, em `mpv/mpv.exe`, no `PATH` ou defina `VIPTV_MPV_PATH`.
 
 ### Debian / Ubuntu
 
@@ -259,11 +257,11 @@ Veja [Configuração e diagnóstico](docs/CONFIGURATION.pt-BR.md).
 
 ## Escopo do projeto
 
-O **núcleo do desktop Linux está maduro** e mudanças devem priorizar confiabilidade, segurança, compatibilidade e manutenção. Grandes expansões de funcionalidade no desktop são deliberadamente conservadoras.
+O **núcleo desktop nativo em C17 (Linux e Windows) está maduro** e mudanças devem priorizar confiabilidade, segurança, compatibilidade e manutenção. Grandes expansões de funcionalidade no desktop são deliberadamente conservadoras.
 
-Os portes Samsung Tizen e Windows são mantidos separadamente dentro do mesmo repositório. O porte Windows compartilha intencionalmente o frontend de catálogo/providers do Tizen, mantendo a integração nativa de desktop isolada em `windows/`.
+O Web App Samsung Tizen é mantido separadamente em `tizen/`.
 
-Ainda não implementados na interface Linux:
+Ainda não implementados na interface desktop:
 
 - interface EPG completa;
 - seletor gráfico de faixas de áudio;
@@ -278,19 +276,19 @@ Consulte o README específico do Tizen para as limitações dessa plataforma; os
 
 ```text
 include/visual_iptv/   APIs entre módulos
+include/compat/X11/    headers de compatibilidade Xlib sobre SDL2 (backend Windows/SDL2)
 src/app/               entry point, hub e aplicação Pluto
 src/core/              tipos compartilhados, ownership e validação
 src/provider/          providers Xtream, M3U e Pluto
 src/database/          persistência SQLite
 src/decoder/           abstração de captura e backend FFmpeg
 src/thumbnails/        fila, download, decode e cache
-src/player_mpv/        backend mpv persistente por JSON IPC
-src/ui_x11/            UI X11, renderer Cairo/Pango e movimento da interface
+src/player_mpv/        backend mpv persistente por JSON IPC (Unix socket / Win32 named pipe)
+src/ui_x11/            UI desktop (X11 ou SDL2), renderer Cairo/Pango e movimento da interface
 src/tools/             ferramentas de diagnóstico/desenvolvimento
 tests/                 testes automatizados
 flatpak/               manifesto e metadados Flatpak
 tizen/                 Web App para Samsung Tizen
-windows/               porte desktop Windows (Electron + IPC do mpv)
 worker/                relay cifrado de pareamento
 docs/                  documentação técnica
 ```
@@ -304,7 +302,6 @@ docs/                  documentação técnica
 - [Desenvolvimento](docs/DEVELOPMENT.pt-BR.md)
 - [Flatpak](flatpak/README.md)
 - [Porte Tizen](tizen/README.md)
-- [Porte Windows](windows/README.md)
 - [Worker de pareamento](worker/README.md)
 - [Changelog](CHANGELOG.pt-BR.md)
 

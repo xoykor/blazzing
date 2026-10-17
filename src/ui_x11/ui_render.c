@@ -8,7 +8,9 @@
 #include "visual_iptv/ui_render.h"
 
 #include <cairo/cairo.h>
+#ifndef VIPTV_USE_SDL2
 #include <cairo/cairo-xlib.h>
+#endif
 #include <pango/pangocairo.h>
 #include <stddef.h>
 #include <string.h>
@@ -92,7 +94,12 @@ bool vip_ui_renderer_begin(vip_ui_renderer_t *renderer, Display *display, Drawab
     if (!renderer || !display || !drawable || !visual || width <= 0 || height <= 0)
         return false;
     memset(renderer, 0, sizeof(*renderer));
+#ifdef VIPTV_USE_SDL2
+    cairo_surface_t *surface =
+        (cairo_surface_t *)vip_sdl2_cairo_surface_create(display, drawable, visual, width, height);
+#else
     cairo_surface_t *surface = cairo_xlib_surface_create(display, drawable, visual, width, height);
+#endif
     if (!surface || cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
         if (surface)
             cairo_surface_destroy(surface);

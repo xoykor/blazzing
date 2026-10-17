@@ -4,17 +4,18 @@ on:
   push:
     branches:
       - main
-      - fix/windows-desktop-rewrite
     paths:
-      - "windows/**"
-      - "tizen/css/app.css"
-      - "src/ui_x11/x11_app.c"
+      - "src/**"
+      - "include/**"
+      - "tests/**"
+      - "CMakeLists.txt"
       - ".github/workflows/windows.yml"
   pull_request:
     paths:
-      - "windows/**"
-      - "tizen/css/app.css"
-      - "src/ui_x11/x11_app.c"
+      - "src/**"
+      - "include/**"
+      - "tests/**"
+      - "CMakeLists.txt"
       - ".github/workflows/windows.yml"
 
 permissions:
@@ -23,44 +24,60 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
-
     defaults:
       run:
-        working-directory: windows
+        shell: msys2 {0}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - name: Setup MSYS2 MinGW64
+        uses: msys2/setup-msys2@v2
         with:
-          node-version: "22"
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-cairo
+            mingw-w64-x86_64-pango
+            mingw-w64-x86_64-curl
+            mingw-w64-x86_64-json-c
+            mingw-w64-x86_64-sqlite3
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-libjpeg-turbo
+            mingw-w64-x86_64-libpng
+            mingw-w64-x86_64-libwebp
+            mingw-w64-x86_64-qrencode
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Validate JavaScript syntax
+      - name: Configure and build native C17 Windows app
         run: |
-          node --check main.js
-          node --check preload.js
-          node --check js/providers.js
-          node --check js/pairing.js
-          node --check js/app.js
-          node --check tests/windows-renderer.test.js
-          node --check tests/providers.test.js
-          node --check tests/visual-identity.test.js
+          cmake -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release -DVIPTV_USE_SDL2=ON
+          cmake --build build-win
 
-      - name: Run Windows architecture tests
-        run: npm test
+      - name: Run CTest unit tests
+        run: |
+          ctest --test-dir build-win --output-on-failure
 
-      - name: Bundle current x64 mpv runtime
+      - name: Stage Windows portable binaries and MinGW64 DLLs
+        run: |
+          mkdir -p dist/Blazzing-Windows-x64
+          cp build-win/visual-iptv.exe dist/Blazzing-Windows-x64/visual-iptv.exe
+          cp build-win/visual-iptv.exe dist/Blazzing-Windows-x64/Blazzing.exe
+          cp build-win/vip-thumb-probe.exe dist/Blazzing-Windows-x64/vip-thumb-probe.exe
+          ldd build-win/visual-iptv.exe | awk '/\/mingw64\/bin\// { print $3 }' | sort -u | xargs -I{} cp -f "{}" dist/Blazzing-Windows-x64/
+
+      - name: Bundle x64 mpv runtime and create portable ZIP
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Force runtime/mpv | Out-Null
+          New-Item -ItemType Directory -Force dist/Blazzing-Windows-x64/mpv | Out-Null
           $headers = @{
             "User-Agent" = "Blazzing-Windows-CI"
             "Authorization" = "Bearer $env:GITHUB_TOKEN"
@@ -70,32 +87,27 @@ jobs:
           $asset = $release.assets | Where-Object { $_.name -match '^mpv-x86_64-.*\.7z$' -and $_.name -notmatch 'dev' } | Select-Object -First 1
           if (-not $asset) { throw "No x64 mpv runtime asset was found in the latest release." }
           Invoke-WebRequest -Uri $asset.browser_download_url -Headers $headers -OutFile mpv-runtime.7z
-          New-Item -ItemType Directory -Force runtime/mpv/unpacked | Out-Null
-          7z x mpv-runtime.7z "-oruntime/mpv/unpacked" -y | Out-Host
-          $mpv = Get-ChildItem runtime/mpv/unpacked -Filter mpv.exe -Recurse | Select-Object -First 1
+          New-Item -ItemType Directory -Force dist/mpv-unpacked | Out-Null
+          7z x mpv-runtime.7z "-odist/mpv-unpacked" -y | Out-Host
+          $mpv = Get-ChildItem dist/mpv-unpacked -Filter mpv.exe -Recurse | Select-Object -First 1
           if (-not $mpv) { throw "mpv.exe was not found after extracting the runtime archive." }
-          Copy-Item -Path (Join-Path $mpv.Directory.FullName "*") -Destination runtime/mpv -Recurse -Force
-          Remove-Item runtime/mpv/unpacked -Recurse -Force
+          Copy-Item -Path (Join-Path $mpv.Directory.FullName "*") -Destination dist/Blazzing-Windows-x64/mpv -Recurse -Force
+          Remove-Item dist/mpv-unpacked -Recurse -Force
           Remove-Item mpv-runtime.7z -Force
-          if (-not (Test-Path runtime/mpv/mpv.exe)) { throw "Bundled mpv.exe is missing." }
+          if (-not (Test-Path dist/Blazzing-Windows-x64/mpv/mpv.exe)) { throw "Bundled mpv.exe is missing." }
 
-      - name: Package Windows app
-        run: npm run dist
-
-      - name: Generate Windows SHA-256 files
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        shell: pwsh
-        run: |
-          Get-ChildItem dist -Filter *.exe | ForEach-Object {
-            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
-            "$hash  $($_.Name)" | Set-Content "$($_.FullName).sha256" -Encoding ascii
-          }
+          $zipPath = "dist/Blazzing-Windows-x64-portable.zip"
+          Compress-Archive -Path "dist/Blazzing-Windows-x64/*" -DestinationPath $zipPath -Force
+          $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLower()
+          "$hash  Blazzing-Windows-x64-portable.zip" | Set-Content "$zipPath.sha256" -Encoding ascii
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: blazzing-windows
-          path: windows/dist/*
+          path: |
+            dist/*.zip
+            dist/*.sha256
           if-no-files-found: error
 
       - name: Publish Windows assets to matching GitHub release
@@ -104,11 +116,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $version = (Get-Content package.json | ConvertFrom-Json).version
-          $tag = "v$version"
-          gh release view $tag --repo "${{ github.repository }}"
-          Get-ChildItem dist -File | Where-Object {
-            $_.Extension -eq ".exe" -or $_.Name.EndsWith(".exe.sha256")
-          } | ForEach-Object {
-            gh release upload $tag $_.FullName --clobber --repo "${{ github.repository }}"
+          $cmake = Get-Content CMakeLists.txt -Raw
+          if ($cmake -match 'project\(visual_iptv_x11 VERSION ([0-9]+\.[0-9]+\.[0-9]+)') {
+            $tag = "v$($Matches[1])"
+            gh release view $tag --repo "${{ github.repository }}" 2>$null
+            if ($LASTEXITCODE -eq 0) {
+              Get-ChildItem dist -File | Where-Object {
+                $_.Extension -eq ".zip" -or $_.Name.EndsWith(".zip.sha256")
+              } | ForEach-Object {
+                gh release upload $tag $_.FullName --clobber --repo "${{ github.repository }}"
+              }
+            }
           }

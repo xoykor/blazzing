@@ -72,9 +72,7 @@ The Tizen port does not depend on X11, Cairo, SQLite or mpv. See [tizen/README.m
 
 ### Windows desktop
 
-The Windows port lives under `windows/`. It reuses the Tizen catalog/provider frontend but replaces Samsung APIs with a hardened Electron bridge for networking, persistent playlist storage and native mpv playback. The mpv process is embedded through the Windows HWND and controlled over a private Windows named pipe, so media URLs are sent through JSON IPC instead of process arguments.
-
-The source build currently requires Windows 10 or newer, Node.js for packaging, and `mpv.exe` either on `PATH`, at a documented local path, or via `VIPTV_MPV_PATH`. See [windows/README.md](windows/README.md).
+Windows and Linux share the single native C17 desktop codebase (`src/`). On Windows, Blazzing builds with `-DVIPTV_USE_SDL2=ON`, rendering the same Cairo/Pango UI over an SDL2 surface, storing credentials in the native Windows Credential Manager (`wincred.h`), and embedding `mpv.exe` into a native Win32 child `HWND` (`--wid`) controlled over a private Windows named pipe (`\\.\pipe\viptv-mpv-...`).
 
 ## Controls
 
@@ -160,16 +158,16 @@ The repository also contains a Fish helper:
 ./scripts/build-cachyos.fish
 ```
 
-### Windows
+### Windows (MSYS2 MinGW64)
 
-```powershell
-git clone https://github.com/xoykor/blazzing.git
-cd blazzing\windows
-npm install
-npm start
+```sh
+pacman -S --needed git mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-pkgconf mingw-w64-x86_64-SDL2 mingw-w64-x86_64-cairo mingw-w64-x86_64-pango mingw-w64-x86_64-curl mingw-w64-x86_64-json-c mingw-w64-x86_64-sqlite3 mingw-w64-x86_64-openssl mingw-w64-x86_64-libjpeg-turbo mingw-w64-x86_64-libpng mingw-w64-x86_64-libwebp mingw-w64-x86_64-qrencode
+cmake -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release -DVIPTV_USE_SDL2=ON
+cmake --build build-win
+./build-win/visual-iptv.exe
 ```
 
-Build an NSIS installer and portable package with `npm run dist`. The Windows build uses an external `mpv.exe`; see [windows/README.md](windows/README.md) for lookup locations and controls.
+Place `mpv.exe` alongside `visual-iptv.exe`, inside `mpv/mpv.exe`, on `PATH`, or set `VIPTV_MPV_PATH`.
 
 ### Debian / Ubuntu
 
@@ -258,11 +256,11 @@ See [Configuration and diagnostics](docs/CONFIGURATION.md).
 
 ## Project scope
 
-The **Linux desktop core is mature** and changes should prioritize reliability, security, compatibility and maintainability. Large desktop feature additions are intentionally conservative.
+The **native C17 desktop core (Linux and Windows) is mature** and changes should prioritize reliability, security, compatibility and maintainability. Large desktop feature additions are intentionally conservative.
 
-The Samsung Tizen and Windows ports are maintained separately inside the same repository. The Windows port intentionally shares the Tizen catalog/provider frontend while keeping its native desktop integration isolated under `windows/`.
+The Samsung Tizen Web App is maintained separately under `tizen/`.
 
-Not currently implemented in the Linux desktop UI:
+Not currently implemented in the desktop UI:
 
 - full EPG interface;
 - graphical audio-track selector;
@@ -277,19 +275,19 @@ See the platform-specific README for Tizen limitations rather than assuming feat
 
 ```text
 include/visual_iptv/   public/internal module APIs
+include/compat/X11/    Xlib compatibility headers over SDL2 (Windows/SDL2 backend)
 src/app/               entry point, hub and Pluto application
 src/core/              shared types, ownership and validation
 src/provider/          Xtream, M3U and Pluto providers
 src/database/          SQLite persistence
 src/decoder/           frame-capture abstraction and FFmpeg backend
 src/thumbnails/        queue, download, decode and cache
-src/player_mpv/        persistent mpv JSON IPC backend
-src/ui_x11/            X11 UI, Cairo/Pango renderer and UI motion
+src/player_mpv/        persistent mpv JSON IPC backend (Unix socket / Win32 named pipe)
+src/ui_x11/            Desktop UI (X11 or SDL2), Cairo/Pango renderer and UI motion
 src/tools/             diagnostics/development utilities
 tests/                 automated tests
 flatpak/               Flatpak manifest and metadata
 tizen/                 Samsung Tizen Web App
-windows/               Windows desktop port (Electron host + mpv IPC)
 worker/                encrypted pairing relay
 docs/                  technical documentation
 ```
@@ -303,7 +301,6 @@ docs/                  technical documentation
 - [Development](docs/DEVELOPMENT.md)
 - [Flatpak](flatpak/README.md)
 - [Tizen port](tizen/README.md)
-- [Windows port](windows/README.md)
 - [Pairing Worker](worker/README.md)
 - [Changelog](CHANGELOG.md)
 

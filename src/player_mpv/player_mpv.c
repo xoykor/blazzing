@@ -12,23 +12,28 @@
 #include <json-c/json.h>
 #include <ctype.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <poll.h>
 #include <pthread.h>
-#include <signal.h>
 #include <stdatomic.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <poll.h>
+#include <signal.h>
+#include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
+#endif
 
 #define VIP_MPV_LOG_CAP 4096u
 #define VIP_MPV_IPC_BUF_CAP 32768u
@@ -57,6 +62,11 @@ struct vip_mpv_player {
     pid_t pid;
     int log_fd;
     int ipc_fd;
+#ifdef _WIN32
+    HANDLE proc_handle;
+    HANDLE log_handle;
+    HANDLE ipc_handle;
+#endif
     char ipc_path[108];
     char *mpv_path;
     unsigned long window_id;
@@ -113,25 +123,36 @@ static void debug_log(vip_mpv_player_t *player, const char *fmt, ...) {
 
 /* Return monotonic time in milliseconds for deadlines and animation timing. */
 static int64_t monotonic_ms(void) {
+#ifdef _WIN32
+    return (int64_t)GetTickCount64();
+#else
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
         return 0;
     return (int64_t)ts.tv_sec * 1000LL + (int64_t)(ts.tv_nsec / 1000000L);
+#endif
 }
 
 /* Sleep for the requested number of milliseconds, retrying after interruptions. */
 static void sleep_ms(long ms) {
+#ifdef _WIN32
+    if (ms > 0)
+        Sleep((DWORD)ms);
+#else
     struct timespec ts = {.tv_sec = ms / 1000L, .tv_nsec = (ms % 1000L) * 1000000L};
     while (nanosleep(&ts, &ts) != 0 && errno == EINTR) {
     }
+#endif
 }
 
+#ifndef _WIN32
 /* Set nonblocking. */
 static void set_nonblocking(int fd) {
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags >= 0)
         (void)fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
+#endif
 
 /* Return whether url start. */
 static bool is_url_start(const char *s, size_t remaining, size_t *prefix_len) {
@@ -251,6 +272,20 @@ static void reset_media_snapshot_locked(vip_mpv_player_t *player, double start_s
     player->recent_log_len = 0u;
 }
 
+#ifdef _WIN32
+static int write_all_handle(HANDLE h, const char *text, size_t len) {
+    if (!h || h == INVALID_HANDLE_VALUE)
+        return -1;
+    size_t offset = 0u;
+    while (offset < len) {
+        DWORD written = 0;
+        if (!WriteFile(h, text + offset, (DWORD)(len - offset), &written, NULL) || written == 0)
+            return -1;
+        offset += (size_t)written;
+    }
+    return 0;
+}
+#else
 /* Write all fd. */
 static int write_all_fd(int fd, const char *text, size_t len) {
     size_t offset = 0u;
@@ -271,6 +306,7 @@ static int write_all_fd(int fd, const char *text, size_t len) {
     }
     return 0;
 }
+#endif
 
 /* Write line in the player. */
 static int player_write_line(vip_mpv_player_t *player, const char *text) {
@@ -278,6 +314,9 @@ static int player_write_line(vip_mpv_player_t *player, const char *text) {
         return -1;
     pthread_mutex_lock(&player->mutex);
     int fd = player->ipc_fd;
+#ifdef _WIN32
+    HANDLE ipc_h = player->ipc_handle;
+#endif
     bool available = player->runtime_running && fd >= 0;
     pthread_mutex_unlock(&player->mutex);
     if (!available)
@@ -285,9 +324,15 @@ static int player_write_line(vip_mpv_player_t *player, const char *text) {
 
     size_t len = strlen(text);
     pthread_mutex_lock(&player->write_mutex);
+#ifdef _WIN32
+    int rc = write_all_handle(ipc_h, text, len);
+    if (rc == 0)
+        rc = write_all_handle(ipc_h, "\n", 1u);
+#else
     int rc = write_all_fd(fd, text, len);
     if (rc == 0)
         rc = write_all_fd(fd, "\n", 1u);
+#endif
     pthread_mutex_unlock(&player->write_mutex);
     return rc;
 }
@@ -431,12 +476,17 @@ static int send_seek(vip_mpv_player_t *player, double seconds, bool relative) {
 
 /* Create ipc path. */
 static bool make_ipc_path(vip_mpv_player_t *player) {
+    uint64_t n = atomic_fetch_add(&g_socket_counter, 1u);
+#ifdef _WIN32
+    int written = snprintf(player->ipc_path, sizeof(player->ipc_path), "\\\\.\\pipe\\viptv-mpv-%lu-%llu",
+                           (unsigned long)GetCurrentProcessId(), (unsigned long long)n);
+    return written > 0 && (size_t)written < sizeof(player->ipc_path);
+#else
     const char *runtime = getenv("XDG_RUNTIME_DIR");
     struct stat st;
     if (!runtime || !runtime[0] || stat(runtime, &st) != 0 || !S_ISDIR(st.st_mode) ||
         access(runtime, W_OK | X_OK) != 0)
         runtime = "/tmp";
-    uint64_t n = atomic_fetch_add(&g_socket_counter, 1u);
     int written = snprintf(player->ipc_path, sizeof(player->ipc_path), "%s/viptv-mpv-%ld-%llu.sock", runtime,
                            (long)getpid(), (unsigned long long)n);
     if (written < 0 || (size_t)written >= sizeof(player->ipc_path)) {
@@ -444,8 +494,147 @@ static bool make_ipc_path(vip_mpv_player_t *player) {
                            (long)getpid(), (unsigned long long)n);
     }
     return written > 0 && (size_t)written < sizeof(player->ipc_path);
+#endif
 }
 
+#ifdef _WIN32
+static bool append_win32_mpv_arg(char *dst, size_t cap, size_t *len, const char *arg) {
+    if (!dst || !len || !arg)
+        return false;
+    if (*len > 0) {
+        if (*len + 1u >= cap)
+            return false;
+        dst[(*len)++] = ' ';
+    }
+    if (*len + 2u >= cap)
+        return false;
+    dst[(*len)++] = '"';
+    for (const char *p = arg; *p; ++p) {
+        if (*p == '"' || *p == '\\') {
+            if (*len + 2u >= cap)
+                return false;
+            dst[(*len)++] = '\\';
+        }
+        if (*len + 2u >= cap)
+            return false;
+        dst[(*len)++] = *p;
+    }
+    dst[(*len)++] = '"';
+    dst[*len] = '\0';
+    return true;
+}
+
+static HANDLE try_connect_ipc_win32(const char *path) {
+    HANDLE h = CreateFileA(path, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+    return h == INVALID_HANDLE_VALUE ? NULL : h;
+}
+
+static void terminate_and_reap_win32(HANDLE proc) {
+    if (!proc)
+        return;
+    if (WaitForSingleObject(proc, 200) != WAIT_OBJECT_0) {
+        (void)TerminateProcess(proc, 1);
+        (void)WaitForSingleObject(proc, 200);
+    }
+    CloseHandle(proc);
+}
+
+static int spawn_runtime(vip_mpv_player_t *player, int *log_read_fd) {
+    const char *renderer = getenv("VIPTV_MPV_RENDERER");
+    bool use_gpu_next = renderer && (!strcasecmp(renderer, "next") || !strcasecmp(renderer, "gpu-next"));
+    const char *requested_hwdec = getenv("VIPTV_MPV_HWDEC");
+    const char *hwdec = requested_hwdec && requested_hwdec[0] ? requested_hwdec : "auto-safe";
+    const char *vo_arg = use_gpu_next ? "--vo=gpu-next,gpu" : "--vo=gpu";
+
+    if (!make_ipc_path(player))
+        return -1;
+
+    SECURITY_ATTRIBUTES sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+
+    HANDLE log_read = NULL, log_write = NULL;
+    if (!CreatePipe(&log_read, &log_write, &sa, 0))
+        return -1;
+    (void)SetHandleInformation(log_read, HANDLE_FLAG_INHERIT, 0);
+
+    HANDLE nul = CreateFileA("NUL", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
+                             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+
+    char ipc_arg[160];
+    char hwdec_arg[96];
+    char title_arg[96];
+    char wid_arg[96];
+    snprintf(ipc_arg, sizeof(ipc_arg), "--input-ipc-server=%s", player->ipc_path);
+    snprintf(hwdec_arg, sizeof(hwdec_arg), "--hwdec=%s", hwdec);
+    snprintf(title_arg, sizeof(title_arg), "--title=visual-iptv-mpv-%lu",
+             (unsigned long)GetCurrentProcessId());
+    snprintf(wid_arg, sizeof(wid_arg), "--wid=%lu", player->window_id);
+    const char *audio_arg = player->audio ? "--audio=auto" : "--no-audio";
+    const char *argv[32];
+    size_t ai = 0u;
+    argv[ai++] = player->mpv_path;
+    argv[ai++] = "--no-config";
+    argv[ai++] = "--idle=yes";
+    argv[ai++] = "--force-window=immediate";
+    argv[ai++] = "--no-border";
+    argv[ai++] = wid_arg;
+    argv[ai++] = title_arg;
+    argv[ai++] = "--keep-open=no";
+    argv[ai++] = "--osc=no";
+    argv[ai++] = "--osd-level=0";
+    argv[ai++] = "--input-terminal=no";
+    argv[ai++] = "--input-default-bindings=no";
+    argv[ai++] = "--ytdl=no";
+    argv[ai++] = player->debug ? "--msg-level=all=info" : "--msg-level=all=warn";
+    argv[ai++] = vo_arg;
+    argv[ai++] = hwdec_arg;
+    argv[ai++] = "--video-sync=audio";
+    argv[ai++] = "--interpolation=no";
+    argv[ai++] = ipc_arg;
+    argv[ai++] = audio_arg;
+    argv[ai] = NULL;
+
+    char cmdline[4096];
+    size_t cmd_len = 0;
+    cmdline[0] = '\0';
+    for (size_t i = 0; argv[i]; ++i) {
+        if (!append_win32_mpv_arg(cmdline, sizeof(cmdline), &cmd_len, argv[i])) {
+            if (nul != INVALID_HANDLE_VALUE)
+                CloseHandle(nul);
+            CloseHandle(log_read);
+            CloseHandle(log_write);
+            return -1;
+        }
+    }
+
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof(si));
+    memset(&pi, 0, sizeof(pi));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = nul != INVALID_HANDLE_VALUE ? nul : GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdOutput = log_write;
+    si.hStdError = log_write;
+
+    BOOL ok = CreateProcessA(NULL, cmdline, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+    if (nul != INVALID_HANDLE_VALUE)
+        CloseHandle(nul);
+    CloseHandle(log_write);
+    if (!ok) {
+        CloseHandle(log_read);
+        return -1;
+    }
+    CloseHandle(pi.hThread);
+    player->proc_handle = pi.hProcess;
+    player->log_handle = log_read;
+    player->ipc_handle = NULL;
+    *log_read_fd = 1;
+    return 1;
+}
+#else
 /* Handle the try connect ipc operation. */
 static int try_connect_ipc(const char *path) {
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -580,6 +769,7 @@ static int spawn_runtime(vip_mpv_player_t *player, int *log_read_fd) {
     *log_read_fd = log_pipe[0];
     return (int)pid;
 }
+#endif
 
 /* Handle the drain mpv log operation. */
 static void drain_mpv_log(vip_mpv_player_t *player, int fd) {
@@ -587,7 +777,21 @@ static void drain_mpv_log(vip_mpv_player_t *player, int fd) {
     if (fd < 0)
         return;
     for (;;) {
+#ifdef _WIN32
+        pthread_mutex_lock(&player->mutex);
+        HANDLE lh = player->log_handle;
+        pthread_mutex_unlock(&player->mutex);
+        DWORD avail = 0;
+        if (!lh || !PeekNamedPipe(lh, NULL, 0, NULL, &avail, NULL) || avail == 0)
+            break;
+        DWORD to_read = avail < sizeof(tmp) ? avail : (DWORD)sizeof(tmp);
+        DWORD nread = 0;
+        if (!ReadFile(lh, tmp, to_read, &nread, NULL) || nread == 0)
+            break;
+        ssize_t count = (ssize_t)nread;
+#else
         ssize_t count = read(fd, tmp, sizeof(tmp));
+#endif
         if (count > 0) {
             char clean[1024] = {0};
             size_t clean_len = 0u;
@@ -609,8 +813,10 @@ static void drain_mpv_log(vip_mpv_player_t *player, int fd) {
             }
             continue;
         }
+#ifndef _WIN32
         if (count < 0 && errno == EINTR)
             continue;
+#endif
         break;
     }
 }
@@ -781,6 +987,9 @@ static void handle_ipc_line(vip_mpv_player_t *player, const char *line) {
 static void consume_ipc(vip_mpv_player_t *player, char *buf, size_t *len) {
     pthread_mutex_lock(&player->mutex);
     int fd = player->ipc_fd;
+#ifdef _WIN32
+    HANDLE ih = player->ipc_handle;
+#endif
     pthread_mutex_unlock(&player->mutex);
     if (fd < 0)
         return;
@@ -794,7 +1003,18 @@ static void consume_ipc(vip_mpv_player_t *player, char *buf, size_t *len) {
         }
 
         size_t writable = VIP_MPV_IPC_BUF_CAP - *len - 1u;
+#ifdef _WIN32
+        DWORD avail = 0;
+        if (!ih || !PeekNamedPipe(ih, NULL, 0, NULL, &avail, NULL) || avail == 0)
+            break;
+        DWORD to_read = avail < (DWORD)writable ? avail : (DWORD)writable;
+        DWORD nread = 0;
+        if (!ReadFile(ih, buf + *len, to_read, &nread, NULL) || nread == 0)
+            break;
+        ssize_t n = (ssize_t)nread;
+#else
         ssize_t n = read(fd, buf + *len, writable);
+#endif
         if (n > 0) {
             *len += (size_t)n;
             buf[*len] = '\0';
@@ -824,8 +1044,10 @@ static void consume_ipc(vip_mpv_player_t *player, char *buf, size_t *len) {
             continue;
         }
 
+#ifndef _WIN32
         if (n < 0 && errno == EINTR)
             continue;
+#endif
         break;
     }
 }
@@ -852,6 +1074,26 @@ static void *monitor_main(void *userdata) {
             break;
 
         if (ipc_fd < 0 && !shutting_down) {
+#ifdef _WIN32
+            HANDLE connected_h = try_connect_ipc_win32(path);
+            if (connected_h) {
+                bool accepted = false;
+                pthread_mutex_lock(&player->mutex);
+                if (player->ipc_fd < 0) {
+                    player->ipc_handle = connected_h;
+                    player->ipc_fd = 1;
+                    ++player->serial;
+                    accepted = true;
+                }
+                pthread_mutex_unlock(&player->mutex);
+                if (!accepted)
+                    CloseHandle(connected_h);
+                else {
+                    debug_log(player, "IPC conectado; mpv persistente pronto");
+                    send_observers(player);
+                }
+            }
+#else
             int connected = try_connect_ipc(path);
             if (connected >= 0) {
                 bool accepted = false;
@@ -869,12 +1111,19 @@ static void *monitor_main(void *userdata) {
                     send_observers(player);
                 }
             }
+#endif
         }
 
         pthread_mutex_lock(&player->mutex);
         ipc_fd = player->ipc_fd;
         log_fd = player->log_fd;
+#ifdef _WIN32
+        HANDLE proc_h = player->proc_handle;
+#endif
         pthread_mutex_unlock(&player->mutex);
+#ifdef _WIN32
+        sleep_ms(30);
+#else
         struct pollfd pfds[2];
         nfds_t nfds = 0u;
         if (log_fd >= 0)
@@ -885,11 +1134,22 @@ static void *monitor_main(void *userdata) {
             (void)poll(pfds, nfds, 50);
         else
             sleep_ms(50);
+#endif
         if (log_fd >= 0)
             drain_mpv_log(player, log_fd);
         if (ipc_fd >= 0)
             consume_ipc(player, ipc_buf, &ipc_len);
 
+#ifdef _WIN32
+        if (proc_h && WaitForSingleObject(proc_h, 0) == WAIT_OBJECT_0) {
+            DWORD win_exit = 0;
+            if (GetExitCodeProcess(proc_h, &win_exit)) {
+                status = (int)win_exit;
+                status_valid = true;
+            }
+            break;
+        }
+#else
         pid_t result = waitpid(pid, &status, WNOHANG);
         if (result == pid) {
             status_valid = true;
@@ -897,6 +1157,7 @@ static void *monitor_main(void *userdata) {
         }
         if (result < 0 && errno != EINTR)
             break;
+#endif
         if (shutting_down)
             break;
     }
@@ -906,11 +1167,34 @@ static void *monitor_main(void *userdata) {
     int ipc_fd = player->ipc_fd;
     pid_t pid = player->pid;
     bool shutting_down = player->shutting_down;
+#ifdef _WIN32
+    HANDLE proc_h = player->proc_handle;
+    HANDLE log_h = player->log_handle;
+    HANDLE ipc_h = player->ipc_handle;
+    player->proc_handle = NULL;
+    player->log_handle = NULL;
+    player->ipc_handle = NULL;
+#endif
     player->log_fd = -1;
     player->ipc_fd = -1;
     player->pid = -1;
     pthread_mutex_unlock(&player->mutex);
 
+#ifdef _WIN32
+    (void)ipc_fd;
+    (void)log_fd;
+    (void)pid;
+    if (ipc_h)
+        CloseHandle(ipc_h);
+    if (log_h)
+        CloseHandle(log_h);
+    if (proc_h) {
+        if (!status_valid)
+            terminate_and_reap_win32(proc_h);
+        else
+            CloseHandle(proc_h);
+    }
+#else
     if (ipc_fd >= 0)
         close(ipc_fd);
     if (log_fd >= 0) {
@@ -922,33 +1206,45 @@ static void *monitor_main(void *userdata) {
         status = 0;
     }
     (void)unlink(player->ipc_path);
+#endif
 
     pthread_mutex_lock(&player->mutex);
     player->runtime_running = false;
     player->media_running = false;
+#ifdef _WIN32
+    if (status_valid) {
+        player->exit_code_valid = true;
+        player->exit_code = status;
+    }
+#else
     if (status_valid && WIFEXITED(status)) {
         player->exit_code_valid = true;
         player->exit_code = WEXITSTATUS(status);
     }
+#endif
     if (!shutting_down) {
         trim_text(player->recent_log);
         if (player->recent_log[0])
             snprintf(player->last_error, sizeof(player->last_error), "%.511s", player->recent_log);
+#ifndef _WIN32
         else if (status_valid && WIFEXITED(status) && WEXITSTATUS(status) == 127)
             snprintf(player->last_error, sizeof(player->last_error),
                      "mpv não encontrado; instale o pacote mpv");
+#endif
         else
             snprintf(player->last_error, sizeof(player->last_error), "processo mpv encerrou inesperadamente");
         touch_state_locked(player, VIP_PLAYER_ERROR);
     }
     pthread_mutex_unlock(&player->mutex);
 
+#ifndef _WIN32
     if (player->debug && status_valid) {
         if (WIFEXITED(status))
             debug_log(player, "runtime-exit-code=%d", WEXITSTATUS(status));
         else if (WIFSIGNALED(status))
             debug_log(player, "runtime-terminated-by-signal=%d", WTERMSIG(status));
     }
+#endif
     return NULL;
 }
 
@@ -978,8 +1274,12 @@ static void shutdown_runtime(vip_mpv_player_t *player) {
     pthread_mutex_unlock(&player->mutex);
 
     (void)send_quit(player);
+#ifndef _WIN32
     if (pid > 0)
         (void)kill(pid, SIGTERM);
+#else
+    (void)pid;
+#endif
     if (joinable)
         pthread_join(thread, NULL);
 
@@ -988,15 +1288,29 @@ static void shutdown_runtime(vip_mpv_player_t *player) {
     player->runtime_running = false;
     player->shutting_down = false;
     player->pid = -1;
+#ifdef _WIN32
+    if (player->ipc_handle)
+        CloseHandle(player->ipc_handle);
+    if (player->log_handle)
+        CloseHandle(player->log_handle);
+    if (player->proc_handle)
+        terminate_and_reap_win32(player->proc_handle);
+    player->ipc_handle = NULL;
+    player->log_handle = NULL;
+    player->proc_handle = NULL;
+#else
     if (player->ipc_fd >= 0)
         close(player->ipc_fd);
     if (player->log_fd >= 0)
         close(player->log_fd);
+#endif
     player->ipc_fd = -1;
     player->log_fd = -1;
     pthread_mutex_unlock(&player->mutex);
+#ifndef _WIN32
     if (player->ipc_path[0])
         (void)unlink(player->ipc_path);
+#endif
 }
 
 /* Ensure runtime. */
@@ -1022,9 +1336,18 @@ static vip_status_t ensure_runtime(vip_mpv_player_t *player, vip_error_t *error)
         player->exit_code = 0;
         pthread_mutex_unlock(&player->mutex);
         if (pthread_create(&player->monitor, NULL, monitor_main, player) != 0) {
+#ifdef _WIN32
+            if (player->log_handle)
+                CloseHandle(player->log_handle);
+            if (player->proc_handle)
+                terminate_and_reap_win32(player->proc_handle);
+            player->log_handle = NULL;
+            player->proc_handle = NULL;
+#else
             (void)kill((pid_t)child, SIGTERM);
             terminate_and_reap((pid_t)child);
             close(log_fd);
+#endif
             pthread_mutex_lock(&player->mutex);
             player->pid = -1;
             player->log_fd = -1;
@@ -1065,6 +1388,37 @@ static vip_status_t ensure_runtime(vip_mpv_player_t *player, vip_error_t *error)
     return VIP_ERR_PLAYER;
 }
 
+/* Resolve the mpv binary path, preferring VIPTV_MPV_PATH or bundled Windows mpv.exe. */
+static char *resolve_mpv_binary_path(const char *configured) {
+    const char *env_path = getenv("VIPTV_MPV_PATH");
+    if (env_path && env_path[0])
+        return vip_strdup(env_path);
+    if (configured && configured[0] && strcmp(configured, "mpv") != 0)
+        return vip_strdup(configured);
+#ifdef _WIN32
+    char exe_path[MAX_PATH] = {0};
+    DWORD n = GetModuleFileNameA(NULL, exe_path, MAX_PATH);
+    if (n > 0 && n < MAX_PATH) {
+        char *slash = strrchr(exe_path, '\\');
+        if (!slash)
+            slash = strrchr(exe_path, '/');
+        if (slash) {
+            *slash = '\0';
+            const char *rel_candidates[] = {"mpv.exe", "mpv\\mpv.exe", "runtime\\mpv\\mpv.exe"};
+            for (size_t i = 0; i < sizeof(rel_candidates) / sizeof(rel_candidates[0]); ++i) {
+                char candidate[MAX_PATH * 2];
+                snprintf(candidate, sizeof(candidate), "%s\\%s", exe_path, rel_candidates[i]);
+                if (GetFileAttributesA(candidate) != INVALID_FILE_ATTRIBUTES)
+                    return vip_strdup(candidate);
+            }
+        }
+    }
+    return vip_strdup("mpv.exe");
+#else
+    return vip_strdup(configured && configured[0] ? configured : "mpv");
+#endif
+}
+
 /* Create the requested state in the mpv player. */
 vip_status_t vip_mpv_player_create(vip_mpv_player_t **out, const vip_mpv_player_config_t *config,
                                    vip_error_t *error) {
@@ -1073,7 +1427,9 @@ vip_status_t vip_mpv_player_create(vip_mpv_player_t **out, const vip_mpv_player_
         return VIP_ERR_INVALID_ARGUMENT;
     }
     *out = NULL;
+#ifndef _WIN32
     (void)signal(SIGPIPE, SIG_IGN);
+#endif
     vip_mpv_player_t *player = calloc(1, sizeof(*player));
     if (!player) {
         vip_error_set(error, VIP_ERR_NOMEM, "sem memória para player mpv");
@@ -1089,8 +1445,7 @@ vip_status_t vip_mpv_player_create(vip_mpv_player_t **out, const vip_mpv_player_
     player->debug = env_enabled("VIPTV_MPV_DEBUG");
     player->state = VIP_PLAYER_IDLE;
     player->volume = 100.0;
-    const char *path = config->mpv_path && config->mpv_path[0] ? config->mpv_path : "mpv";
-    player->mpv_path = vip_strdup(path);
+    player->mpv_path = resolve_mpv_binary_path(config->mpv_path);
     if (!player->mpv_path) {
         pthread_mutex_destroy(&player->write_mutex);
         pthread_mutex_destroy(&player->mutex);

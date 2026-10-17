@@ -95,10 +95,18 @@ int main(void) {
     TEST_CHECK(wait_for_count(&state, 1, 100L) == 0);
 
     /* Explicit opt-in restores interactive frame capture. */
+#ifdef _WIN32
+    TEST_CHECK(_putenv_s("VIPTV_ALLOW_REMOTE_THUMB_CAPTURE", "1") == 0);
+#else
     TEST_CHECK(setenv("VIPTV_ALLOW_REMOTE_THUMB_CAPTURE", "1", 1) == 0);
+#endif
     TEST_STATUS(vip_thumbnail_scheduler_enqueue(scheduler, &no_art, &error), VIP_OK, &error);
     TEST_CHECK(wait_for_count(&state, 1, 1000L) == 1);
+#ifdef _WIN32
+    (void)_putenv_s("VIPTV_ALLOW_REMOTE_THUMB_CAPTURE", "");
+#else
     unsetenv("VIPTV_ALLOW_REMOTE_THUMB_CAPTURE");
+#endif
 
     /* Viewport/search changes no longer call cancel_pending. An explicit
        provider boundary does, and must discard stale queued work. */

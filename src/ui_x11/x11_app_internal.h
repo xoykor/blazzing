@@ -2,7 +2,9 @@
 #ifndef VIP_X11_APP_INTERNAL_H
 #define VIP_X11_APP_INTERNAL_H
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include "visual_iptv/core.h"
 #include "visual_iptv/database.h"
 #include "visual_iptv/decoder.h"
@@ -32,7 +34,9 @@
 #include <jpeglib.h>
 #include <pthread.h>
 #include <setjmp.h>
+#ifndef _WIN32
 #include <spawn.h>
+#endif
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -40,9 +44,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#ifdef _WIN32
+#include <direct.h>
+#else
 #include <sys/select.h>
-#include <sys/stat.h>
 #include <sys/wait.h>
+#endif
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 

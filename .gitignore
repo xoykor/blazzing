@@ -32,8 +32,5 @@ compile_commands.json
 /tizen/.buildResult/
 *.wgt
 
-# Windows desktop port
-/windows/node_modules/
-/windows/app/
-/windows/dist/
-/windows/mpv/
+# Packaging outputs
+/dist/

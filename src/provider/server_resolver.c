@@ -348,17 +348,34 @@ void vip_streamfire_free_bases(char **bases, size_t count) {
     free(bases);
 }
 
+#ifdef _WIN32
+#include <direct.h>
+#endif
+
 /* Handle the mkdir if needed operation. */
 static int mkdir_if_needed(const char *path) {
+#ifdef _WIN32
+    if (_mkdir(path) == 0 || errno == EEXIST)
+        return 0;
+#else
     if (mkdir(path, 0700) == 0 || errno == EEXIST)
         return 0;
+#endif
     return -1;
 }
 
 /* Handle the identity file path operation. */
 static char *identity_file_path(void) {
     const char *config = getenv("XDG_CONFIG_HOME");
+#ifdef _WIN32
+    if (!config || !config[0])
+        config = getenv("APPDATA");
+#endif
     const char *home = getenv("HOME");
+#ifdef _WIN32
+    if (!home || !home[0])
+        home = getenv("USERPROFILE");
+#endif
     char *base = NULL;
     if (config && config[0])
         base = vip_strdup(config);

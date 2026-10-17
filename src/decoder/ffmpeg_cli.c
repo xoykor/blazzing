@@ -11,18 +11,23 @@
 #include "decoder_internal.h"
 
 #include <errno.h>
-#include <fcntl.h>
-#include <poll.h>
-#include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <poll.h>
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
+#endif
 
 #define VIP_FFMPEG_DEFAULT_TIMEOUT_MS 12000u
 #define VIP_FFMPEG_DEFAULT_FRAMES 3u
@@ -39,28 +44,14 @@ typedef struct {
 
 /* Return monotonic time in milliseconds for deadlines and animation timing. */
 static int64_t monotonic_ms(void) {
+#ifdef _WIN32
+    return (int64_t)GetTickCount64();
+#else
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
         return 0;
     return (int64_t)ts.tv_sec * INT64_C(1000) + (int64_t)(ts.tv_nsec / 1000000L);
-}
-
-/* Terminate child. */
-static void terminate_child(pid_t pid) {
-    if (pid <= 0)
-        return;
-    if (kill(pid, SIGTERM) == 0) {
-        for (unsigned i = 0; i < 10; ++i) {
-            int status = 0;
-            pid_t rc = waitpid(pid, &status, WNOHANG);
-            if (rc == pid || rc < 0)
-                return;
-            struct timespec pause = {.tv_sec = 0, .tv_nsec = 20000000L};
-            nanosleep(&pause, NULL);
-        }
-    }
-    (void)kill(pid, SIGKILL);
-    (void)waitpid(pid, NULL, 0);
+#endif
 }
 
 /* Handle the safe mul3 operation. */
@@ -99,6 +90,152 @@ static bool frame_is_useful(const uint8_t *rgb, size_t width, size_t height, siz
     double mean = sum / n;
     double variance = sumsq / n - mean * mean;
     return mean >= 7.0 && variance >= 18.0;
+}
+
+#ifdef _WIN32
+
+static bool append_win32_arg(char *dst, size_t cap, size_t *len, const char *arg) {
+    if (!dst || !len || !arg)
+        return false;
+    if (*len > 0) {
+        if (*len + 1u >= cap)
+            return false;
+        dst[(*len)++] = ' ';
+    }
+    if (*len + 2u >= cap)
+        return false;
+    dst[(*len)++] = '"';
+    for (const char *p = arg; *p; ++p) {
+        if (*p == '"' || *p == '\\') {
+            if (*len + 2u >= cap)
+                return false;
+            dst[(*len)++] = '\\';
+        }
+        if (*len + 2u >= cap)
+            return false;
+        dst[(*len)++] = *p;
+    }
+    dst[(*len)++] = '"';
+    dst[*len] = '\0';
+    return true;
+}
+
+static bool spawn_ffmpeg_win32(const ffmpeg_impl_t *impl, const char *source, HANDLE *proc_out,
+                               HANDLE *stdout_read_out) {
+    SECURITY_ATTRIBUTES sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+
+    HANDLE read_pipe = NULL, write_pipe = NULL;
+    if (!CreatePipe(&read_pipe, &write_pipe, &sa, 0))
+        return false;
+    (void)SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0);
+
+    HANDLE nul = CreateFileA("NUL", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
+                             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+
+    char frame_count[16];
+    char filter[192];
+    char rw_timeout[32];
+    snprintf(frame_count, sizeof(frame_count), "%u", impl->candidate_frames);
+    snprintf(filter, sizeof(filter),
+             "scale=%zu:%zu:force_original_aspect_ratio=decrease,"
+             "pad=%zu:%zu:(ow-iw)/2:(oh-ih)/2",
+             impl->width, impl->height, impl->width, impl->height);
+    unsigned long long timeout_us = (unsigned long long)impl->timeout_ms * 1000ULL;
+    snprintf(rw_timeout, sizeof(rw_timeout), "%llu", timeout_us);
+
+    const char *const argv[] = {impl->ffmpeg_path,
+                                "-hide_banner",
+                                "-loglevel",
+                                "error",
+                                "-nostdin",
+                                "-rw_timeout",
+                                rw_timeout,
+                                "-i",
+                                source,
+                                "-an",
+                                "-sn",
+                                "-dn",
+                                "-threads",
+                                "1",
+                                "-vf",
+                                filter,
+                                "-frames:v",
+                                frame_count,
+                                "-f",
+                                "rawvideo",
+                                "-pix_fmt",
+                                "rgb24",
+                                "pipe:1",
+                                NULL};
+
+    char cmdline[4096];
+    size_t cmd_len = 0;
+    cmdline[0] = '\0';
+    for (size_t i = 0; argv[i]; ++i) {
+        if (!append_win32_arg(cmdline, sizeof(cmdline), &cmd_len, argv[i])) {
+            if (nul != INVALID_HANDLE_VALUE)
+                CloseHandle(nul);
+            CloseHandle(read_pipe);
+            CloseHandle(write_pipe);
+            return false;
+        }
+    }
+
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof(si));
+    memset(&pi, 0, sizeof(pi));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = nul != INVALID_HANDLE_VALUE ? nul : GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdOutput = write_pipe;
+    si.hStdError = nul != INVALID_HANDLE_VALUE ? nul : GetStdHandle(STD_ERROR_HANDLE);
+
+    BOOL ok = CreateProcessA(NULL, cmdline, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+    if (nul != INVALID_HANDLE_VALUE)
+        CloseHandle(nul);
+    CloseHandle(write_pipe);
+    if (!ok) {
+        CloseHandle(read_pipe);
+        return false;
+    }
+    CloseHandle(pi.hThread);
+    *proc_out = pi.hProcess;
+    *stdout_read_out = read_pipe;
+    return true;
+}
+
+static void terminate_child_win32(HANDLE proc) {
+    if (!proc)
+        return;
+    if (WaitForSingleObject(proc, 50) != WAIT_OBJECT_0) {
+        (void)TerminateProcess(proc, 1);
+        (void)WaitForSingleObject(proc, 200);
+    }
+    CloseHandle(proc);
+}
+
+#else
+
+/* Terminate child. */
+static void terminate_child(pid_t pid) {
+    if (pid <= 0)
+        return;
+    if (kill(pid, SIGTERM) == 0) {
+        for (unsigned i = 0; i < 10; ++i) {
+            int status = 0;
+            pid_t rc = waitpid(pid, &status, WNOHANG);
+            if (rc == pid || rc < 0)
+                return;
+            struct timespec pause = {.tv_sec = 0, .tv_nsec = 20000000L};
+            nanosleep(&pause, NULL);
+        }
+    }
+    (void)kill(pid, SIGKILL);
+    (void)waitpid(pid, NULL, 0);
 }
 
 /* execv/execvp receives source as one argv element.  No shell is involved,
@@ -190,6 +327,7 @@ static int spawn_ffmpeg(const ffmpeg_impl_t *impl, const char *source, int *stdo
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
+#endif
 
 /* Capture the requested state in the ffmpeg. */
 static vip_status_t ffmpeg_capture(void *userdata, const char *source, vip_rgb_frame_t *frame_out,
@@ -207,6 +345,55 @@ static vip_status_t ffmpeg_capture(void *userdata, const char *source, vip_rgb_f
         return VIP_ERR_NOMEM;
     }
 
+    size_t offset = 0;
+    unsigned frames_seen = 0;
+    bool valid = false;
+    bool timed_out = false;
+    int64_t deadline = monotonic_ms() + (int64_t)impl->timeout_ms;
+
+#ifdef _WIN32
+    HANDLE proc = NULL, pipe_read = NULL;
+    if (!spawn_ffmpeg_win32(impl, source, &proc, &pipe_read)) {
+        free(candidate);
+        vip_error_set(error, VIP_ERR_IO, "não foi possível iniciar o FFmpeg");
+        return VIP_ERR_IO;
+    }
+    while (!valid && frames_seen < impl->candidate_frames) {
+        int64_t remaining = deadline - monotonic_ms();
+        if (remaining <= 0) {
+            timed_out = true;
+            break;
+        }
+        DWORD avail = 0;
+        if (!PeekNamedPipe(pipe_read, NULL, 0, NULL, &avail, NULL))
+            break;
+        if (avail == 0) {
+            if (WaitForSingleObject(proc, 20) == WAIT_OBJECT_0) {
+                if (!PeekNamedPipe(pipe_read, NULL, 0, NULL, &avail, NULL) || avail == 0)
+                    break;
+            } else {
+                continue;
+            }
+        }
+        DWORD to_read = (DWORD)(frame_bytes - offset);
+        if (to_read > avail)
+            to_read = avail;
+        DWORD n = 0;
+        if (!ReadFile(pipe_read, candidate + offset, to_read, &n, NULL) || n == 0)
+            break;
+        offset += (size_t)n;
+        if (offset == frame_bytes) {
+            ++frames_seen;
+            if (frame_is_useful(candidate, impl->width, impl->height, impl->width * 3u)) {
+                valid = true;
+                break;
+            }
+            offset = 0;
+        }
+    }
+    CloseHandle(pipe_read);
+    terminate_child_win32(proc);
+#else
     int fd = -1;
     int pid_int = spawn_ffmpeg(impl, source, &fd);
     if (pid_int < 0) {
@@ -215,11 +402,6 @@ static vip_status_t ffmpeg_capture(void *userdata, const char *source, vip_rgb_f
         return VIP_ERR_IO;
     }
     pid_t pid = (pid_t)pid_int;
-    size_t offset = 0;
-    unsigned frames_seen = 0;
-    bool valid = false;
-    bool timed_out = false;
-    int64_t deadline = monotonic_ms() + (int64_t)impl->timeout_ms;
 
     while (!valid && frames_seen < impl->candidate_frames) {
         int64_t remaining = deadline - monotonic_ms();
@@ -260,6 +442,7 @@ static vip_status_t ffmpeg_capture(void *userdata, const char *source, vip_rgb_f
 
     close(fd);
     terminate_child(pid);
+#endif
 
     if (!valid) {
         free(candidate);

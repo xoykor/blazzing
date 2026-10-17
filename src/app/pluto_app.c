@@ -197,10 +197,19 @@ static bool point_in(int px, int py, int x, int y, int w, int h) {
     return px >= x && px < x + w && py >= y && py < y + h;
 }
 
+#ifdef _WIN32
+#include <direct.h>
+#endif
+
 /* Handle the mkdir one operation. */
 static int mkdir_one(const char *path) {
+#ifdef _WIN32
+    if (_mkdir(path) == 0 || errno == EEXIST)
+        return 0;
+#else
     if (mkdir(path, 0700) == 0 || errno == EEXIST)
         return 0;
+#endif
     return -1;
 }
 
@@ -209,11 +218,14 @@ static int mkdir_parents(const char *path) {
     char tmp[1024];
     snprintf(tmp, sizeof(tmp), "%s", path);
     for (char *p = tmp + 1; *p; ++p) {
-        if (*p == '/') {
+        if (*p == '/' || *p == '\\') {
+            char sep = *p;
+            if (p > tmp && p[-1] == ':')
+                continue;
             *p = '\0';
             if (mkdir_one(tmp) != 0)
                 return -1;
-            *p = '/';
+            *p = sep;
         }
     }
     return mkdir_one(tmp);
@@ -222,17 +234,32 @@ static int mkdir_parents(const char *path) {
 /* Initialize cache path. */
 static void init_cache_path(pluto_app_t *a) {
     const char *home = getenv("HOME");
+#ifdef _WIN32
+    if (!home || !home[0])
+        home = getenv("USERPROFILE");
+    if (!home || !home[0])
+        home = getenv("TEMP");
+#endif
     if (!home || !home[0])
         home = "/tmp";
     const char *base = getenv("XDG_CACHE_HOME");
+#ifdef _WIN32
+    if (!base || !base[0])
+        base = getenv("LOCALAPPDATA");
+#endif
     char fallback[1024];
     if (!base || !base[0]) {
         snprintf(fallback, sizeof(fallback), "%s/.cache", home);
         base = fallback;
     }
     int n = snprintf(a->cache_dir, sizeof(a->cache_dir), "%s/visual-iptv-x11/thumbnails", base);
+#ifdef _WIN32
+    long uid_tag = 0L;
+#else
+    long uid_tag = (long)getuid();
+#endif
     if (n < 0 || (size_t)n >= sizeof(a->cache_dir))
-        snprintf(a->cache_dir, sizeof(a->cache_dir), "/tmp/visual-iptv-x11-%ld/thumbnails", (long)getuid());
+        snprintf(a->cache_dir, sizeof(a->cache_dir), "/tmp/visual-iptv-x11-%ld/thumbnails", uid_tag);
     if (mkdir_parents(a->cache_dir) != 0)
         fprintf(stderr, "[pluto/cache] não foi possível criar %s\n", a->cache_dir);
 }
@@ -840,6 +867,9 @@ static void handle_key(pluto_app_t *a, XKeyEvent *event) {
 
 /* Handle the pulse runtime available operation. */
 static bool pulse_runtime_available(void) {
+#ifdef _WIN32
+    return true;
+#else
     const char *server = getenv("PULSE_SERVER");
     if (server && server[0])
         return true;
@@ -849,6 +879,7 @@ static bool pulse_runtime_available(void) {
     char path[1024];
     int n = snprintf(path, sizeof(path), "%s/pulse/native", runtime);
     return n > 0 && (size_t)n < sizeof(path) && access(path, F_OK) == 0;
+#endif
 }
 
 /* Initialize x11. */

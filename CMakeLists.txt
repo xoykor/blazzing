@@ -3,17 +3,26 @@ project(visual_iptv_x11 VERSION 1.5.1 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
+if(WIN32)
+    set(CMAKE_C_EXTENSIONS ON)
+else()
+    set(CMAKE_C_EXTENSIONS OFF)
+endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(VIPTV_SANITIZE "Enable AddressSanitizer/UBSan" OFF)
+option(VIPTV_USE_SDL2 "Use SDL2 windowing backend instead of native X11" ${WIN32})
 set(VIPTV_PAIRING_DEFAULT_URL "https://blazzing-pairing.vsxk.workers.dev" CACHE STRING
     "Default HTTPS base URL for the public phone-pairing relay")
 
 find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
-pkg_check_modules(X11 REQUIRED IMPORTED_TARGET x11)
+if(VIPTV_USE_SDL2)
+    pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
+else()
+    pkg_check_modules(X11 REQUIRED IMPORTED_TARGET x11)
+endif()
 pkg_check_modules(CURL REQUIRED IMPORTED_TARGET libcurl)
 pkg_check_modules(JSONC REQUIRED IMPORTED_TARGET json-c)
 pkg_check_modules(SQLITE3 REQUIRED IMPORTED_TARGET sqlite3)
@@ -23,7 +32,7 @@ pkg_check_modules(WEBP REQUIRED IMPORTED_TARGET libwebp)
 pkg_check_modules(CAIRO REQUIRED IMPORTED_TARGET cairo)
 pkg_check_modules(PANGOCAIRO REQUIRED IMPORTED_TARGET pangocairo)
 pkg_check_modules(QRENCODE REQUIRED IMPORTED_TARGET libqrencode)
-find_program(FFMPEG_EXECUTABLE NAMES ffmpeg REQUIRED)
+find_program(FFMPEG_EXECUTABLE NAMES ffmpeg)
 find_program(MPV_EXECUTABLE NAMES mpv)
 
 function(vip_warnings target)
@@ -76,7 +85,7 @@ target_link_libraries(vip_pairing PUBLIC
     vip_core Threads::Threads PkgConfig::CURL PkgConfig::JSONC OpenSSL::Crypto)
 vip_warnings(vip_pairing)
 
-add_library(vip_ui_x11
+set(VIP_UI_SOURCES
     src/ui_x11/x11_app.c
     src/ui_x11/x11_catalog.c
     src/ui_x11/x11_input.c
@@ -86,9 +95,24 @@ add_library(vip_ui_x11
     src/ui_x11/x11_workers.c
     src/ui_x11/ui_motion.c
     src/ui_x11/ui_render.c)
+if(VIPTV_USE_SDL2)
+    list(APPEND VIP_UI_SOURCES src/ui_x11/x11_sdl2_compat.c)
+endif()
+
+add_library(vip_ui_x11 ${VIP_UI_SOURCES})
+if(VIPTV_USE_SDL2)
+    target_include_directories(vip_ui_x11 BEFORE PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include/compat)
+    target_compile_definitions(vip_ui_x11 PUBLIC VIPTV_USE_SDL2=1 SDL_MAIN_HANDLED=1)
+    set(VIP_WINDOW_BACKEND_LIB PkgConfig::SDL2)
+else()
+    set(VIP_WINDOW_BACKEND_LIB PkgConfig::X11)
+endif()
 target_link_libraries(vip_ui_x11 PUBLIC
     vip_core vip_provider vip_database vip_decoder vip_thumbnails vip_player_mpv vip_pairing
-    PkgConfig::X11 PkgConfig::JPEG PkgConfig::CURL PkgConfig::CAIRO PkgConfig::PANGOCAIRO PkgConfig::QRENCODE Threads::Threads)
+    ${VIP_WINDOW_BACKEND_LIB} PkgConfig::JPEG PkgConfig::CURL PkgConfig::CAIRO PkgConfig::PANGOCAIRO PkgConfig::QRENCODE Threads::Threads)
+if(WIN32)
+    target_link_libraries(vip_ui_x11 PUBLIC advapi32 user32 gdi32)
+endif()
 if(VIPTV_PAIRING_DEFAULT_URL)
     add_compile_definitions(VIPTV_PAIRING_DEFAULT_URL="${VIPTV_PAIRING_DEFAULT_URL}")
 endif()
@@ -109,7 +133,11 @@ set_target_properties(vip-thumb-probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMA
 target_link_libraries(vip-thumb-probe PRIVATE vip_thumbnails vip_decoder)
 vip_warnings(vip-thumb-probe)
 
-message(STATUS "X11: ${X11_VERSION}")
+if(VIPTV_USE_SDL2)
+    message(STATUS "Window backend: SDL2 (${SDL2_VERSION})")
+else()
+    message(STATUS "Window backend: X11 (${X11_VERSION})")
+endif()
 message(STATUS "FFmpeg: ${FFMPEG_EXECUTABLE}")
 if(MPV_EXECUTABLE)
     message(STATUS "mpv runtime: ${MPV_EXECUTABLE}")
@@ -160,15 +188,17 @@ if(BUILD_TESTING)
     vip_warnings(test_thumbnail_policy)
     add_test(NAME thumbnail_policy COMMAND test_thumbnail_policy)
 
-    add_executable(test_decoder_ffmpeg tests/test_decoder_ffmpeg.c)
-    target_link_libraries(test_decoder_ffmpeg PRIVATE vip_decoder vip_thumbnails)
-    vip_warnings(test_decoder_ffmpeg)
-    add_test(NAME decoder_ffmpeg COMMAND test_decoder_ffmpeg)
+    if(NOT WIN32)
+        add_executable(test_decoder_ffmpeg tests/test_decoder_ffmpeg.c)
+        target_link_libraries(test_decoder_ffmpeg PRIVATE vip_decoder vip_thumbnails)
+        vip_warnings(test_decoder_ffmpeg)
+        add_test(NAME decoder_ffmpeg COMMAND test_decoder_ffmpeg)
 
-    add_executable(test_player_mpv tests/test_player_mpv.c)
-    target_link_libraries(test_player_mpv PRIVATE vip_player_mpv)
-    vip_warnings(test_player_mpv)
-    add_test(NAME player_mpv COMMAND test_player_mpv)
+        add_executable(test_player_mpv tests/test_player_mpv.c)
+        target_link_libraries(test_player_mpv PRIVATE vip_player_mpv)
+        vip_warnings(test_player_mpv)
+        add_test(NAME player_mpv COMMAND test_player_mpv)
+    endif()
 
     add_executable(test_ui_motion tests/test_ui_motion.c src/ui_x11/ui_motion.c)
     target_include_directories(test_ui_motion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/tests)

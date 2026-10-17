@@ -468,15 +468,27 @@ vip_status_t vip_thumbnail_scheduler_enqueue(vip_thumbnail_scheduler_t *s,
     return st;
 }
 
+#ifdef _WIN32
+#include <direct.h>
+#endif
+
 /* Handle the mkdir parents operation. */
 static vip_status_t mkdir_parents(const char *path, vip_error_t *error) {
     char *tmp = vip_strdup(path);
     if (!tmp)
         return VIP_ERR_NOMEM;
     for (char *p = tmp + 1; *p; ++p) {
-        if (*p == '/') {
+        if (*p == '/' || *p == '\\') {
+            char sep = *p;
+            if (p > tmp && p[-1] == ':')
+                continue;
             *p = '\0';
-            if (mkdir(tmp, 0755) != 0 && errno != EEXIST) {
+#ifdef _WIN32
+            int mrc = _mkdir(tmp);
+#else
+            int mrc = mkdir(tmp, 0755);
+#endif
+            if (mrc != 0 && errno != EEXIST) {
                 struct stat st;
                 if (stat(tmp, &st) != 0 || !S_ISDIR(st.st_mode)) {
                     vip_error_set(error, VIP_ERR_IO, "não foi possível criar %s: %s", tmp, strerror(errno));
@@ -484,7 +496,7 @@ static vip_status_t mkdir_parents(const char *path, vip_error_t *error) {
                     return VIP_ERR_IO;
                 }
             }
-            *p = '/';
+            *p = sep;
         }
     }
     free(tmp);

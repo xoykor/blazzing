@@ -71,26 +71,21 @@ O player passa sua janela filha X11 de vídeo ao mpv com `--wid`; não existe ca
 
 ## Desktop Windows
 
-O porte Windows é compilado separadamente do alvo CMake nativo do Linux.
+O Windows compila o mesmo alvo nativo em C17 do Linux usando MSYS2 MinGW64 e `-DVIPTV_USE_SDL2=ON`.
 
 Requisitos:
 
 - Windows 10 ou superior, x64;
-- Node.js 20 ou superior para compilar pelo código-fonte;
-- `mpv.exe` disponível no `PATH`, via `VIPTV_MPV_PATH` ou em um dos caminhos descritos em `windows/README.md`.
+- MSYS2 (ambiente `MINGW64`) com `gcc`, `cmake`, `ninja`, `pkgconf`, `SDL2`, `cairo`, `pango`, `curl`, `json-c`, `sqlite3`, `openssl`, `libjpeg-turbo`, `libpng`, `libwebp` e `qrencode`;
+- `mpv.exe` ao lado de `visual-iptv.exe`, em `mpv/mpv.exe`, no `PATH` ou via `VIPTV_MPV_PATH`.
 
-Executar pelo código-fonte:
+Compilar e executar pelo código-fonte (MSYS2 MinGW64):
 
-```powershell
-cd windows
-npm install
-npm start
+```sh
+cmake -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release -DVIPTV_USE_SDL2=ON
+cmake --build build-win
+ctest --test-dir build-win --output-on-failure
+./build-win/visual-iptv.exe
 ```
 
-Gerar instalador + pacote portátil:
-
-```powershell
-npm run dist
-```
-
-O frontend gerado em `windows/app/` é copiado de `tizen/` por `npm run prepare-app`; não deve ser editado diretamente. O empacotamento Windows também é validado por `.github/workflows/windows.yml`.
+A compilação, os testes unitários e o empacotamento portátil para Windows são validados por `.github/workflows/windows.yml`.

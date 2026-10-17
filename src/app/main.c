@@ -9,7 +9,9 @@
 #include <X11/Xlib.h>
 
 /* Run this executable's main entry point. */
-int main(void) {
+int main(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
     XInitThreads();
     return vip_hub_run();
 }

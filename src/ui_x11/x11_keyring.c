@@ -5,16 +5,83 @@
  * Comments intentionally cover straightforward helpers as well as subtle
  * behavior so a maintainer can follow intent without reverse-engineering it.
  */
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include "x11_keyring.h"
 
 #include <ctype.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <spawn.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+
+/* Secret Service attributes are passed directly to execv, but keep the
+ * profile identifier deliberately narrow as an extra boundary check. */
+static bool keyring_profile_id_is_safe(const char *profile_id) {
+    if (!profile_id || !profile_id[0])
+        return false;
+    size_t len = strlen(profile_id);
+    if (len > 128u)
+        return false;
+    for (size_t i = 0u; i < len; ++i) {
+        unsigned char c = (unsigned char)profile_id[i];
+        if (!(isalnum(c) || c == '-' || c == '_' || c == '.' || c == ':'))
+            return false;
+    }
+    return true;
+}
+
+#ifdef _WIN32
+#include <windows.h>
+#include <wincred.h>
+
+bool keyring_store_password(const char *profile_id, const char *password) {
+    if (!keyring_profile_id_is_safe(profile_id) || !password || !password[0])
+        return false;
+    char target[192];
+    int n = snprintf(target, sizeof(target), "visual-iptv:%s", profile_id);
+    if (n <= 0 || (size_t)n >= sizeof(target))
+        return false;
+    CREDENTIALA cred;
+    memset(&cred, 0, sizeof(cred));
+    cred.Type = CRED_TYPE_GENERIC;
+    cred.TargetName = target;
+    cred.CredentialBlobSize = (DWORD)strlen(password);
+    cred.CredentialBlob = (LPBYTE)(uintptr_t)password;
+    cred.Persist = CRED_PERSIST_LOCAL_MACHINE;
+    cred.UserName = (LPSTR)(uintptr_t)profile_id;
+    return CredWriteA(&cred, 0) != FALSE;
+}
+
+bool keyring_lookup_password(const char *profile_id, char *out, size_t cap) {
+    if (!out || cap == 0u)
+        return false;
+    out[0] = '\0';
+    if (!keyring_profile_id_is_safe(profile_id))
+        return false;
+    char target[192];
+    int n = snprintf(target, sizeof(target), "visual-iptv:%s", profile_id);
+    if (n <= 0 || (size_t)n >= sizeof(target))
+        return false;
+    PCREDENTIALA pcred = NULL;
+    if (!CredReadA(target, CRED_TYPE_GENERIC, 0, &pcred) || !pcred)
+        return false;
+    bool ok = false;
+    if (pcred->CredentialBlob && pcred->CredentialBlobSize > 0 &&
+        (size_t)pcred->CredentialBlobSize < cap) {
+        memcpy(out, pcred->CredentialBlob, pcred->CredentialBlobSize);
+        out[pcred->CredentialBlobSize] = '\0';
+        ok = out[0] != '\0';
+    }
+    CredFree(pcred);
+    return ok;
+}
+
+#else
+
+#include <errno.h>
+#include <fcntl.h>
+#include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -39,22 +106,6 @@ static bool find_secret_tool(char *out, size_t cap) {
     }
     out[0] = '\0';
     return false;
-}
-
-/* Secret Service attributes are passed directly to execv, but keep the
- * profile identifier deliberately narrow as an extra boundary check. */
-static bool keyring_profile_id_is_safe(const char *profile_id) {
-    if (!profile_id || !profile_id[0])
-        return false;
-    size_t len = strlen(profile_id);
-    if (len > 128u)
-        return false;
-    for (size_t i = 0u; i < len; ++i) {
-        unsigned char c = (unsigned char)profile_id[i];
-        if (!(isalnum(c) || c == '-' || c == '_' || c == '.' || c == ':'))
-            return false;
-    }
-    return true;
 }
 
 /* Write all bytes to file descriptor. */
@@ -192,3 +243,5 @@ bool keyring_lookup_password(const char *profile_id, char *out, size_t cap) {
     }
     return trim_secret_output(out, n) > 0;
 }
+
+#endif

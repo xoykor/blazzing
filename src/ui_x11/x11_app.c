@@ -10,8 +10,13 @@
 
 
 static int mkdir_one(const char *path) {
+#ifdef _WIN32
+    if (_mkdir(path) == 0 || errno == EEXIST)
+        return 0;
+#else
     if (mkdir(path, 0700) == 0 || errno == EEXIST)
         return 0;
+#endif
     return -1;
 }
 
@@ -20,11 +25,14 @@ static int mkdir_parents(const char *path) {
     char tmp[1024];
     snprintf(tmp, sizeof(tmp), "%s", path);
     for (char *p = tmp + 1; *p; ++p) {
-        if (*p == '/') {
+        if (*p == '/' || *p == '\\') {
+            char sep = *p;
+            if (p > tmp && p[-1] == ':')
+                continue;
             *p = '\0';
             if (mkdir_one(tmp) != 0)
                 return -1;
-            *p = '/';
+            *p = sep;
         }
     }
     return mkdir_one(tmp);
@@ -33,6 +41,12 @@ static int mkdir_parents(const char *path) {
 /* Initialize paths. */
 static void init_paths(app_t *a) {
     const char *home = getenv("HOME");
+#ifdef _WIN32
+    if (!home || !home[0])
+        home = getenv("USERPROFILE");
+    if (!home || !home[0])
+        home = getenv("TEMP");
+#endif
     if (!home || !home[0])
         home = "/tmp";
 
@@ -40,6 +54,12 @@ static void init_paths(app_t *a) {
     char data_fallback[1024];
     const char *cache_base = getenv("XDG_CACHE_HOME");
     const char *data_base = getenv("XDG_DATA_HOME");
+#ifdef _WIN32
+    if (!cache_base || !cache_base[0])
+        cache_base = getenv("LOCALAPPDATA");
+    if (!data_base || !data_base[0])
+        data_base = getenv("APPDATA");
+#endif
     if (!cache_base || !cache_base[0]) {
         snprintf(cache_fallback, sizeof(cache_fallback), "%s/.cache", home);
         cache_base = cache_fallback;
@@ -52,10 +72,15 @@ static void init_paths(app_t *a) {
     int cache_n = snprintf(a->cache_dir, sizeof(a->cache_dir), "%s/visual-iptv-x11/thumbnails", cache_base);
     char data_dir[1024];
     int data_n = snprintf(data_dir, sizeof(data_dir), "%s/visual-iptv-x11", data_base);
+#ifdef _WIN32
+    long uid_tag = 0L;
+#else
+    long uid_tag = (long)getuid();
+#endif
     if (cache_n < 0 || (size_t)cache_n >= sizeof(a->cache_dir))
-        snprintf(a->cache_dir, sizeof(a->cache_dir), "/tmp/visual-iptv-x11-%ld/thumbnails", (long)getuid());
+        snprintf(a->cache_dir, sizeof(a->cache_dir), "/tmp/visual-iptv-x11-%ld/thumbnails", uid_tag);
     if (data_n < 0 || (size_t)data_n >= sizeof(data_dir))
-        snprintf(data_dir, sizeof(data_dir), "/tmp/visual-iptv-x11-%ld", (long)getuid());
+        snprintf(data_dir, sizeof(data_dir), "/tmp/visual-iptv-x11-%ld", uid_tag);
     if (mkdir_parents(a->cache_dir) != 0)
         fprintf(stderr, "[paths] não foi possível criar cache: %s\n", a->cache_dir);
     if (mkdir_parents(data_dir) != 0)
@@ -351,6 +376,9 @@ static bool init_x11(app_t *a, vip_error_t *error) {
 
 /* Handle the pulse runtime available operation. */
 static bool pulse_runtime_available(void) {
+#ifdef _WIN32
+    return true;
+#else
     const char *server = getenv("PULSE_SERVER");
     if (server && server[0])
         return true;
@@ -360,6 +388,7 @@ static bool pulse_runtime_available(void) {
     char path[1024];
     int n = snprintf(path, sizeof(path), "%s/pulse/native", runtime);
     return n > 0 && (size_t)n < sizeof(path) && access(path, F_OK) == 0;
+#endif
 }
 
 /* Initialize runtime. */
@@ -538,6 +567,7 @@ int vip_x11_app_run(void) {
     init_test_env(&a);
 
     int xfd = ConnectionNumber(a.dpy);
+    (void)xfd;
     int64_t next_draw = 0;
     while (!a.quit) {
         while (XPending(a.dpy)) {
@@ -567,11 +597,17 @@ int vip_x11_app_run(void) {
             redraw(&a);
             next_draw = now + (a.screen == SCREEN_PLAYER ? 33 : (ui_animating ? 16 : 100));
         }
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(xfd, &rfds);
-        struct timeval tv = {.tv_sec = 0, .tv_usec = 16000};
-        (void)select(xfd + 1, &rfds, NULL, NULL, &tv);
+#ifdef VIPTV_USE_SDL2
+        vip_sdl2_wait_events(a.dpy, 16);
+#else
+        if (xfd >= 0) {
+            fd_set rfds;
+            FD_ZERO(&rfds);
+            FD_SET(xfd, &rfds);
+            struct timeval tv = {.tv_sec = 0, .tv_usec = 16000};
+            (void)select(xfd + 1, &rfds, NULL, NULL, &tv);
+        }
+#endif
     }
     destroy_app(&a);
     return 0;
