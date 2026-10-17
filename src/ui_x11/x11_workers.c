@@ -1002,8 +1002,13 @@ static bool same_text_case(const char *a, const char *b) {
 static size_t collect_m3u_series_seasons(app_t *a, const char *series_name,
                                          int *seasons, size_t capacity) {
     size_t count = 0u;
+    size_t series_len = series_name ? strlen(series_name) : 0u;
+    if (series_len == 0u)
+        return 0u;
     for (size_t i = 0u; i < a->catalogs[CONTENT_SERIES].channels.len; ++i) {
         vip_channel_t *ch = &a->catalogs[CONTENT_SERIES].channels.items[i];
+        if (!ch->name || strncasecmp(ch->name, series_name, series_len) != 0)
+            continue;
         char candidate[256];
         int season = 0, episode = 0;
         if (!vip_m3u_parse_episode_label(ch->name, candidate, sizeof(candidate), &season, &episode) ||
@@ -1076,8 +1081,11 @@ static vip_status_t append_m3u_season(app_t *a, const vip_channel_t *selected,
     if (st != VIP_OK)
         return st;
 
+    size_t series_len = series_name ? strlen(series_name) : 0u;
     for (size_t i = 0u; i < a->catalogs[CONTENT_SERIES].channels.len; ++i) {
         vip_channel_t *ch = &a->catalogs[CONTENT_SERIES].channels.items[i];
+        if (!ch->name || strncasecmp(ch->name, series_name, series_len) != 0)
+            continue;
         char candidate[256];
         int season = 0, episode = 0;
         if (!vip_m3u_parse_episode_label(ch->name, candidate, sizeof(candidate), &season, &episode) ||

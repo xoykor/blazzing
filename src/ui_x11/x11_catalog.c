@@ -250,13 +250,20 @@ void recalc_category_counts(app_t *a) {
     a->category_counts = calloc(ACTIVE_CATEGORIES(a).len, sizeof(*a->category_counts));
     if (!a->category_counts)
         return;
+    size_t last_j = SIZE_MAX;
     for (size_t i = 0; i < ACTIVE_CHANNELS(a).len; ++i) {
         const char *cid = ACTIVE_CHANNELS(a).items[i].category_id;
         if (!cid)
             continue;
+        if (last_j < ACTIVE_CATEGORIES(a).len &&
+            strcmp(cid, ACTIVE_CATEGORIES(a).items[last_j].id) == 0) {
+            ++a->category_counts[last_j];
+            continue;
+        }
         for (size_t j = 0; j < ACTIVE_CATEGORIES(a).len; ++j) {
             if (strcmp(cid, ACTIVE_CATEGORIES(a).items[j].id) == 0) {
                 ++a->category_counts[j];
+                last_j = j;
                 break;
             }
         }

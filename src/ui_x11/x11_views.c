@@ -837,14 +837,17 @@ static void draw_login(app_t *a) {
     int x = (a->width - w) / 2, y = (a->height - h) / 2;
     if (y < 18)
         y = 18;
+    int panel_h = h;
+    if (y + panel_h > a->height - 12 && a->height - y - 12 >= 500)
+        panel_h = a->height - y - 12;
     if (a->renderer.active) {
-        vip_ui_render_round_rect(&a->renderer, x + 8, y + 10, w, h, 26, 0x000000u, 0.58);
-        vip_ui_render_round_rect(&a->renderer, x, y, w, h, 26, 0x111722u, 0.97);
-        vip_ui_render_round_stroke(&a->renderer, x, y, w, h, 26, 0x343A48u, 1.0, 1.0);
+        vip_ui_render_round_rect(&a->renderer, x + 8, y + 10, w, panel_h, 26, 0x000000u, 0.58);
+        vip_ui_render_round_rect(&a->renderer, x, y, w, panel_h, 26, 0x111722u, 0.97);
+        vip_ui_render_round_stroke(&a->renderer, x, y, w, panel_h, 26, 0x343A48u, 1.0, 1.0);
     } else {
-        fill_round_rect(a, x + 8, y + 10, w, h, 24, a->colors.black);
-        fill_round_rect(a, x, y, w, h, 24, a->colors.panel);
-        stroke_round_rect(a, x, y, w, h, 24, a->colors.border);
+        fill_round_rect(a, x + 8, y + 10, w, panel_h, 24, a->colors.black);
+        fill_round_rect(a, x, y, w, panel_h, 24, a->colors.panel);
+        stroke_round_rect(a, x, y, w, panel_h, 24, a->colors.border);
     }
 
     if (a->renderer.active) {
@@ -1078,12 +1081,22 @@ static void draw_login(app_t *a) {
     pthread_mutex_lock(&a->data_mutex);
     snprintf(status_copy, sizeof(status_copy), "%s", a->status);
     pthread_mutex_unlock(&a->data_mutex);
-    bool status_error = strstr(status_copy, "falha") || strstr(status_copy, "Erro");
+    bool status_error = strstr(status_copy, "falha") != NULL ||
+                        strstr(status_copy, "Falha") != NULL ||
+                        strstr(status_copy, "Erro") != NULL ||
+                        strstr(status_copy, "erro") != NULL ||
+                        strstr(status_copy, "HTTP") != NULL ||
+                        strstr(status_copy, "indisponível") != NULL ||
+                        strstr(status_copy, "expirou") != NULL ||
+                        strstr(status_copy, "nenhum stream") != NULL;
+    int status_y = connect_y + 60;
+    if (status_y > a->height - 28)
+        status_y = a->height - 28;
     if (a->renderer.active)
-        vip_ui_render_text(&a->renderer, form_x, y + h - 56, form_w, status_copy, "Sans 8",
+        vip_ui_render_text(&a->renderer, form_x, status_y, form_w, status_copy, "Sans 8",
                            status_error ? 0xFF7185u : 0xAAB2C4u, 1.0, false);
     else
-        draw_text(a, form_x, y + h - 42, status_copy, status_error ? a->colors.danger : a->colors.muted);
+        draw_text(a, form_x, status_y + 12, status_copy, status_error ? a->colors.danger : a->colors.muted);
 
     const char *credit = "by Xoykor";
     if (a->renderer.active) {

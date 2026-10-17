@@ -305,24 +305,18 @@ bool vip_m3u_parse_episode_label(const char *name, char *series_out, size_t seri
     return true;
 }
 
-/* Find category. */
-static const vip_category_t *find_category(const vip_category_list_t *cats, const char *id) {
+/* Find category index with last-used hint. */
+static int find_category_index(const vip_category_list_t *cats, const char *id, int last_hint) {
     if (!cats || !id)
-        return NULL;
+        return -1;
+    if (last_hint >= 0 && (size_t)last_hint < cats->len) {
+        if (cats->items[last_hint].id && strcmp(cats->items[last_hint].id, id) == 0)
+            return last_hint;
+    }
     for (size_t i = 0u; i < cats->len; ++i)
         if (cats->items[i].id && strcmp(cats->items[i].id, id) == 0)
-            return &cats->items[i];
-    return NULL;
-}
-
-/* Return whether used for the category. */
-static bool category_is_used(const vip_channel_list_t *channels, const char *category_id) {
-    if (!channels || !category_id)
-        return false;
-    for (size_t i = 0u; i < channels->len; ++i)
-        if (channels->items[i].category_id && strcmp(channels->items[i].category_id, category_id) == 0)
-            return true;
-    return false;
+            return (int)i;
+    return -1;
 }
 
 /* Append channel for kind. */
@@ -348,10 +342,25 @@ vip_status_t vip_m3u_split_catalog(const vip_category_list_t *source_categories,
         vip_error_set(error, VIP_ERR_INVALID_ARGUMENT, "listas M3U inválidas para classificação");
         return VIP_ERR_INVALID_ARGUMENT;
     }
+    size_t cat_alloc = source_categories->len > 0u ? source_categories->len : 1u;
+    bool *live_used = calloc(cat_alloc, sizeof(bool));
+    bool *vod_used = calloc(cat_alloc, sizeof(bool));
+    bool *series_used = calloc(cat_alloc, sizeof(bool));
+    if (!live_used || !vod_used || !series_used) {
+        free(live_used);
+        free(vod_used);
+        free(series_used);
+        vip_error_set(error, VIP_ERR_NOMEM, "sem memória para classificar catálogo M3U");
+        return VIP_ERR_NOMEM;
+    }
     vip_status_t st = VIP_OK;
+    int last_cat_idx = -1;
     for (size_t i = 0u; i < source_channels->len; ++i) {
         const vip_channel_t *ch = &source_channels->items[i];
-        const vip_category_t *cat = find_category(source_categories, ch->category_id);
+        int cat_idx = find_category_index(source_categories, ch->category_id, last_cat_idx);
+        if (cat_idx >= 0)
+            last_cat_idx = cat_idx;
+        const vip_category_t *cat = cat_idx >= 0 ? &source_categories->items[(size_t)cat_idx] : NULL;
         vip_m3u_content_kind_t kind = cat ? vip_m3u_classify_group(cat->name) : VIP_M3U_CONTENT_LIVE;
 
         /* Episode syntax is stronger evidence than group-title. Public M3U
@@ -361,8 +370,20 @@ vip_status_t vip_m3u_split_catalog(const vip_category_list_t *source_categories,
         if (vip_m3u_parse_episode_label(ch->name, series_name, sizeof(series_name), NULL, NULL))
             kind = VIP_M3U_CONTENT_SERIES;
         st = push_channel_for_kind(kind, ch, live_channels, vod_channels, series_channels, error);
-        if (st != VIP_OK)
+        if (st != VIP_OK) {
+            free(live_used);
+            free(vod_used);
+            free(series_used);
             goto fail;
+        }
+        if (cat_idx >= 0) {
+            if (kind == VIP_M3U_CONTENT_VOD)
+                vod_used[(size_t)cat_idx] = true;
+            else if (kind == VIP_M3U_CONTENT_SERIES)
+                series_used[(size_t)cat_idx] = true;
+            else
+                live_used[(size_t)cat_idx] = true;
+        }
     }
     for (size_t i = 0u; i < source_categories->len; ++i) {
         const vip_category_t *cat = &source_categories->items[i];
@@ -370,22 +391,37 @@ vip_status_t vip_m3u_split_catalog(const vip_category_list_t *source_categories,
         /* One upstream group may contain a mixture of live channels and
          * episodes. Copy the category into every destination that actually
          * uses it instead of forcing the whole group into a single tab. */
-        if (category_is_used(live_channels, cat->id)) {
+        if (live_used[i]) {
             st = vip_category_list_push(live_categories, cat, error);
-            if (st != VIP_OK)
+            if (st != VIP_OK) {
+                free(live_used);
+                free(vod_used);
+                free(series_used);
                 goto fail;
+            }
         }
-        if (category_is_used(vod_channels, cat->id)) {
+        if (vod_used[i]) {
             st = vip_category_list_push(vod_categories, cat, error);
-            if (st != VIP_OK)
+            if (st != VIP_OK) {
+                free(live_used);
+                free(vod_used);
+                free(series_used);
                 goto fail;
+            }
         }
-        if (category_is_used(series_channels, cat->id)) {
+        if (series_used[i]) {
             st = vip_category_list_push(series_categories, cat, error);
-            if (st != VIP_OK)
+            if (st != VIP_OK) {
+                free(live_used);
+                free(vod_used);
+                free(series_used);
                 goto fail;
+            }
         }
     }
+    free(live_used);
+    free(vod_used);
+    free(series_used);
     vip_error_clear(error);
     return VIP_OK;
 

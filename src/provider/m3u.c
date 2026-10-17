@@ -239,14 +239,34 @@ static void apply_external_card_artwork(const char *base, const char *version,
     if (!base || !base[0] || !channels || channels->len == 0u)
         return;
 
+    bool remote = strncmp(base, "http://", 7u) == 0 ||
+                  strncmp(base, "https://", 8u) == 0;
+    if (remote) {
+        /* Downloading 16+ remote JSON shards (30+ MB) synchronously inside
+         * vip_m3u_load blocks playlist loading for large catalogs. */
+        return;
+    }
+
     char (*keys)[17] = calloc(channels->len, sizeof(*keys));
     if (!keys)
         return;
 
+    const char *last_cat_id = NULL;
+    const char *last_cat_name = "";
     for (size_t i = 0u; i < channels->len; ++i) {
         if (channels->items[i].logo_url && channels->items[i].logo_url[0])
             continue;
-        const char *group = category_name_by_id(categories, channels->items[i].category_id);
+        const char *cid = channels->items[i].category_id;
+        const char *group = "";
+        if (cid) {
+            if (last_cat_id && strcmp(last_cat_id, cid) == 0) {
+                group = last_cat_name;
+            } else {
+                group = category_name_by_id(categories, cid);
+                last_cat_id = cid;
+                last_cat_name = group;
+            }
+        }
         card_lookup_key(keys[i], channels->items[i].name, group);
     }
 
@@ -255,8 +275,6 @@ static void apply_external_card_artwork(const char *base, const char *version,
     for (unsigned shard = 0u; shard < 16u; ++shard) {
         char prefix = "0123456789abcdef"[shard];
         size_t version_len = version ? strlen(version) : 0u;
-        bool remote = strncmp(base, "http://", 7u) == 0 ||
-                      strncmp(base, "https://", 8u) == 0;
         size_t url_len = base_len + (slash ? 0u : 1u) + 6u +
                          (remote && version_len ? 3u + version_len : 0u) + 1u;
         char *url = malloc(url_len);
@@ -365,8 +383,98 @@ static char *extinf_name(const char *line) {
     return vip_strdup(*name ? name : "Canal");
 }
 
+/* Open-addressing hash set for O(1) channel ID collision detection. */
+typedef struct {
+    uint64_t *keys;
+    size_t cap;
+    size_t count;
+} m3u_id_set_t;
+
+static inline uint64_t mix_u64(uint64_t x) {
+    x ^= x >> 30;
+    x *= UINT64_C(0xbf58476d1ce4e5b9);
+    x ^= x >> 27;
+    x *= UINT64_C(0x94d049bb133111eb);
+    x ^= x >> 31;
+    return x;
+}
+
+static bool m3u_id_set_init(m3u_id_set_t *set, size_t initial_cap) {
+    set->cap = initial_cap < 64u ? 64u : initial_cap;
+    set->count = 0u;
+    set->keys = calloc(set->cap, sizeof(uint64_t));
+    return set->keys != NULL;
+}
+
+static void m3u_id_set_free(m3u_id_set_t *set) {
+    free(set->keys);
+    set->keys = NULL;
+    set->cap = 0u;
+    set->count = 0u;
+}
+
+static bool m3u_id_set_grow(m3u_id_set_t *set) {
+    size_t new_cap = set->cap * 2u;
+    uint64_t *new_keys = calloc(new_cap, sizeof(uint64_t));
+    if (!new_keys)
+        return false;
+    size_t mask = new_cap - 1u;
+    for (size_t i = 0u; i < set->cap; ++i) {
+        uint64_t k = set->keys[i];
+        if (k != 0u) {
+            size_t idx = (size_t)mix_u64(k) & mask;
+            while (new_keys[idx] != 0u)
+                idx = (idx + 1u) & mask;
+            new_keys[idx] = k;
+        }
+    }
+    free(set->keys);
+    set->keys = new_keys;
+    set->cap = new_cap;
+    return true;
+}
+
+static inline bool m3u_id_set_contains(const m3u_id_set_t *set, uint64_t key) {
+    if (!set->keys)
+        return false;
+    if (key == 0u)
+        key = 1u;
+    size_t mask = set->cap - 1u;
+    size_t idx = (size_t)mix_u64(key) & mask;
+    while (set->keys[idx] != 0u) {
+        if (set->keys[idx] == key)
+            return true;
+        idx = (idx + 1u) & mask;
+    }
+    return false;
+}
+
+static inline bool m3u_id_set_insert(m3u_id_set_t *set, uint64_t key) {
+    if (!set->keys)
+        return false;
+    if (key == 0u)
+        key = 1u;
+    if (set->count * 2u >= set->cap) {
+        if (!m3u_id_set_grow(set))
+            return false;
+    }
+    size_t mask = set->cap - 1u;
+    size_t idx = (size_t)mix_u64(key) & mask;
+    while (set->keys[idx] != 0u && set->keys[idx] != key)
+        idx = (idx + 1u) & mask;
+    if (set->keys[idx] == 0u) {
+        set->keys[idx] = key;
+        set->count++;
+    }
+    return true;
+}
+
 /* Find category. */
-static int find_category(const vip_category_list_t *list, const char *name) {
+static int find_category(const vip_category_list_t *list, const char *name, int last_hint) {
+    if (last_hint >= 0 && (size_t)last_hint < list->len) {
+        if (list->items[last_hint].name && strcmp(list->items[last_hint].name, name) == 0)
+            return last_hint;
+    }
     for (size_t i = 0; i < list->len; ++i)
         if (list->items[i].name && strcmp(list->items[i].name, name) == 0)
             return (int)i;
@@ -375,23 +483,29 @@ static int find_category(const vip_category_list_t *list, const char *name) {
 
 /* Ensure category. */
 static vip_status_t ensure_category(vip_category_list_t *cats, const char *provider_id, const char *group,
-                                    char id_out[32], vip_error_t *error) {
+                                    int *last_cat_hint, char id_out[32], vip_error_t *error) {
     const char *name = group && group[0] ? group : "Sem grupo";
-    int existing = find_category(cats, name);
+    int existing = find_category(cats, name, last_cat_hint ? *last_cat_hint : -1);
     if (existing >= 0) {
+        if (last_cat_hint)
+            *last_cat_hint = existing;
         snprintf(id_out, 32u, "%s", cats->items[(size_t)existing].id);
         return VIP_OK;
     }
     char hash[17];
     stable_id(hash, name);
     snprintf(id_out, 32u, "m3ug:%s", hash);
+    int new_idx = (int)cats->len;
     vip_category_t cat = {
         .provider_id = (char *)provider_id,
         .id = id_out,
         .name = (char *)name,
-        .position = (int)cats->len,
+        .position = new_idx,
     };
-    return vip_category_list_push(cats, &cat, error);
+    vip_status_t st = vip_category_list_push(cats, &cat, error);
+    if (st == VIP_OK && last_cat_hint)
+        *last_cat_hint = new_idx;
+    return st;
 }
 
 /* Return whether scheme. */
@@ -607,6 +721,9 @@ vip_status_t vip_m3u_load(const char *source, vip_category_list_t *categories_ou
     char *card_index_base = NULL;
     char *card_index_version = NULL;
     int position = 0;
+    int last_cat_hint = -1;
+    m3u_id_set_t id_set = {0};
+    (void)m3u_id_set_init(&id_set, 1024u);
     char *saveptr = NULL;
     for (char *line = strtok_r(body, "\n", &saveptr); line; line = strtok_r(NULL, "\n", &saveptr)) {
         line = trim(line);
@@ -664,25 +781,21 @@ vip_status_t vip_m3u_load(const char *source, vip_category_list_t *categories_ou
             break;
         }
         char cat_id[32];
-        st = ensure_category(categories_out, provider_id_out, pending_group, cat_id, error);
+        st = ensure_category(categories_out, provider_id_out, pending_group, &last_cat_hint, cat_id, error);
         if (st != VIP_OK) {
             free(stream_url);
             break;
         }
-        char id_hash[17];
         const char *identity = pending_tvg_id && pending_tvg_id[0] ? pending_tvg_id : stream_url;
-        stable_id(id_hash, identity);
-        char channel_id[32];
-        snprintf(channel_id, sizeof(channel_id), "m3u:%s", id_hash);
-        for (size_t k = channels_out->len; k > 0; --k) {
-            if (strcmp(channels_out->items[k - 1].id, channel_id) == 0) {
-                char disambiguated[1024];
-                snprintf(disambiguated, sizeof(disambiguated), "%s#%s#%d", identity, stream_url, position);
-                stable_id(id_hash, disambiguated);
-                snprintf(channel_id, sizeof(channel_id), "m3u:%s", id_hash);
-                break;
-            }
+        uint64_t id_hash_val = fnv_text(identity);
+        if (m3u_id_set_contains(&id_set, id_hash_val)) {
+            char disambiguated[1024];
+            snprintf(disambiguated, sizeof(disambiguated), "%s#%s#%d", identity, stream_url, position);
+            id_hash_val = fnv_text(disambiguated);
         }
+        (void)m3u_id_set_insert(&id_set, id_hash_val);
+        char channel_id[32];
+        snprintf(channel_id, sizeof(channel_id), "m3u:%016llx", (unsigned long long)id_hash_val);
         vip_channel_t item = {
             .provider_id = provider_id_out,
             .id = channel_id,
@@ -714,6 +827,7 @@ vip_status_t vip_m3u_load(const char *source, vip_category_list_t *categories_ou
         if (st != VIP_OK)
             break;
     }
+    m3u_id_set_free(&id_set);
     free(pending_name);
     free(pending_logo);
     free(pending_group);
