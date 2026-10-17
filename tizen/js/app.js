@@ -1663,12 +1663,192 @@
         }).then(scheduleNextArtworkBatch, scheduleNextArtworkBatch);
     }
 
+    var CHANNEL_LOGO_RULES = [
+        ["globo news", "brazil/globo-news-br.png"],
+        ["globonews", "brazil/globo-news-br.png"],
+        ["globoplay novelas", "brazil/globoplay-novelas-br.png"],
+        ["tv bahia", "brazil/tv-bahia-br.png"],
+        ["tve bahia", "brazil/tv-bahia-br.png"],
+        ["inter tv", "brazil/rede-inter-tv-br.png"],
+        ["globo", "brazil/globo-br.png"],
+        ["band news", "brazil/band-news-br.png"],
+        ["bandnews", "brazil/band-news-br.png"],
+        ["band sports", "brazil/band-sports-br.png"],
+        ["bandsports", "brazil/band-sports-br.png"],
+        ["band", "brazil/band-br.png"],
+        ["sbt news", "brazil/sbt-news-br.png"],
+        ["sbt", "brazil/sbt-br.png"],
+        ["record news", "brazil/record-news-br.png"],
+        ["recordnews", "brazil/record-news-br.png"],
+        ["ric record", "brazil/ric-record-br.png"],
+        ["record", "brazil/record-br.png"],
+        ["redetv", "brazil/rede-tv-br.png"],
+        ["rede tv", "brazil/rede-tv-br.png"],
+        ["tv brasil", "brazil/tv-brasil-br.png"],
+        ["cultura", "brazil/tv-cultura-br.png"],
+        ["gazeta", "brazil/tv-gazeta-br.png"],
+        ["cnt", "brazil/rede-cnt-br.png"],
+        ["playtv", "brazil/play-tv-br.png"],
+        ["play tv", "brazil/play-tv-br.png"],
+        ["tv camara", "brazil/tv-camara-br.png"],
+        ["tv senado", "brazil/tv-senado-br.png"],
+        ["tv escola", "brazil/tv-escola-br.png"],
+        ["canal gov", "brazil/canal-gov-br.png"],
+        ["futura", "brazil/futura-br.png"],
+        ["canal brasil", "brazil/canal-brasil-br.png"],
+        ["canal off", "brazil/canal-off-br.png"],
+        ["canal rural", "brazil/canal-rural-br.png"],
+        ["terra viva", "brazil/terraviva-br.png"],
+        ["terraviva", "brazil/terraviva-br.png"],
+        ["agro mais", "brazil/agro-mais-br.png"],
+        ["agromais", "brazil/agro-mais-br.png"],
+        ["aparecida", "brazil/tv-aparecida-br.png"],
+        ["cancao nova", "brazil/cancao-nova-tv-br.png"],
+        ["rede vida", "brazil/rede-vida-br.png"],
+        ["redevida", "brazil/rede-vida-br.png"],
+        ["rede gospel", "brazil/rede-gospel-br.png"],
+        ["novo tempo", "brazil/novo-tempo-br.png"],
+        ["pai eterno", "brazil/tv-pai-eterno-br.png"],
+        ["rit", "brazil/rit-br.png"],
+        ["cnn brasil money", "brazil/cnn-brasil-money-br.png"],
+        ["cnn", "brazil/cnn-brasil-br.png"],
+        ["jovem pan news", "brazil/jovem-pan-news-br.png"],
+        ["jovem pan", "brazil/jovem-pan-tv-br.png"],
+        ["times brasil", "brazil/times-brasil-cnbc-br.png"],
+        ["cnbc", "brazil/times-brasil-cnbc-br.png"],
+        ["ge tv", "brazil/ge-tv-br.png"],
+        ["sportv 2", "brazil/sportv2-br.png"],
+        ["sportv2", "brazil/sportv2-br.png"],
+        ["sportv 3", "brazil/sportv3-br.png"],
+        ["sportv3", "brazil/sportv3-br.png"],
+        ["sportv", "brazil/sportv-br.png"],
+        ["premiere", "brazil/premiere-br.png"],
+        ["espn 2", "united-states/espn-2-us.png"],
+        ["espn 3", "united-states/espn-3-us.png"],
+        ["espn 4", "brazil/espn-4-br.png"],
+        ["espn 5", "brazil/espn-5-br.png"],
+        ["espn extra", "brazil/espn-extra-br.png"],
+        ["espn", "united-states/espn-us.png"],
+        ["fox sports", "brazil/fox-sports-2-br.png"],
+        ["woohoo", "brazil/woohoo-br.png"],
+        ["fish tv", "brazil/fish-tv-br.png"],
+        ["x sports", "brazil/x-sports-br.png"],
+        ["dazn", "united-states/dazn-us.png"],
+        ["disney", "united-states/disney-plus-us.png"],
+        ["paramount+", "united-states/paramount-plus-us.png"],
+        ["paramount +", "united-states/paramount-plus-us.png"],
+        ["paramount", "brazil/paramount-network-br.png"],
+        ["ufc fight pass", "united-states/ufc-fight-pass-us.png"],
+        ["ufc", "united-states/ufc-us.png"],
+        ["nba league pass", "united-states/nba-league-pass-us.png"],
+        ["nba", "united-states/nba-tv-us.png"],
+        ["cartoonito", "brazil/cartoonito-br.png"],
+        ["cartoon network", "brazil/cartoon-network-br.png"],
+        ["discovery kids", "brazil/discovery-kids-br.png"],
+        ["discovery turbo", "brazil/discovery-turbo-br.png"],
+        ["discovery science", "united-states/discovery-science-us.png"],
+        ["discovery id", "united-states/investigation-discovery-us.png"],
+        ["discovery", "united-states/discovery-channel-us.png"],
+        ["animal planet", "united-states/animal-planet-us.png"],
+        ["history 2", "united-states/history-channel-2-us.png"],
+        ["history", "united-states/history-channel-us.png"],
+        ["hgtv", "united-states/hgtv-us.png"],
+        ["a&e", "brazil/a-and-e-br.png"],
+        ["tooncast", "brazil/tooncast-br.png"],
+        ["box kids", "brazil/box-kids-tv-br.png"],
+        ["dumdum", "brazil/dumdum-br.png"],
+        ["nicktoons", "united-states/nick-toons-us.png"],
+        ["nickelodeon", "united-states/nickelodeon-us.png"],
+        ["gloobinho", "brazil/gloobinho-br.png"],
+        ["gloob", "brazil/gloob-br.png"],
+        ["ra tim bum", "brazil/tv-ra-tim-bum-br.png"],
+        ["zoomoo", "brazil/zoomoo-br.png"],
+        ["dreamworks", "brazil/dreamworks-channel-br.png"],
+        ["telecine action", "brazil/tele-cine-action-br.png"],
+        ["telecine pipoca", "brazil/tele-cine-pipoca-br.png"],
+        ["telecine premium", "brazil/tele-cine-premium-br.png"],
+        ["telecine fun", "brazil/tele-cine-fun-br.png"],
+        ["telecine cult", "brazil/tele-cine-cult-br.png"],
+        ["telecine touch", "brazil/tele-cine-touch-br.png"],
+        ["hbo 2", "brazil/hbo-2-br.png"],
+        ["hbo2", "brazil/hbo-2-br.png"],
+        ["hbo family", "brazil/hbo-family-br.png"],
+        ["hbo mundi", "brazil/hbo-mundi-br.png"],
+        ["hbo plus", "brazil/hbo-plus-br.png"],
+        ["hbo pop", "brazil/hbo-pop-br.png"],
+        ["hbo signature", "brazil/hbo-signature-br.png"],
+        ["hbo xtreme", "brazil/hbo-xtreme-br.png"],
+        ["hbo", "brazil/hbo-br.png"],
+        ["megapix", "brazil/megapix-br.png"],
+        ["sony movies", "brazil/sony-movies-br.png"],
+        ["sony", "brazil/sony-channel-br.png"],
+        ["warner", "brazil/warner-channel-br.png"],
+        ["cinemax", "brazil/cinemax-br.png"],
+        ["space", "brazil/space-br.png"],
+        ["tnt series", "brazil/tnt-series-br.png"],
+        ["tnt", "brazil/tnt-br.png"],
+        ["studio universal", "brazil/studio-universal-br.png"],
+        ["universal", "brazil/universal-tv-br.png"],
+        ["usa", "brazil/usa-br.png"],
+        ["star channel", "brazil/star-channel-br.png"],
+        ["cinecanal", "brazil/cine-canal-br.png"],
+        ["cine canal", "brazil/cine-canal-br.png"],
+        ["axn", "brazil/axn-br.png"],
+        ["tcm", "brazil/tcm-br.png"],
+        ["amc", "united-states/amc-us.png"],
+        ["lifetime", "united-states/lifetime-us.png"],
+        ["adult swim", "united-states/adult-swim-us.png"],
+        ["gnt", "brazil/gnt-br.png"],
+        ["multishow", "brazil/multishow-br.png"],
+        ["tlc", "united-states/tlc-us.png"],
+        ["arte 1", "brazil/arte1-br.png"],
+        ["arte1", "brazil/arte1-br.png"],
+        ["food network", "united-states/food-network-us.png"],
+        ["modo viagem", "brazil/modo-viagem-br.png"],
+        ["sabor & arte", "brazil/sabor-and-arte-br.png"],
+        ["trace", "brazil/trace-brasil-br.png"],
+        ["mtv", "united-states/mtv-us.png"],
+        ["bis", "brazil/bis-br.png"],
+        ["prime box", "brazil/prime-box-brazil-br.png"]
+    ];
+
+    function resolveChannelLogoUrl(rawTitle) {
+        var norm = String(rawTitle || "")
+            .toLowerCase()
+            .replace(/[áàâãä]/g, "a")
+            .replace(/[éèêë]/g, "e")
+            .replace(/[íìîï]/g, "i")
+            .replace(/[óòôõö]/g, "o")
+            .replace(/[úùûü]/g, "u")
+            .replace(/ç/g, "c")
+            .replace(/[^a-z0-9&+]+/g, " ")
+            .replace(/^\s+|\s+$/g, "");
+        if (!norm || norm.indexOf("radio ") === 0) {
+            return "";
+        }
+        var i;
+        for (i = 0; i < CHANNEL_LOGO_RULES.length; i += 1) {
+            if (norm.indexOf(CHANNEL_LOGO_RULES[i][0]) !== -1) {
+                return "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/" +
+                    CHANNEL_LOGO_RULES[i][1];
+            }
+        }
+        return "";
+    }
+
     function resolveOnDemandArtwork(item) {
         var cacheKey;
         var requestId;
 
         if (!item || item.logo) {
             return Promise.resolve(item && item.logo || "");
+        }
+        if (item.kind === "live") {
+            var chLogo = resolveChannelLogoUrl(item.name);
+            if (chLogo) {
+                item.logo = chLogo;
+            }
+            return Promise.resolve(chLogo);
         }
         if (item.kind !== "vod" && item.kind !== "series") {
             return Promise.resolve("");
@@ -1774,6 +1954,9 @@
     }
 
     function appendCardPosterImage(poster, item) {
+        if (item && !item.logo && item.kind === "live") {
+            item.logo = resolveChannelLogoUrl(item.name);
+        }
         var imageUrl = safeImageUrl(item.logo);
         var image;
 

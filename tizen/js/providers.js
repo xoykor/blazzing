@@ -48,8 +48,35 @@
         return (" " + text + " ").indexOf(" " + word + " ") !== -1;
     }
 
+    var groupKindCache = {};
+    var groupNormCache = {};
+    var cleanGroupCache = {};
+    var categoryIdCache = {};
+    var attributePatternCache = {
+        "group-title": /(?:^|[\s,])group-title=(?:"([^"]*)"|([^,\s]*))/i,
+        "tvg-logo": /(?:^|[\s,])tvg-logo=(?:"([^"]*)"|([^,\s]*))/i,
+        "x-lista-fallback": /(?:^|[\s,])x-lista-fallback=(?:"([^"]*)"|([^,\s]*))/i
+    };
+    var EPISODE_REGEX = /(?:^|[^A-Za-z0-9])(?:[sStT]\s*(\d{1,4})[\s._-]*[eE]\s*(\d{1,4})|(\d{1,4})[xX](\d{1,4}))/;
+    var VOD_EXT_REGEX = /\.(mp4|mkv|avi|mov|m4v|webm)$/;
+
+    function cachedGroupNorm(group) {
+        var key = String(group || "");
+        if (Object.prototype.hasOwnProperty.call(groupNormCache, key)) {
+            return groupNormCache[key];
+        }
+        var norm = normalizeWords(key);
+        groupNormCache[key] = norm;
+        return norm;
+    }
+
     function classifyGroup(group) {
-        var norm = normalizeWords(group);
+        var key = String(group || "");
+        if (Object.prototype.hasOwnProperty.call(groupKindCache, key)) {
+            return groupKindCache[key];
+        }
+        var norm = cachedGroupNorm(key);
+        var result = "live";
 
         if (hasWord(norm, "series") || hasWord(norm, "serie") ||
                 hasWord(norm, "seriados") || hasWord(norm, "seriado") ||
@@ -57,32 +84,31 @@
                 hasWord(norm, "novela") || hasWord(norm, "novelas") ||
                 hasWord(norm, "dorama") || hasWord(norm, "doramas") ||
                 hasWord(norm, "temporada") || hasWord(norm, "temporadas")) {
-            return "series";
-        }
-
-        if (hasWord(norm, "filmes") || hasWord(norm, "filme") ||
+            result = "series";
+        } else if (hasWord(norm, "filmes") || hasWord(norm, "filme") ||
                 hasWord(norm, "movies") || hasWord(norm, "movie") ||
                 hasWord(norm, "vod") || hasWord(norm, "cinema") ||
                 hasWord(norm, "lancamentos") || hasWord(norm, "lancamento")) {
-            return "vod";
+            result = "vod";
         }
 
-        return "live";
+        groupKindCache[key] = result;
+        return result;
     }
 
     function inferKind(group, name, mediaUrl, episode) {
-        var groupKind = classifyGroup(group);
-        var norm = normalizeWords(group);
-        var url = String(mediaUrl || "").toLowerCase().split("?")[0];
-        var vodExtension = /\.(mp4|mkv|avi|mov|m4v|webm)$/.test(url);
-
         if (episode) {
             return "series";
         }
 
+        var groupKind = classifyGroup(group);
         if (groupKind !== "live") {
             return groupKind;
         }
+
+        var norm = cachedGroupNorm(group);
+        var url = String(mediaUrl || "").toLowerCase().split("?")[0];
+        var vodExtension = VOD_EXT_REGEX.test(url);
 
         if (vodExtension &&
                 !hasWord(norm, "tv") &&
@@ -97,11 +123,17 @@
     }
 
     function cleanCategoryName(group, kind) {
+        var cacheKey = (kind || "") + "|" + String(group || "");
+        if (Object.prototype.hasOwnProperty.call(cleanGroupCache, cacheKey)) {
+            return cleanGroupCache[cacheKey];
+        }
+
         var value = String(group || "")
             .replace(/^\s+|\s+$/g, "")
             .replace(/\s+/g, " ");
 
-        if (!value || normalizeWords(value) === "sem grupo") {
+        if (!value || cachedGroupNorm(value) === "sem grupo") {
+            cleanGroupCache[cacheKey] = "Outros";
             return "Outros";
         }
 
@@ -114,16 +146,20 @@
             .replace(/^\s+|\s+$/g, "");
 
         if (!value) {
-            return kind === "vod" ? "Filmes" :
+            value = kind === "vod" ? "Filmes" :
                 (kind === "series" ? "Séries" : "TV");
         }
 
+        cleanGroupCache[cacheKey] = value;
         return value;
     }
 
     function parseEpisodeLabel(name) {
         var text = String(name || "");
-        var match = /(?:^|[^A-Za-z0-9])(?:[sStT]\s*(\d{1,4})[\s._-]*[eE]\s*(\d{1,4})|(\d{1,4})[xX](\d{1,4}))/.exec(text);
+        if (!/\d/.test(text)) {
+            return null;
+        }
+        var match = EPISODE_REGEX.exec(text);
         var season;
         var episode;
         var title;
@@ -150,7 +186,14 @@
     }
 
     function parseAttribute(line, key) {
-        var pattern = new RegExp("(?:^|[\\s,])" + key + "=(?:\"([^\"]*)\"|([^,\\s]*))", "i");
+        if (!line || line.indexOf("=") === -1) {
+            return "";
+        }
+        var pattern = attributePatternCache[key];
+        if (!pattern) {
+            pattern = new RegExp("(?:^|[\\s,])" + key + "=(?:\"([^\"]*)\"|([^,\\s]*))", "i");
+            attributePatternCache[key] = pattern;
+        }
         var match = pattern.exec(line);
         return match ? (match[1] !== undefined ? match[1] : match[2]) : "";
     }
@@ -204,7 +247,13 @@
     }
 
     function categoryId(group, kind) {
-        return "m3ug:" + hashText((kind || "") + "|" + normalizeWords(group || "Outros"));
+        var cacheKey = (kind || "") + "|" + String(group || "Outros");
+        if (Object.prototype.hasOwnProperty.call(categoryIdCache, cacheKey)) {
+            return categoryIdCache[cacheKey];
+        }
+        var id = "m3ug:" + hashText((kind || "") + "|" + cachedGroupNorm(group || "Outros"));
+        categoryIdCache[cacheKey] = id;
+        return id;
     }
 
     function classifyM3uEntry(source, extinfLine, mediaUrl) {
