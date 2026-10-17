@@ -890,27 +890,78 @@ static vip_status_t decode_png_memory(const uint8_t *data, size_t len, decoded_i
     image.version = PNG_IMAGE_VERSION;
     if (!png_image_begin_read_from_memory(&image, data, len))
         return VIP_ERR_INVALID_FRAME;
-    image.format = PNG_FORMAT_RGB;
+    bool had_alpha = (image.format & PNG_FORMAT_FLAG_ALPHA) != 0;
+    image.format = PNG_FORMAT_RGBA;
     if (!image.width || !image.height || image.width > 8192u || image.height > 8192u) {
         png_image_free(&image);
         return VIP_ERR_INVALID_FRAME;
     }
-    size_t bytes = PNG_IMAGE_SIZE(image);
-    uint8_t *rgb = malloc(bytes);
-    if (!rgb) {
+    size_t rgba_bytes = PNG_IMAGE_SIZE(image);
+    uint8_t *rgba = malloc(rgba_bytes);
+    if (!rgba) {
         png_image_free(&image);
         return VIP_ERR_NOMEM;
     }
-    if (!png_image_finish_read(&image, NULL, rgb, 0, NULL)) {
-        free(rgb);
+    if (!png_image_finish_read(&image, NULL, rgba, 0, NULL)) {
+        free(rgba);
         png_image_free(&image);
         return VIP_ERR_INVALID_FRAME;
     }
-    out->data = rgb;
-    out->width = image.width;
-    out->height = image.height;
-    out->stride = (size_t)image.width * 3u;
+    size_t src_w = image.width, src_h = image.height;
     png_image_free(&image);
+
+    uint8_t bg_r = 4u, bg_g = 6u, bg_b = 10u;
+    if (had_alpha) {
+        uint64_t lum_sum = 0, vis_count = 0;
+        for (size_t i = 0; i < src_w * src_h; ++i) {
+            uint8_t a = rgba[i * 4u + 3u];
+            if (a > 64u) {
+                lum_sum += (uint64_t)(rgba[i * 4u] * 299u + rgba[i * 4u + 1u] * 587u +
+                                      rgba[i * 4u + 2u] * 114u) /
+                           1000u;
+                ++vis_count;
+            }
+        }
+        if (vis_count > 0u && (lum_sum / vis_count) < 42u) {
+            bg_r = 226u;
+            bg_g = 232u;
+            bg_b = 240u;
+        }
+    }
+
+    size_t pad_x = had_alpha ? (src_w / 6u) : 0u;
+    size_t pad_y = had_alpha ? (src_h / 6u) : 0u;
+    size_t dst_w = src_w + pad_x * 2u;
+    size_t dst_h = src_h + pad_y * 2u;
+    if (had_alpha && dst_w * 9u < dst_h * 16u) {
+        dst_w = (dst_h * 16u) / 9u;
+        pad_x = (dst_w - src_w) / 2u;
+    }
+    uint8_t *rgb = malloc(dst_w * dst_h * 3u);
+    if (!rgb) {
+        free(rgba);
+        return VIP_ERR_NOMEM;
+    }
+    for (size_t i = 0; i < dst_w * dst_h; ++i) {
+        rgb[i * 3u] = bg_r;
+        rgb[i * 3u + 1u] = bg_g;
+        rgb[i * 3u + 2u] = bg_b;
+    }
+    for (size_t y = 0; y < src_h; ++y) {
+        for (size_t x = 0; x < src_w; ++x) {
+            const uint8_t *sp = rgba + (y * src_w + x) * 4u;
+            uint8_t *dp = rgb + ((y + pad_y) * dst_w + (x + pad_x)) * 3u;
+            unsigned a = sp[3];
+            dp[0] = (uint8_t)((sp[0] * a + bg_r * (255u - a)) / 255u);
+            dp[1] = (uint8_t)((sp[1] * a + bg_g * (255u - a)) / 255u);
+            dp[2] = (uint8_t)((sp[2] * a + bg_b * (255u - a)) / 255u);
+        }
+    }
+    free(rgba);
+    out->data = rgb;
+    out->width = dst_w;
+    out->height = dst_h;
+    out->stride = dst_w * 3u;
     vip_error_clear(error);
     return VIP_OK;
 }

@@ -69,12 +69,246 @@ static size_t resolver_write(void *ptr, size_t size, size_t nmemb, void *userdat
     return bytes;
 }
 
+static void normalize_channel_title(const char *raw, char *out, size_t out_size) {
+    if (!out || out_size == 0u)
+        return;
+    out[0] = '\0';
+    if (!raw)
+        return;
+    size_t j = 0u;
+    bool prev_space = true;
+    for (size_t i = 0u; raw[i] != '\0' && j + 2u < out_size; ++i) {
+        unsigned char c = (unsigned char)raw[i];
+        char mapped = 0;
+        if (c == 0xC3u && raw[i + 1] != '\0') {
+            unsigned char n = (unsigned char)raw[++i];
+            if ((n >= 0x80u && n <= 0x85u) || (n >= 0xA0u && n <= 0xA5u))
+                mapped = 'a';
+            else if ((n >= 0x88u && n <= 0x8Bu) || (n >= 0xA8u && n <= 0xABu))
+                mapped = 'e';
+            else if ((n >= 0x8Cu && n <= 0x8Fu) || (n >= 0xACu && n <= 0xAFu))
+                mapped = 'i';
+            else if ((n >= 0x92u && n <= 0x96u) || (n >= 0xB2u && n <= 0xB6u))
+                mapped = 'o';
+            else if ((n >= 0x99u && n <= 0x9Cu) || (n >= 0xB9u && n <= 0xBCu))
+                mapped = 'u';
+            else if (n == 0x87u || n == 0xA7u)
+                mapped = 'c';
+            else
+                mapped = ' ';
+        } else if (c >= 'A' && c <= 'Z') {
+            mapped = (char)(c - 'A' + 'a');
+        } else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '&' || c == '+') {
+            mapped = (char)c;
+        } else {
+            mapped = ' ';
+        }
+        if (mapped == ' ') {
+            if (!prev_space) {
+                out[j++] = ' ';
+                prev_space = true;
+            }
+        } else {
+            out[j++] = mapped;
+            prev_space = false;
+        }
+    }
+    if (j > 0u && out[j - 1u] == ' ')
+        --j;
+    out[j] = '\0';
+}
+
+static char *resolve_channel_logo_url(const char *raw_title) {
+    char norm[256];
+    normalize_channel_title(raw_title, norm, sizeof(norm));
+    if (norm[0] == '\0' || strncmp(norm, "radio ", 6u) == 0)
+        return NULL;
+
+    static const struct {
+        const char *needle;
+        const char *rel_path;
+    } k_channel_logos[] = {
+        {"globo news", "brazil/globo-news-br.png"},
+        {"globonews", "brazil/globo-news-br.png"},
+        {"globoplay novelas", "brazil/globoplay-novelas-br.png"},
+        {"tv bahia", "brazil/tv-bahia-br.png"},
+        {"tve bahia", "brazil/tv-bahia-br.png"},
+        {"inter tv", "brazil/rede-inter-tv-br.png"},
+        {"globo", "brazil/globo-br.png"},
+        {"band news", "brazil/band-news-br.png"},
+        {"bandnews", "brazil/band-news-br.png"},
+        {"band sports", "brazil/band-sports-br.png"},
+        {"bandsports", "brazil/band-sports-br.png"},
+        {"band", "brazil/band-br.png"},
+        {"sbt news", "brazil/sbt-news-br.png"},
+        {"sbt", "brazil/sbt-br.png"},
+        {"record news", "brazil/record-news-br.png"},
+        {"recordnews", "brazil/record-news-br.png"},
+        {"ric record", "brazil/ric-record-br.png"},
+        {"record", "brazil/record-br.png"},
+        {"redetv", "brazil/rede-tv-br.png"},
+        {"rede tv", "brazil/rede-tv-br.png"},
+        {"tv brasil", "brazil/tv-brasil-br.png"},
+        {"cultura", "brazil/tv-cultura-br.png"},
+        {"gazeta", "brazil/tv-gazeta-br.png"},
+        {"cnt", "brazil/rede-cnt-br.png"},
+        {"playtv", "brazil/play-tv-br.png"},
+        {"play tv", "brazil/play-tv-br.png"},
+        {"tv camara", "brazil/tv-camara-br.png"},
+        {"tv senado", "brazil/tv-senado-br.png"},
+        {"tv escola", "brazil/tv-escola-br.png"},
+        {"canal gov", "brazil/canal-gov-br.png"},
+        {"futura", "brazil/futura-br.png"},
+        {"canal brasil", "brazil/canal-brasil-br.png"},
+        {"canal off", "brazil/canal-off-br.png"},
+        {"canal rural", "brazil/canal-rural-br.png"},
+        {"terra viva", "brazil/terraviva-br.png"},
+        {"terraviva", "brazil/terraviva-br.png"},
+        {"agro mais", "brazil/agro-mais-br.png"},
+        {"agromais", "brazil/agro-mais-br.png"},
+        {"aparecida", "brazil/tv-aparecida-br.png"},
+        {"cancao nova", "brazil/cancao-nova-tv-br.png"},
+        {"rede vida", "brazil/rede-vida-br.png"},
+        {"redevida", "brazil/rede-vida-br.png"},
+        {"rede gospel", "brazil/rede-gospel-br.png"},
+        {"novo tempo", "brazil/novo-tempo-br.png"},
+        {"pai eterno", "brazil/tv-pai-eterno-br.png"},
+        {"rit", "brazil/rit-br.png"},
+        {"cnn brasil money", "brazil/cnn-brasil-money-br.png"},
+        {"cnn", "brazil/cnn-brasil-br.png"},
+        {"jovem pan news", "brazil/jovem-pan-news-br.png"},
+        {"jovem pan", "brazil/jovem-pan-tv-br.png"},
+        {"times brasil", "brazil/times-brasil-cnbc-br.png"},
+        {"cnbc", "brazil/times-brasil-cnbc-br.png"},
+        {"ge tv", "brazil/ge-tv-br.png"},
+        {"sportv 2", "brazil/sportv2-br.png"},
+        {"sportv2", "brazil/sportv2-br.png"},
+        {"sportv 3", "brazil/sportv3-br.png"},
+        {"sportv3", "brazil/sportv3-br.png"},
+        {"sportv", "brazil/sportv-br.png"},
+        {"premiere", "brazil/premiere-br.png"},
+        {"espn 2", "united-states/espn-2-us.png"},
+        {"espn 3", "united-states/espn-3-us.png"},
+        {"espn 4", "brazil/espn-4-br.png"},
+        {"espn 5", "brazil/espn-5-br.png"},
+        {"espn extra", "brazil/espn-extra-br.png"},
+        {"espn", "united-states/espn-us.png"},
+        {"fox sports", "brazil/fox-sports-2-br.png"},
+        {"woohoo", "brazil/woohoo-br.png"},
+        {"fish tv", "brazil/fish-tv-br.png"},
+        {"x sports", "brazil/x-sports-br.png"},
+        {"dazn", "united-states/dazn-us.png"},
+        {"disney", "united-states/disney-plus-us.png"},
+        {"paramount+", "united-states/paramount-plus-us.png"},
+        {"paramount +", "united-states/paramount-plus-us.png"},
+        {"paramount", "brazil/paramount-network-br.png"},
+        {"ufc fight pass", "united-states/ufc-fight-pass-us.png"},
+        {"ufc", "united-states/ufc-us.png"},
+        {"nba league pass", "united-states/nba-league-pass-us.png"},
+        {"nba", "united-states/nba-tv-us.png"},
+        {"cartoonito", "brazil/cartoonito-br.png"},
+        {"cartoon network", "brazil/cartoon-network-br.png"},
+        {"discovery kids", "brazil/discovery-kids-br.png"},
+        {"discovery turbo", "brazil/discovery-turbo-br.png"},
+        {"discovery science", "united-states/discovery-science-us.png"},
+        {"discovery id", "united-states/investigation-discovery-us.png"},
+        {"discovery", "united-states/discovery-channel-us.png"},
+        {"animal planet", "united-states/animal-planet-us.png"},
+        {"history 2", "united-states/history-channel-2-us.png"},
+        {"history", "united-states/history-channel-us.png"},
+        {"hgtv", "united-states/hgtv-us.png"},
+        {"a&e", "brazil/a-and-e-br.png"},
+        {"tooncast", "brazil/tooncast-br.png"},
+        {"box kids", "brazil/box-kids-tv-br.png"},
+        {"dumdum", "brazil/dumdum-br.png"},
+        {"nicktoons", "united-states/nick-toons-us.png"},
+        {"nickelodeon", "united-states/nickelodeon-us.png"},
+        {"gloobinho", "brazil/gloobinho-br.png"},
+        {"gloob", "brazil/gloob-br.png"},
+        {"ra tim bum", "brazil/tv-ra-tim-bum-br.png"},
+        {"zoomoo", "brazil/zoomoo-br.png"},
+        {"dreamworks", "brazil/dreamworks-channel-br.png"},
+        {"telecine action", "brazil/tele-cine-action-br.png"},
+        {"telecine pipoca", "brazil/tele-cine-pipoca-br.png"},
+        {"telecine premium", "brazil/tele-cine-premium-br.png"},
+        {"telecine fun", "brazil/tele-cine-fun-br.png"},
+        {"telecine cult", "brazil/tele-cine-cult-br.png"},
+        {"telecine touch", "brazil/tele-cine-touch-br.png"},
+        {"hbo 2", "brazil/hbo-2-br.png"},
+        {"hbo2", "brazil/hbo-2-br.png"},
+        {"hbo family", "brazil/hbo-family-br.png"},
+        {"hbo mundi", "brazil/hbo-mundi-br.png"},
+        {"hbo plus", "brazil/hbo-plus-br.png"},
+        {"hbo pop", "brazil/hbo-pop-br.png"},
+        {"hbo signature", "brazil/hbo-signature-br.png"},
+        {"hbo xtreme", "brazil/hbo-xtreme-br.png"},
+        {"hbo", "brazil/hbo-br.png"},
+        {"megapix", "brazil/megapix-br.png"},
+        {"sony movies", "brazil/sony-movies-br.png"},
+        {"sony", "brazil/sony-channel-br.png"},
+        {"warner", "brazil/warner-channel-br.png"},
+        {"cinemax", "brazil/cinemax-br.png"},
+        {"space", "brazil/space-br.png"},
+        {"tnt series", "brazil/tnt-series-br.png"},
+        {"tnt", "brazil/tnt-br.png"},
+        {"studio universal", "brazil/studio-universal-br.png"},
+        {"universal", "brazil/universal-tv-br.png"},
+        {"usa", "brazil/usa-br.png"},
+        {"star channel", "brazil/star-channel-br.png"},
+        {"cinecanal", "brazil/cine-canal-br.png"},
+        {"cine canal", "brazil/cine-canal-br.png"},
+        {"axn", "brazil/axn-br.png"},
+        {"tcm", "brazil/tcm-br.png"},
+        {"amc", "united-states/amc-us.png"},
+        {"lifetime", "united-states/lifetime-us.png"},
+        {"adult swim", "united-states/adult-swim-us.png"},
+        {"gnt", "brazil/gnt-br.png"},
+        {"multishow", "brazil/multishow-br.png"},
+        {"tlc", "united-states/tlc-us.png"},
+        {"arte 1", "brazil/arte1-br.png"},
+        {"arte1", "brazil/arte1-br.png"},
+        {"food network", "united-states/food-network-us.png"},
+        {"modo viagem", "brazil/modo-viagem-br.png"},
+        {"sabor & arte", "brazil/sabor-and-arte-br.png"},
+        {"trace", "brazil/trace-brasil-br.png"},
+        {"mtv", "united-states/mtv-us.png"},
+        {"bis", "brazil/bis-br.png"},
+        {"prime box", "brazil/prime-box-brazil-br.png"},
+    };
+
+    const char *base_prefix = "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/";
+    for (size_t i = 0u; i < sizeof(k_channel_logos) / sizeof(k_channel_logos[0]); ++i) {
+        if (strstr(norm, k_channel_logos[i].needle) != NULL) {
+            size_t len = strlen(base_prefix) + strlen(k_channel_logos[i].rel_path) + 1u;
+            char *url = malloc(len);
+            if (url)
+                snprintf(url, len, "%s%s", base_prefix, k_channel_logos[i].rel_path);
+            return url;
+        }
+    }
+    return NULL;
+}
+
 static vip_status_t resolve_remote_artwork(const vip_thumbnail_request_t *request, char **url_out,
                                            vip_error_t *error) {
     *url_out = NULL;
     if (!can_resolve_artwork(request)) {
         vip_error_set(error, VIP_ERR_INVALID_ARGUMENT, "item sem metadados para resolver capa");
         return VIP_ERR_INVALID_ARGUMENT;
+    }
+
+    if (strcmp(request->artwork_kind, "channel") == 0) {
+        char *channel_logo = resolve_channel_logo_url(request->title);
+        if (channel_logo) {
+            *url_out = channel_logo;
+            vip_error_clear(error);
+            return VIP_OK;
+        }
+        /* Allow 24h show channels (e.g. "24H Os Simpsons") to fall through to TMDB TV lookup. */
+        if (strncmp(request->title, "24H ", 4u) != 0 && strncmp(request->title, "24h ", 4u) != 0) {
+            vip_error_set(error, VIP_ERR_MALFORMED, "logo de canal não encontrado");
+            return VIP_ERR_MALFORMED;
+        }
     }
 
     const char *base = artwork_service_base();
@@ -103,9 +337,16 @@ static vip_status_t resolve_remote_artwork(const vip_thumbnail_request_t *reques
         vip_error_set(error, VIP_ERR_NOMEM, "sem memória para pedido de capa");
         return VIP_ERR_NOMEM;
     }
+    const char *lookup_title = request->title;
+    const char *lookup_kind = request->artwork_kind;
+    if (strcmp(lookup_kind, "channel") == 0) {
+        if (strncmp(lookup_title, "24H ", 4u) == 0 || strncmp(lookup_title, "24h ", 4u) == 0)
+            lookup_title += 4u;
+        lookup_kind = "tv";
+    }
     json_object_object_add(item, "id", json_object_new_string("thumb"));
-    json_object_object_add(item, "title", json_object_new_string(request->title));
-    json_object_object_add(item, "kind", json_object_new_string(request->artwork_kind));
+    json_object_object_add(item, "title", json_object_new_string(lookup_title));
+    json_object_object_add(item, "kind", json_object_new_string(lookup_kind));
     json_object_array_add(items, item);
     json_object_object_add(root, "items", items);
     const char *payload = json_object_to_json_string_ext(root, JSON_C_TO_STRING_PLAIN);

@@ -147,7 +147,7 @@ void enqueue_thumbnail(app_t *a, const vip_channel_t *ch, int64_t priority) {
         if (exists)
             return;
     }
-    const char *artwork_kind = NULL;
+    const char *artwork_kind = "channel";
     if (a->content_kind == CONTENT_VOD)
         artwork_kind = "movie";
     else if (a->content_kind == CONTENT_SERIES || a->series_season_select)

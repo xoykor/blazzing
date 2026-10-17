@@ -20,6 +20,12 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.5.3" date="2026-10-17">
+      <description>
+        <p>Blazzing 1.5.3: Resolves live TV channel logos on-demand for logo-less playlists, composites transparent PNG channel logos with clean aspect padding, and immediately displays fallback labels when a channel has no known logo.</p>
+        <p xml:lang="pt-BR">Blazzing 1.5.3: Resolve logos de canais de TV ao vivo sob demanda em listas sem tvg-logo, compõe logos PNG transparentes com espaçamento adequado e exibe imediatamente "sem capa" quando um canal não possui logo conhecido.</p>
+      </description>
+    </release>
     <release version="1.5.2" date="2026-10-17">
       <description>
         <p>Blazzing 1.5.2: Unifies Linux and Windows under the native C17 core, fixes mpv x11vk gpu-context playback failure on Flatpak, and fixes resolved TMDB artwork cache paths for logo-less playlists.</p>
