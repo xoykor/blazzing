@@ -252,6 +252,57 @@ void __wrap_vip_thumbnail_scheduler_cancel_pending(vip_thumbnail_scheduler_t *sc
     __real_vip_thumbnail_scheduler_cancel_pending(scheduler);
 }
 
+#include <sys/stat.h>
+#include <time.h>
+
+#define POLICY_BACKOFF_SECONDS 30
+
+static bool policy_failure_backoff_active(const char *canonical_path) {
+    if (!canonical_path)
+        return false;
+    size_t n = strlen(canonical_path) + 6u;
+    char *marker = malloc(n);
+    if (!marker)
+        return false;
+    snprintf(marker, n, "%s.fail", canonical_path);
+    struct stat st;
+    bool active = false;
+    if (stat(marker, &st) == 0) {
+        time_t now = time(NULL);
+        active = now != (time_t)-1 && st.st_mtime <= now && now - st.st_mtime < POLICY_BACKOFF_SECONDS;
+        if (!active)
+            (void)remove(marker);
+    }
+    free(marker);
+    return active;
+}
+
+static void policy_failure_marker_set(const char *canonical_path) {
+    if (!canonical_path)
+        return;
+    size_t n = strlen(canonical_path) + 6u;
+    char *marker = malloc(n);
+    if (!marker)
+        return;
+    snprintf(marker, n, "%s.fail", canonical_path);
+    FILE *fp = fopen(marker, "wb");
+    if (fp)
+        fclose(fp);
+    free(marker);
+}
+
+static void policy_failure_marker_clear(const char *canonical_path) {
+    if (!canonical_path)
+        return;
+    size_t n = strlen(canonical_path) + 6u;
+    char *marker = malloc(n);
+    if (!marker)
+        return;
+    snprintf(marker, n, "%s.fail", canonical_path);
+    (void)remove(marker);
+    free(marker);
+}
+
 /* Capture with decoder in the thumbnail subsystem. */
 vip_status_t __wrap_vip_thumbnail_capture_with_decoder(const vip_thumbnail_request_t *request,
                                                        char **path_out, vip_error_t *error, void *userdata) {
@@ -272,6 +323,29 @@ vip_status_t __wrap_vip_thumbnail_capture_with_decoder(const vip_thumbnail_reque
        frame capture. The Worker keeps the TMDB token private and remembers the
        result centrally, so another device can reuse the same discovery. */
     if (can_resolve_artwork(request)) {
+        const vip_thumbnail_capture_context_t *ctx = userdata;
+        char *canonical = (ctx && ctx->cache_dir && request->provider_id && request->channel_id)
+                              ? vip_thumbnail_cache_path(ctx->cache_dir, request->provider_id,
+                                                         request->channel_id, NULL)
+                              : NULL;
+        if (canonical) {
+            struct stat stbuf;
+            if (stat(canonical, &stbuf) == 0 && stbuf.st_size > 0) {
+                policy_failure_marker_clear(canonical);
+                if (path_out)
+                    *path_out = canonical;
+                else
+                    free(canonical);
+                vip_error_clear(error);
+                return VIP_OK;
+            }
+            if (policy_failure_backoff_active(canonical)) {
+                free(canonical);
+                vip_error_set(error, VIP_ERR_CANCELLED, "resolvedor de capa em espera após falha recente");
+                return VIP_ERR_CANCELLED;
+            }
+        }
+
         char *resolved_url = NULL;
         vip_error_t lookup_error = {0};
         if (resolve_remote_artwork(request, &resolved_url, &lookup_error) == VIP_OK && resolved_url) {
@@ -280,9 +354,27 @@ vip_status_t __wrap_vip_thumbnail_capture_with_decoder(const vip_thumbnail_reque
             vip_status_t resolved_status =
                 __real_vip_thumbnail_capture_with_decoder(&resolved_request, path_out, error, userdata);
             free(resolved_url);
+            if (resolved_status == VIP_OK && canonical && path_out && *path_out) {
+                if (strcmp(*path_out, canonical) != 0) {
+                    (void)remove(canonical);
+                    if (rename(*path_out, canonical) == 0) {
+                        free(*path_out);
+                        *path_out = canonical;
+                        canonical = NULL;
+                    }
+                }
+                policy_failure_marker_clear(*path_out);
+            } else if (resolved_status != VIP_OK && canonical) {
+                policy_failure_marker_set(canonical);
+            }
+            free(canonical);
             return resolved_status;
         }
         free(resolved_url);
+        if (canonical) {
+            policy_failure_marker_set(canonical);
+            free(canonical);
+        }
 
         if (request->stream_url && !strncmp(request->stream_url, "series://", 9u)) {
             vip_error_set(error, VIP_ERR_CANCELLED, "série sem capa conhecida");

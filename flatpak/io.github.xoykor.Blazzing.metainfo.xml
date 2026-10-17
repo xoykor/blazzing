@@ -20,6 +20,12 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.5.2" date="2026-10-17">
+      <description>
+        <p>Blazzing 1.5.2: Unifies Linux and Windows under the native C17 core, fixes mpv x11vk gpu-context playback failure on Flatpak, and fixes resolved TMDB artwork cache paths for logo-less playlists.</p>
+        <p xml:lang="pt-BR">Blazzing 1.5.2: Unifica Linux e Windows no motor nativo C17, corrige erro de reprodução gpu-context x11vk do mpv no Flatpak e corrige o caminho de cache das capas resolvidas via TMDB em listas sem logo embutido.</p>
+      </description>
+    </release>
     <release version="1.5.1" date="2026-10-16">
       <description>
         <p>Blazzing 1.5.1: Fixes Linux freeze on large M3U playlists with O(1) hash deduplication and single-pass catalog splitting, improves login error visibility on compact windows, and speeds up Samsung Tizen tab transitions.</p>

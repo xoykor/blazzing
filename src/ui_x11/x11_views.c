@@ -1724,10 +1724,20 @@ static void draw_browse_card_image(app_t *a, vip_channel_t *channel, const card_
                     draw_cached_image_contain(a, path, cx, cy, layout->card_w, layout->art_h);
     bool can_load_image =
         (channel->logo_url && channel->logo_url[0]) ||
+        (channel->name && channel->name[0]) ||
         strncmp(channel->stream_url ? channel->stream_url : "", "series://", 9u) != 0;
 
     if (!image_ok) {
-        const char *placeholder = can_load_image ? "carregando imagem..." : "sem capa";
+        bool failed_backoff = false;
+        if (path != NULL && path[0] != '\0') {
+            char fail_path[PATH_MAX];
+            if (snprintf(fail_path, sizeof(fail_path), "%s.fail", path) > 0 &&
+                access(fail_path, F_OK) == 0) {
+                failed_backoff = true;
+            }
+        }
+        const char *placeholder =
+            (can_load_image && !failed_backoff) ? "carregando imagem..." : "sem capa";
         if (a->renderer.active)
             vip_ui_render_text(&a->renderer, cx + 8, cy + layout->art_h / 2 - 7,
                                layout->card_w - 16, placeholder, "Sans 9", 0xAAB2C4u,
@@ -1736,7 +1746,12 @@ static void draw_browse_card_image(app_t *a, vip_channel_t *channel, const card_
             draw_centered(a, cx, cy + layout->art_h / 2 + 5, layout->card_w,
                           placeholder, a->colors.muted);
 
-        if (can_load_image) {
+        if (can_load_image && !failed_backoff) {
+            int distance = row_offset >= 0 ? row_offset : -row_offset;
+            int64_t priority = 1000000LL - (int64_t)distance * 1000LL - col;
+            enqueue_thumbnail(a, channel, priority);
+        } else if (can_load_image && failed_backoff) {
+            /* Let enqueue_thumbnail check if the 30s .fail backoff has expired. */
             int distance = row_offset >= 0 ? row_offset : -row_offset;
             int64_t priority = 1000000LL - (int64_t)distance * 1000LL - col;
             enqueue_thumbnail(a, channel, priority);

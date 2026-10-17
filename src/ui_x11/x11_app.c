@@ -129,6 +129,20 @@ void enqueue_thumbnail(app_t *a, const vip_channel_t *ch, int64_t priority) {
     if (path) {
         struct stat st;
         bool exists = stat(path, &st) == 0 && st.st_size > 0;
+        if (!exists) {
+            size_t fn = strlen(path) + 6u;
+            char *fail_path = malloc(fn);
+            if (fail_path) {
+                snprintf(fail_path, fn, "%s.fail", path);
+                struct stat fst;
+                time_t now = time(NULL);
+                if (stat(fail_path, &fst) == 0 && now != (time_t)-1 && fst.st_mtime <= now &&
+                    now - fst.st_mtime < 30) {
+                    exists = true;
+                }
+                free(fail_path);
+            }
+        }
         free(path);
         if (exists)
             return;
@@ -139,12 +153,15 @@ void enqueue_thumbnail(app_t *a, const vip_channel_t *ch, int64_t priority) {
     else if (a->content_kind == CONTENT_SERIES || a->series_season_select)
         artwork_kind = "tv";
 
+    char grouped_title[256];
+    const char *clean_title = m3u_series_display_name(a, ch, grouped_title, sizeof(grouped_title));
+
     vip_thumbnail_request_t req = {
         .provider_id = ch->provider_id,
         .channel_id = ch->id,
         .logo_url = ch->logo_url,
         .stream_url = ch->stream_url,
-        .title = ch->name,
+        .title = (char *)clean_title,
         .artwork_kind = (char *)artwork_kind,
         .priority = priority,
     };
